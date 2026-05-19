@@ -1,0 +1,8 @@
+
+include_dir.txt: 头文件路径,单独放到一个文件中防止windows平台命令行参数过长出现no input files错误
+
+make过程分2步:
+   step1: 根目录的Makefile调用编译器的预处理功能将genFileList.c转换成fileList.mk
+   step2: 根目录的Makefile 通过命令make -f build/Makefile.mk 启动编译
+
+   目的是根据SDK的配置动态生成fileList.mk，减少需要编译的文件数量，加快编译速度

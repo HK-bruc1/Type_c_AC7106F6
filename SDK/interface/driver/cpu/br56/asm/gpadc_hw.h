@@ -1,0 +1,203 @@
+#ifndef  __GPADC_HW_H__
+#define  __GPADC_HW_H__
+//br56
+#include "gpadc_hw_v11.h"
+#include "generic/typedef.h"
+#include "gpio.h"
+#include "clock.h"
+#include "asm/power_interface.h"
+#include "lib_driver_config.h"
+
+#define ADC_CH_MASK_TYPE_SEL	0xffff0000
+#define ADC_CH_MASK_CH_SEL	    0x000000ff
+#define ADC_CH_MASK_PMU_VBG_CH_SEL   0x0000ff00
+
+#define ADC_CH_TYPE_BT     	(0x0<<16)
+#define ADC_CH_TYPE_AUDIO  	(0x1<<16)
+#define ADC_CH_TYPE_PMU    	(0x2<<16)
+#define ADC_CH_TYPE_LRC200K (0x3<<16)
+#define ADC_CH_TYPE_OCP     (0x4<<16)
+#define ADC_CH_TYPE_SYSPLL  (0x5<<16)
+#define ADC_CH_TYPE_LPCTM   (0x6<<16)
+#define ADC_CH_TYPE_WAT     (0x7<<16)
+#define ADC_CH_TYPE_XOSC    (0x8<<16)
+#define ADC_CH_TYPE_PADC0   (0x9<<16)
+#define ADC_CH_TYPE_BT_H    (0xa<<16)
+#define ADC_CH_TYPE_IO		(0x10<<16)
+
+#define ADC_CH_BT_			(ADC_CH_TYPE_BT | 0x0)
+#define ADC_CH_AUDIO_MICBIAS0	(ADC_CH_TYPE_AUDIO | 0x0)
+#define ADC_CH_AUDIO_MICBIAS1	(ADC_CH_TYPE_AUDIO | 0x1)
+#define ADC_CH_AUDIO_MICLDO		(ADC_CH_TYPE_AUDIO | 0x2)
+#define ADC_CH_AUDIO_ADCLDO0	(ADC_CH_TYPE_AUDIO | 0x3)
+#define ADC_CH_AUDIO_ADCLDO1	(ADC_CH_TYPE_AUDIO | 0x4)
+#define ADC_CH_AUDIO_QTLDO0	    (ADC_CH_TYPE_AUDIO | 0x5)
+#define ADC_CH_AUDIO_QTLDO1	    (ADC_CH_TYPE_AUDIO | 0x6)
+#define ADC_CH_AUDIO_QTREF0	    (ADC_CH_TYPE_AUDIO | 0x7)
+#define ADC_CH_AUDIO_QTREF1	    (ADC_CH_TYPE_AUDIO | 0x8)
+#define ADC_CH_AUDIO_BUFN0	    (ADC_CH_TYPE_AUDIO | 0x9)
+#define ADC_CH_AUDIO_BUFN1	    (ADC_CH_TYPE_AUDIO | 0xa)
+#define ADC_CH_AUDIO_AIN_A0	    (ADC_CH_TYPE_AUDIO | 0xb)
+#define ADC_CH_AUDIO_AIN_A1	    (ADC_CH_TYPE_AUDIO | 0xc)
+#define ADC_CH_AUDIO_CAPLESS_OUT0	    (ADC_CH_TYPE_AUDIO | 0xd)
+#define ADC_CH_AUDIO_CAPLESS_OUT1	    (ADC_CH_TYPE_AUDIO | 0xe)
+#define ADC_CH_AUDIO_DACVDD	    (ADC_CH_TYPE_AUDIO | 0xf)
+#define ADC_CH_AUDIO_DACLP  	(ADC_CH_TYPE_AUDIO | 0x11)
+#define ADC_CH_AUDIO_DACLN	    (ADC_CH_TYPE_AUDIO | 0x12)
+#define ADC_CH_AUDIO_DACRP  	(ADC_CH_TYPE_AUDIO | 0x13)
+#define ADC_CH_AUDIO_DACRN	    (ADC_CH_TYPE_AUDIO | 0x14)
+#define ADC_CH_AUDIO_FIFVDD	    (ADC_CH_TYPE_AUDIO | 0x15)
+#define ADC_CH_AUDIO_HPVDD  	(ADC_CH_TYPE_AUDIO | 0x16)
+#define ADC_CH_AUDIO_VCM    	(ADC_CH_TYPE_AUDIO | 0x17)
+#define ADC_CH_AUDIO_VBG    	(ADC_CH_TYPE_AUDIO | 0x18)
+#define ADC_CH_AUDIO_IRP5U  	(ADC_CH_TYPE_AUDIO | 0x19)
+#define ADC_CH_PMU_WBG04  	    (ADC_CH_TYPE_PMU | (0x0<<8) | 0x0)//WBG04
+#define ADC_CH_PMU_MBG08  	    (ADC_CH_TYPE_PMU | (0x1<<8) | 0x0)//MBG08
+#define ADC_CH_PMU_LVDVBG  	    (ADC_CH_TYPE_PMU | (0x2<<8) | 0x0)//LVDVBG
+#define ADC_CH_PMU_MVBG  	    (ADC_CH_TYPE_PMU | (0x3<<8) | 0x0)//MVBG
+#define ADC_CH_PMU_SW  	        (ADC_CH_TYPE_PMU | 0x1)
+#define ADC_CH_PMU_PROGI	    (ADC_CH_TYPE_PMU | 0x2)
+#define ADC_CH_PMU_CHG_VREF	    (ADC_CH_TYPE_PMU | 0x3)
+#define ADC_CH_PMU_VTEMP	    (ADC_CH_TYPE_PMU | 0x4)
+#define ADC_CH_PMU_VPWR_4 	    (ADC_CH_TYPE_PMU | 0x5) //1/4vpwr
+#define ADC_CH_PMU_VBAT_4 	    (ADC_CH_TYPE_PMU | 0x6)  //1/4vbat
+#define ADC_CH_PMU_VBAT_2	    (ADC_CH_TYPE_PMU | 0x7)
+#define ADC_CH_PMU_VP17_DCDC    (ADC_CH_TYPE_PMU | 0x8)
+#define ADC_CH_PMU_RVDD  	    (ADC_CH_TYPE_PMU | 0x9)
+#define ADC_CH_PMU_DCVDD	    (ADC_CH_TYPE_PMU | 0xa)
+#define ADC_CH_PMU_DVDD		    (ADC_CH_TYPE_PMU | 0xb)
+#define ADC_CH_PMU_WVDD  	    (ADC_CH_TYPE_PMU | 0xc)
+#define ADC_CH_PMU_PVDD  	    (ADC_CH_TYPE_PMU | 0xd)
+#define ADC_CH_PMU_PVD_PORB_11V (ADC_CH_TYPE_PMU | 0xe)
+#define ADC_CH_PMU_VIN_4        (ADC_CH_TYPE_PMU | 0xf) //1/4vin
+#define ADC_CH_LRC200K_     (ADC_CH_TYPE_LRC200K | 0x0)
+#define ADC_CH_OCP_		    (ADC_CH_TYPE_OCP | 0x0)
+#define ADC_CH_SYSPLL_		(ADC_CH_TYPE_SYSPLL | 0x0)
+#define ADC_CH_LPCTM_		(ADC_CH_TYPE_LPCTM | 0x0)
+#define ADC_CH_WAT_		    (ADC_CH_TYPE_WAT | 0x0)
+#define ADC_CH_XOSC_		(ADC_CH_TYPE_XOSC | 0x0)
+#define ADC_CH_PADC0_		(ADC_CH_TYPE_PADC0 | 0x0)
+#define ADC_CH_BT_H_		(ADC_CH_TYPE_BT_H | 0x0)
+#define ADC_CH_IO_PC1   (ADC_CH_TYPE_IO | 0x0)
+#define ADC_CH_IO_PC2	(ADC_CH_TYPE_IO | 0x1)
+#define ADC_CH_IO_PC3	(ADC_CH_TYPE_IO | 0x2)
+#define ADC_CH_IO_PC4   (ADC_CH_TYPE_IO | 0x3)
+#define ADC_CH_IO_PA3   (ADC_CH_TYPE_IO | 0x4)
+#define ADC_CH_IO_PA4   (ADC_CH_TYPE_IO | 0x5)
+#define ADC_CH_IO_PA5   (ADC_CH_TYPE_IO | 0x6)
+#define ADC_CH_IO_PB0   (ADC_CH_TYPE_IO | 0x7)
+#define ADC_CH_IO_PB1   (ADC_CH_TYPE_IO | 0x8)
+#define ADC_CH_IO_PB2   (ADC_CH_TYPE_IO | 0x9)
+#define ADC_CH_IO_PB3   (ADC_CH_TYPE_IO | 0xA)
+#define ADC_CH_IO_PB7   (ADC_CH_TYPE_IO | 0xB)
+#define ADC_CH_IO_PB8   (ADC_CH_TYPE_IO | 0xC)
+#define ADC_CH_IO_PP2   (ADC_CH_TYPE_IO | 0xD)
+#define ADC_CH_IO_DP    (ADC_CH_TYPE_IO | 0xE)
+#define ADC_CH_IO_DM    (ADC_CH_TYPE_IO | 0xF)
+
+
+enum AD_CH {
+    AD_CH_BT = ADC_CH_BT_,
+    AD_CH_AUDIO = ADC_CH_AUDIO_MICBIAS0, //该宏定义非法, 防止编译报错
+    AD_CH_AUDIO_MICBIAS0 = ADC_CH_AUDIO_MICBIAS0,
+    AD_CH_AUDIO_MICBIAS1,
+    AD_CH_AUDIO_MICLDO,
+    AD_CH_AUDIO_ADCLDO0,
+    AD_CH_AUDIO_ADCLDO1,
+    AD_CH_AUDIO_QTLDO0,
+    AD_CH_AUDIO_QTLDO1,
+    AD_CH_AUDIO_QTREF0,
+    AD_CH_AUDIO_QTREF1,
+    AD_CH_AUDIO_BUFN0,
+    AD_CH_AUDIO_BUFN1,
+    AD_CH_AUDIO_AIN_A0,
+    AD_CH_AUDIO_AIN_A1,
+    AD_CH_AUDIO_CAPLESS_OUT0,
+    AD_CH_AUDIO_CAPLESS_OUT1,
+    AD_CH_AUDIO_DACVDD,
+    AD_CH_AUDIO_DACLP = ADC_CH_AUDIO_DACLP,
+    AD_CH_AUDIO_DACLN,
+    AD_CH_AUDIO_DACRP,
+    AD_CH_AUDIO_DACRN,
+    AD_CH_AUDIO_FIFVDD,
+    AD_CH_AUDIO_HPVDD,
+    AD_CH_AUDIO_VCM,
+    AD_CH_AUDIO_VBG,
+    AD_CH_AUDIO_IRP5U,
+
+    AD_CH_PMU_WBG04 = ADC_CH_PMU_WBG04,
+    AD_CH_PMU_MBG08 = ADC_CH_PMU_MBG08,
+    AD_CH_PMU_LVDVBG = ADC_CH_PMU_LVDVBG,
+    AD_CH_PMU_MVBG = ADC_CH_PMU_MVBG,
+    AD_CH_PMU_SW = ADC_CH_PMU_SW,
+    AD_CH_PMU_PROGI,
+    AD_CH_PMU_CHG_VREF,
+    AD_CH_PMU_VTEMP,
+    AD_CH_PMU_VPWR_4,
+    AD_CH_PMU_VBAT_4,
+    AD_CH_PMU_VBAT_2,
+    AD_CH_PMU_VP17_DCDC,
+    AD_CH_PMU_RVDD,
+    AD_CH_PMU_DCVDD,
+    AD_CH_PMU_DVDD,
+    AD_CH_PMU_WVDD,
+    AD_CH_PMU_PVDD,
+    AD_CH_PMU_PVD_PORB_11V,
+    AD_CH_PMU_VIN_4,
+
+    AD_CH_LRC200K = ADC_CH_LRC200K_,
+    AD_CH_OCP = ADC_CH_OCP_,
+    AD_CH_SYSPLL = ADC_CH_SYSPLL_,
+    AD_CH_LPCTM = ADC_CH_LPCTM_,
+    AD_CH_WAT = ADC_CH_WAT_,
+    AD_CH_XOSC = ADC_CH_XOSC_,
+    AD_CH_PADC0 = ADC_CH_PADC0_,
+    AD_CH_BT_H = ADC_CH_BT_H_,
+
+    AD_CH_IO_PC1 = ADC_CH_IO_PC1,
+    AD_CH_IO_PC2,
+    AD_CH_IO_PC3,
+    AD_CH_IO_PC4,
+    AD_CH_IO_PA3,
+    AD_CH_IO_PA4,
+    AD_CH_IO_PA5,
+    AD_CH_IO_PB0,
+    AD_CH_IO_PB1,
+    AD_CH_IO_PB2,
+    AD_CH_IO_PB3,
+    AD_CH_IO_PB7,
+    AD_CH_IO_PB8,
+    AD_CH_IO_PP2,
+    AD_CH_IO_DP,
+    AD_CH_IO_DM,
+
+    AD_CH_IOVDD = ADC_CH_TYPE_IO | 0xffff,
+};
+
+#define     ADC_VBG_CENTER        800
+#define     ADC_VBG_TRIM_STEP     0
+#define     ADC_VBG_DATA_WIDTH    0
+#define     ADC_EXTERN_VOLTAGE_TRIM_EN  0
+
+#define AD_CH_PMU_VBG   AD_CH_PMU_MBG08
+#define AD_CH_LDOREF    AD_CH_PMU_VBG
+#define AD_CH_LPCTMU    AD_CH_LPCTM
+#define AD_CH_PMU_VPWR  AD_CH_PMU_VPWR_4
+#define AD_CH_PMU_VBAT  gpadc_ch_power
+#define AD_CH_PMU_VBAT_DIV  gpadc_ch_power_div
+#define AD_CH_IO_PB4    AD_CH_PADC0
+
+#define ADC_PMU_PMUTS_POR_SEL(x)    SFR(P3_PMU_ADC0, 7, 1, x)
+#define ADC_PMU_PMUTS_OE(x)         SFR(P3_PMU_ADC0, 6, 1, x)
+#define ADC_PMU_VBG_TEST_SEL(x)     SFR(P3_PMU_ADC0, 4, 2, x)
+#define ADC_PMU_VBG_TEST_EN(x)      SFR(P3_PMU_ADC0, 3, 1, x)
+#define ADC_PMU_VBG_BUFFER_EN(x)    SFR(P3_PMU_ADC0, 2, 1, x)
+#define ADC_PMU_VBG_TEST_OE(x)      SFR(P3_PMU_ADC0, 1, 1, x)
+#define ADC_PMU_TOADC_EN(x)         SFR(P3_PMU_ADC0, 0, 1, x)
+#define ADC_PMU_CHANNEL_ADC(x)      SFR(P3_PMU_ADC1, 0, 4, x) //CHANNEL_ADC_S
+#define ADC_PADC0_TOADC_EN(x)       SFR(P3_PMU_ADC2, 0, 1, x)
+#define ADC_PMU_CH_CLOSE()  {   ADC_PMU_TOADC_EN(0);\
+                                ADC_PMU_VBG_TEST_OE(0);\
+                                ADC_PMU_VBG_TEST_EN(0);\
+                            }
+#endif  /*GPADC_HW_H*/
