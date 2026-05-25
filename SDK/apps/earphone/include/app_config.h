@@ -1321,6 +1321,11 @@
 #else
 #define TCFG_TYPEC_EARPHONE_CASE            0
 #endif
+#if TCFG_TYPEC_EARPHONE_CASE && (TCFG_EARPHONE_TYPE == 0)
+//四线耳机,audio_setup时初始化dac电源
+#undef TCFG_AUDIO_DAC_POWER_ON_AT_SETUP
+#define TCFG_AUDIO_DAC_POWER_ON_AT_SETUP    1
+#endif
 
 #ifndef __LD__
 #include "bt_profile_cfg.h"

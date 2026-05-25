@@ -784,4 +784,3 @@ void app_main()
         asm("idle");
     }
 }
-

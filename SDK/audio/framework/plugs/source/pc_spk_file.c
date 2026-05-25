@@ -140,9 +140,11 @@ void pc_spk_data_isr_cb(void *buf, u32 len)
     }
 #endif
 
-    if ((len % pc_spk_fmt.iso_data_len) != 0) {
-        log_error("uac iso error : %d, %d\n", len, pc_spk_fmt.iso_data_len);
-        goto __exit;
+    if ((pc_spk_fmt.sample_rate % 11025) != 0) {
+        if ((len % pc_spk_fmt.iso_data_len) != 0) {
+            log_error("uac iso error : %d, %d\n", len, pc_spk_fmt.iso_data_len);
+            goto __exit;
+        }
     }
 
     if (!hdl->frame_len && len) {

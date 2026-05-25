@@ -16,12 +16,24 @@ if exist %PROJ_DOWNLOAD_PATH%\tone_zh.cfg copy %PROJ_DOWNLOAD_PATH%\tone_zh.cfg 
 if exist sdk_config.h del sdk_config.h
 if exist sdk_config.c del sdk_config.c
 
+:: 检查并添加英文语音文件
 if %TONE_EN_ENABLE%A==1A (
     if not exist tone_en.cfg copy ..\..\tone.cfg tone_en.cfg
-    set TONE_FILES=tone_en.cfg
+    set TONE_FILE_LIST=tone_en.cfg
 )
+
+:: 检查并添加中文语音文件
 if %TONE_ZH_ENABLE%A==1A (
-    set TONE_FILES=%TONE_FILES% tone_zh.cfg
+    if defined TONE_FILE_LIST (
+        set TONE_FILE_LIST=%TONE_FILE_LIST% tone_zh.cfg
+    ) else (
+        set TONE_FILE_LIST=tone_zh.cfg
+    )
+)
+
+:: 组合最终参数
+if defined TONE_FILE_LIST (
+    set TONE_FILES=-tone %TONE_FILE_LIST%
 )
 
 if %FORMAT_VM_ENABLE%A==1A set FORMAT=-format vm
@@ -34,7 +46,7 @@ if not %RCSP_EN%A==A (
 
 
 @echo on
-..\..\isd_download.exe ..\..\isd_config.ini -tonorflash -dev br56 -boot 0x100000 -div8 -wait 300 -uboot ..\..\uboot.boot -app ..\..\app.bin  -tone %TONE_FILES% -res cfg_tool.bin stream.bin %CONFIG_DATA% %KEY_FILE% %FORMAT% -output-ufw update.ufw
+..\..\isd_download.exe ..\..\isd_config.ini -tonorflash -dev br56 -boot 0x100000 -div8 -wait 300 -uboot ..\..\uboot.boot -app ..\..\app.bin %TONE_FILES% -res cfg_tool.bin stream.bin %CONFIG_DATA% %KEY_FILE% %FORMAT% -output-ufw update.ufw
 @echo off
 :: -format all
 ::-reboot 2500

@@ -62,13 +62,13 @@ const struct battery_curve g_battery_curve_table [] =  {
 
 #if TCFG_IO_CFG_AT_POWER_ON
 const struct gpio_cfg_item g_io_cfg_at_poweron [] =  {
-
+    
 };
 #endif // TCFG_IO_CFG_AT_POWER_ON
 
 #if TCFG_IO_CFG_AT_POWER_OFF
 const struct gpio_cfg_item g_io_cfg_at_poweroff [] =  {
-
+    
 };
 #endif // TCFG_IO_CFG_AT_POWER_OFF
 
@@ -88,15 +88,15 @@ const struct iokey_info g_iokey_info [] =  {
 const struct adkey_res_value adkey_res_table [] =  {
     {
         .key_value = KEY_AD_NUM0,
-        .res_value = 10
+        .res_value = 0
     },
     {
         .key_value = KEY_AD_NUM1,
-        .res_value = 100
+        .res_value = 62
     },
     {
         .key_value = KEY_AD_NUM2,
-        .res_value = 200
+        .res_value = 150
     },
     {
         .key_value = KEY_AD_NUM3,
@@ -107,13 +107,21 @@ const struct adkey_res_value adkey_res_table [] =  {
 const struct adkey_info g_adkey_data =  {
     .key_io = IO_PORTB_04,
     .pull_up_type = 1,
-    .pull_up_value = 33,
+    .pull_up_value = 220,
     .max_ad_value = 1023,
     .long_press_reset_enable = 0,
     .long_press_reset_time = 8,
     .res_table = adkey_res_table
 };
 #endif // TCFG_ADKEY_ENABLE
+
+#if TCFG_MICKEY_ENABLE
+const struct mickey_res_value mickey_res_table =  {
+    .pp_res_value = 0,
+    .up_res_value = 200,
+    .down_res_value = 400
+};
+#endif // TCFG_MICKEY_ENABLE
 
 const struct touch_key_cfg lp_touch_key_table [] =  {
     {
@@ -134,12 +142,3 @@ const struct touch_key_cfg lp_touch_key_table [] =  {
         }
     }
 };
-
-#if TCFG_MICKEY_ENABLE
-const struct mickey_res_value mickey_res_table =  {
-    .pp_res_value = 0,
-    .up_res_value = 200,
-    .down_res_value = 400,
-};
-#endif // TCFG_MICKEY_ENABLE
-

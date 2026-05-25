@@ -45,7 +45,7 @@ const struct mickey_platform_data *get_mickey_platform_data()
 #if TCFG_ADC0_ENABLE
     g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC0_BIAS_RSEL);
     g_mickey_platform_data.micbias_ad_channel = AD_CH_AUDIO_MICBIAS0;
-    audio_mic_ldo_en(AUDIO_MIC_BIAS_CH0, 1, TCFG_ADC0_BIAS_RSEL);//1.5k
+    audio_mic_ldo_en(AUDIO_MIC_BIAS_CH0, 1, TCFG_ADC0_BIAS_RSEL);
 #elif TCFG_ADC1_ENABLE
     g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC1_BIAS_RSEL);
     g_mickey_platform_data.micbias_ad_channel = AD_CH_AUDIO_MICBIAS1;
@@ -55,9 +55,7 @@ const struct mickey_platform_data *get_mickey_platform_data()
     g_mickey_platform_data.micbias_ad_channel = 0xffff;
 #endif
 
-#if defined TCFG_EARPHONE_TYPE && (TCFG_EARPHONE_TYPE == 0)//四线模式
-    extern struct audio_dac_hdl dac_hdl;
-    audio_dac_try_power_on(&dac_hdl);
+#if (TCFG_EARPHONE_TYPE == 0)//四线模式
     g_mickey_platform_data.dacln_ad_channel = AD_CH_AUDIO_DACLN;
 #else
     g_mickey_platform_data.dacln_ad_channel = -1;

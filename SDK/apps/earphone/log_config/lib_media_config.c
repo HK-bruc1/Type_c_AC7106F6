@@ -138,7 +138,11 @@ const int config_audio_dac_output_mode    = 0;
   DAC_NG_SILENCE_MUTE		= BIT(1)：信号静音(全0)时候mute
 */
 #if (defined(TCFG_AUDIO_DAC_NOISEGATE_ENABLE) && TCFG_AUDIO_DAC_NOISEGATE_ENABLE)
+#if TCFG_TYPEC_EARPHONE_CASE && (TCFG_EARPHONE_TYPE == 0)
+const int config_audio_dac_noisefloor_optimize_enable = 0;//四线模式外围电路不使用的mute
+#else
 const int config_audio_dac_noisefloor_optimize_enable = DAC_NG_THRESHOLD_MUTE;
+#endif
 #else
 const int config_audio_dac_noisefloor_optimize_enable = 0;
 #endif

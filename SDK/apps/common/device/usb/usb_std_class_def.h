@@ -203,7 +203,7 @@
 #define MIC_AUDIO_RES_2             0//24
 #endif
 #ifndef MIC_CHANNEL
-#define MIC_CHANNEL                 1
+#define MIC_CHANNEL                 2
 #endif
 #ifndef MIC_FRAME_LEN
 #define MIC_FRAME_LEN               ((MIC_AUDIO_RATE * MIC_AUDIO_RES / 8 * MIC_CHANNEL)/1000)
