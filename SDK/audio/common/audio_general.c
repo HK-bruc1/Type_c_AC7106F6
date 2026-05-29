@@ -16,6 +16,7 @@
 #include "effects/voiceChanger_api.h"
 #include "scene_update.h"
 #include "cvp_v3.h"
+#include "sync/audio_syncts.h"
 
 /*音频配置在线调试配置*/
 const int config_audio_cfg_debug_online = TCFG_CFG_TOOL_ENABLE;
@@ -831,6 +832,30 @@ const float virtualbass_noisegate_threshold = -85.0f;
  *******************************************************************
  */
 const int config_src_hw_dma_malloc_enable = 1;
+
+/*
+ *******************************************************************
+ *			Audio sync  config
+ *******************************************************************
+ */
+/*
+ * 固定采样率且bypass同步的配置使能 - CONFIG_AUDIO_SYNC_FIXED_SAMPLE_RATE_ENABLE
+ *
+ * 缓慢对齐控制使能 - CONFIG_AUDIO_SYNC_SLOW_CONTROL_ENABLE
+ *
+ * 多配置选项使用或运算进行配置
+ * */
+const int config_audio_sync_features = CONFIG_AUDIO_SYNC_SLOW_CONTROL_BY_MODE;//CONFIG_AUDIO_SYNC_SLOW_CONTROL_ENABLE;
+
+/*
+ *格式：{输入设备UUID, 输出设备UUID，输入设备采样率，输出设备采样率，输入预设采样率，输出预设采样率}
+ */
+const u32 config_audio_device_sample_rate_table[][6] = {
+    {NODE_UUID_LINEIN, NODE_UUID_IIS0_TX, 48000, 48000, 625, 624},
+    {NODE_UUID_LINEIN, NODE_UUID_IIS1_TX, 48000, 48000, 625, 624},
+};
+
+const int config_audio_sync_fixed_table_num = ARRAY_SIZE(config_audio_device_sample_rate_table);
 
 
 __attribute__((weak))

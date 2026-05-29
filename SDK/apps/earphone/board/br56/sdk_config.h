@@ -16,6 +16,7 @@
 // ------------JLStudio Auto generate------------
 
 // ------------电源配置.json------------
+#define CONFIG_PLL_SOURCE_USING_LRC               0                // 系统时钟源
 #define TCFG_CLOCK_OSC_HZ                         24000000         // 晶振频率
 #define TCFG_LOWPOWER_OSC_TYPE                    OSC_TYPE_LRC     // 低功耗时钟源
 #define TCFG_LOWPOWER_POWER_SEL                   PWR_LDO15        // 电源模式
@@ -121,10 +122,12 @@
 #define SPK_AUDIO_RATE_NUM                        3                // SPK采样率列表
 #define SPK_AUDIO_RES                             24               // SPK位宽1
 #define SPK_AUDIO_RES_2                           16               // SPK位宽2
+#define SPK_CHANNEL                               2                // SPK声道数
 #define TCFG_USB_SLAVE_AUDIO_MIC_ENABLE           1                // USB麦克风使能
 #define MIC_AUDIO_RATE_NUM                        3                // MIC采样率列表
 #define MIC_AUDIO_RES                             16               // MIC位宽1
 #define MIC_AUDIO_RES_2                           0                // MIC位宽2
+#define MIC_CHANNEL                               2                // MIC声道数
 
 #define TCFG_LINEIN_DETECT_ENABLE                 0                // LINEIN检测配置
 #if TCFG_LINEIN_DETECT_ENABLE

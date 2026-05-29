@@ -46,7 +46,7 @@ if not %RCSP_EN%A==A (
 
 
 @echo on
-..\..\isd_download.exe ..\..\isd_config.ini -tonorflash -dev br56 -boot 0x100000 -div8 -wait 300 -uboot ..\..\uboot.boot -app ..\..\app.bin %TONE_FILES% -res cfg_tool.bin stream.bin %CONFIG_DATA% %KEY_FILE% %FORMAT% -output-ufw update.ufw
+..\..\isd_download.exe ..\..\isd_config.ini -tonorflash -dev br56 -boot 0x100000 -div8 -wait 300 -uboot uboot.boot -app ..\..\app.bin %TONE_FILES% -res cfg_tool.bin stream.bin %CONFIG_DATA% %KEY_FILE% %FORMAT% -output-ufw update.ufw
 @echo off
 :: -format all
 ::-reboot 2500

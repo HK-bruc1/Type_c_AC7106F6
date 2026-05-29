@@ -26,9 +26,10 @@
 #define STREAM_ERROR_RESUME                 0x00000004
 
 
-#define AUDIO_SYNCTS_FAST_ALIGN           0
-#define AUDIO_SYNCTS_SLOW_ALIGN           1
-#define AUDIO_SYNCTS_REAMPLE_BYPASS       2
+#define AUDIO_SYNCTS_FAST_ALIGN             0
+#define AUDIO_SYNCTS_SLOW_ALIGN             1
+#define AUDIO_SYNCTS_RESAMPLE_BYPASS        2
+#define AUDIO_SYNCTS_ALIGN_BYPASS           3
 
 /*
  * Audio同步变采样参数
@@ -59,6 +60,10 @@ enum audio_syncts_cmd {
     AUDIO_SYNCTS_UMOUNT_ON_SNDPCM,
     AUDIO_SYNCTS_GET_TIMESTAMP,
 };
+
+#define CONFIG_AUDIO_SYNC_SLOW_CONTROL_ENABLE           BIT(0) //开启所有模式使用慢收敛对齐
+#define CONFIG_AUDIO_SYNC_SLOW_CONTROL_BY_MODE          BIT(1) //开启慢收敛对齐，跟随工具缓慢对齐设置使能
+#define CONFIG_AUDIO_SYNC_FIXED_SAMPLE_RATE_ENABLE      BIT(2) //开启跟随预设设备的采样率比例继续自适应匹配使能
 
 int audio_syncts_open(void **syncts, struct audio_syncts_params *params);
 

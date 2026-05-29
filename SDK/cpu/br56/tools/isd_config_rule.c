@@ -127,7 +127,7 @@ PID = CONFIG_PID;
 VID = CONFIG_VID;
 
 #ifdef CONFIG_SDK_RELEASE
-SDK_VERSION = AC710N_V1.0.0_beta.2; //jenkins脚本生成
+SDK_VERSION = AC710N_V1.0.0_beta.3; //jenkins脚本生成
 #else
 SDK_VERSION = JL708N_V0.1.0;
 #endif
@@ -161,6 +161,7 @@ SPI = CAT4(CONFIG_SPI_DATA_WIDTH, CONFIG_SPI_CLK_DIV, CONFIG_SPI_MODE, CONFIG_SP
 
 #if (CONFIG_PLL_SOURCE_USING_LRC == 1)
 PLL_SRC = LRC; //PLL时钟源：屏蔽或！=LRC; 默认选择晶振。 值=LRC,且用no_ota_uboot,则时钟源选LRC
+LRC = -1;
 #endif
 
 #ifdef CONFIG_UBOOT_DEBUG_PIN

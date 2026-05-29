@@ -89,7 +89,7 @@ else
 
     /opt/utils/strip-ini -i isd_config.ini -o isd_config.ini
 
-    files="app.bin  br56loader.uart br56loader.bin uboot.boot ota*.bin isd_config.ini dlog.bin"
+    files="app.bin  br56loader.uart br56loader.bin uboot*.boot ota*.bin isd_config.ini dlog.bin"
 
     host-client -project ${NICKNAME}$2 -f ${files} $1.elf
 fi
@@ -166,6 +166,12 @@ set UPDATE_COMPRESS_ENABLE=0
 copy anc_ext.bin download\earphone\ALIGN_DIR\.
 #else
 del download\earphone\ALIGN_DIR\anc_ext.bin
+#endif
+
+#if (CONFIG_PLL_SOURCE_USING_LRC == 1)
+copy "uboot_lrc.boot" "download\earphone\uboot.boot"
+#else
+copy "uboot.boot" "download\earphone\uboot.boot"
 #endif
 
 call elf_to_lst.bat

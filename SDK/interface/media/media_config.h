@@ -107,6 +107,14 @@ extern const int CONST_SRC_COEF_16000_TO_8000_ENABLE;
 
 /*
  *******************************************************************
+ *						Audio sync Configs
+ *******************************************************************
+ */
+extern const int config_audio_sync_features;    //音频同步功能配置
+extern const u32 config_audio_device_sample_rate_table[][6];    //固定设备采样率设置
+extern const int config_audio_sync_fixed_table_num;             //固定设备采样率预设的表内数量
+/*
+ *******************************************************************
  *						Effect Configs
  *******************************************************************
  */
