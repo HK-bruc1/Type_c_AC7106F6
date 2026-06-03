@@ -60,7 +60,7 @@
 #define CONFIG_VID                              0.01				//烧写或强制升级之前可以修改,之后升级要保持一致
 
 //Project with bluetooth,it must use OSC as PLL_SOURCE;
-#define CONFIG_PLL_SOURCE_USING_LRC             0       			//PLL时钟源选择 1:LRC 2:OSC
+//#define CONFIG_PLL_SOURCE_USING_LRC             0       			//PLL时钟源选择 1:LRC 0:OSC
 
 //config alignment size unit
 #ifdef CONFIG_256K_FLASH

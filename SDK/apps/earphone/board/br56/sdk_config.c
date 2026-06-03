@@ -115,14 +115,6 @@ const struct adkey_info g_adkey_data =  {
 };
 #endif // TCFG_ADKEY_ENABLE
 
-#if TCFG_MICKEY_ENABLE
-const struct mickey_res_value mickey_res_table =  {
-    .pp_res_value = 0,
-    .up_res_value = 200,
-    .down_res_value = 400
-};
-#endif // TCFG_MICKEY_ENABLE
-
 const struct touch_key_cfg lp_touch_key_table [] =  {
     {
         .key_ch = LPCTMU_CH4_PB4,
@@ -142,3 +134,14 @@ const struct touch_key_cfg lp_touch_key_table [] =  {
         }
     }
 };
+
+#if TCFG_MICKEY_ENABLE
+const struct mickey_res_value mickey_res_table =  {
+    .mickey_pin = IO_PORTB_04,
+    .extern_bias_res = 1500,
+    .pp_res_value = 0,
+    .up_res_value = 200,
+    .down_res_value = 400,
+};
+#endif // TCFG_MICKEY_ENABLE
+

@@ -70,7 +70,7 @@
 #if TCFG_CFG_TOOL_ENABLE
 #define TCFG_ONLINE_TX_PORT                       IO_PORT_DP       // 串口引脚TX
 #define TCFG_ONLINE_RX_PORT                       IO_PORT_DM       // 串口引脚RX
-#define TCFG_COMM_TYPE                            TCFG_UART_COMM   // 通信方式
+#define TCFG_COMM_TYPE                            TCFG_USB_COMM    // 通信方式
 #endif // TCFG_CFG_TOOL_ENABLE
 
 #define CONFIG_SPI_DATA_WIDTH                     4                // flash通信
@@ -281,7 +281,7 @@
 #define TCFG_APP_MUSIC_EN                         0                // 音乐模式
 #define TCFG_APP_LINEIN_EN                        0                // LINEIN模式
 #define TCFG_APP_PC_EN                            1                // PC模式
-#define TCFG_EARPHONE_TYPE                        2                // 耳机类型选择
+#define TCFG_EARPHONE_TYPE                        0                // 耳机类型选择
 #define TCFG_MIC_EFFECT_ENABLE                    0                // 混响使能
 #define TCFG_DEC_ID3_V2_ENABLE                    0                // ID3_V2
 #define TCFG_DEC_ID3_V1_ENABLE                    0                // ID3_V1
@@ -314,7 +314,7 @@
 
 // ------------音频配置.json------------
 #define TCFG_AUDIO_DAC_CONNECT_MODE               DAC_OUTPUT_LR    // 声道配置
-#define TCFG_AUDIO_DAC_MODE                       DAC_MODE_DIFF    // 输出方式
+#define TCFG_AUDIO_DAC_MODE                       DAC_MODE_VCMO    // 输出方式
 #define TCFG_AUDIO_DAC_LIGHT_CLOSE_ENABLE         0X0              // 轻量关闭
 #define TCFG_AUDIO_DAC_BUFFER_TIME_MS             50               // DMA长度(ms)
 #define TCFG_DAC_PERFORMANCE_MODE                 DAC_MODE_HIGH_PERFORMANCE // 性能模式
@@ -328,14 +328,14 @@
 
 #define TCFG_AUDIO_ADC_ENABLE                     1                // ADC配置
 #if TCFG_AUDIO_ADC_ENABLE
-#define TCFG_AUDIO_MIC_LDO_VSEL                   4                // MICLDO电压
+#define TCFG_AUDIO_MIC_LDO_VSEL                   7                // MICLDO电压
 #define TCFG_ADC_PERFORMANCE_MODE                 ADC_MODE_HIGH_PERFORMANCE // 性能模式
 #define TCFG_CAPLESS_MIC_POWER_MODE               1                // 省电容MIC电压
 #define TCFG_ADC_DIGITAL_GAIN                     0                // 数字增益
 #define TCFG_ADC0_ENABLE                          1                // 使能
 #define TCFG_ADC0_MODE                            0                // 模式
 #define TCFG_ADC0_AIN_SEL                         2                // 输入端口
-#define TCFG_ADC0_BIAS_SEL                        1                // 供电端口
+#define TCFG_ADC0_BIAS_SEL                        33               // 供电端口
 #define TCFG_ADC0_BIAS_RSEL                       3                // MIC BIAS上拉电阻挡位
 #define TCFG_ADC0_POWER_IO                        IO_PORTA_00      // IO供电选择
 #define TCFG_ADC0_DCC_EN                          1                // DCC使能

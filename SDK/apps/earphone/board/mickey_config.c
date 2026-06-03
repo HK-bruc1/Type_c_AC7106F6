@@ -43,13 +43,33 @@ const struct mickey_platform_data *get_mickey_platform_data()
 
     extern int audio_mic_ldo_en(u8 index_map, u8 en, u8 mic_bias_rsel);
 #if TCFG_ADC0_ENABLE
-    g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC0_BIAS_RSEL);
+    audio_mic_ldo_en(TCFG_ADC0_BIAS_SEL, 1, TCFG_ADC0_BIAS_RSEL);
+#if (TCFG_ADC0_BIAS_SEL & AUDIO_MIC_LDO_PWR)
+    //使用MICLDO供电时,ad通道需要选择其他IO
+    gpio_set_mode(IO_PORT_SPILT(mickey_res_table.mickey_pin), PORT_INPUT_FLOATING);
+    gpio_set_function(IO_PORT_SPILT(mickey_res_table.mickey_pin), PORT_FUNC_GPADC);
+    g_mickey_platform_data.micbias_ad_channel = adc_io2ch(mickey_res_table.mickey_pin);
+    g_mickey_platform_data.pull_up_value = mickey_res_table.extern_bias_res;
+#else
+    //使用MICBIAS供电时,ad通道选择micbias
     g_mickey_platform_data.micbias_ad_channel = AD_CH_AUDIO_MICBIAS0;
-    audio_mic_ldo_en(AUDIO_MIC_BIAS_CH0, 1, TCFG_ADC0_BIAS_RSEL);
+    g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC0_BIAS_RSEL);
+#endif
+
 #elif TCFG_ADC1_ENABLE
-    g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC1_BIAS_RSEL);
+    audio_mic_ldo_en(TCFG_ADC1_BIAS_SEL, 1, TCFG_ADC1_BIAS_RSEL);
+#if (TCFG_ADC1_BIAS_SEL & AUDIO_MIC_LDO_PWR)
+    //使用MICLDO供电时,ad通道需要选择其他IO
+    gpio_set_mode(IO_PORT_SPILT(mickey_res_table.mickey_pin), PORT_INPUT_FLOATING);
+    gpio_set_function(IO_PORT_SPILT(mickey_res_table.mickey_pin), PORT_FUNC_GPADC);
+    g_mickey_platform_data.micbias_ad_channel = adc_io2ch(mickey_res_table.mickey_pin);
+    g_mickey_platform_data.pull_up_value = mickey_res_table.extern_bias_res;
+#else
+    //使用MICBIAS供电时,ad通道选择micbias
     g_mickey_platform_data.micbias_ad_channel = AD_CH_AUDIO_MICBIAS1;
-    audio_mic_ldo_en(AUDIO_MIC_BIAS_CH1, 1, TCFG_ADC1_BIAS_RSEL);
+    g_mickey_platform_data.pull_up_value = mickey_calc_pull_up_value(TCFG_ADC1_BIAS_RSEL);
+#endif
+
 #else
 #error "please open the ADC0 or ADC1!!!"
     g_mickey_platform_data.micbias_ad_channel = 0xffff;
