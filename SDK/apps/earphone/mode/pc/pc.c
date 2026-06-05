@@ -58,10 +58,12 @@ static struct pc_opr pc_hdl = {0};
  */
 static int app_pc_check(void)
 {
+#if TCFG_TYPEC_EARPHONE_CASE
+    return true;
+#endif
 #if TCFG_PC_BACKMODE_ENABLE
     return false;
 #endif
-
     u32 r = usb_otg_online(0);
     log_info("pc_app_check %d", r);
     if ((r == SLAVE_MODE) ||

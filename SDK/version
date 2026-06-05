@@ -8,7 +8,7 @@ project earphone_sdk/apps/common/device/
 0c02dc1c7356d6bfadf94abbc84b16296c922cc7
 
 project earphone_sdk/apps/earphone/
-4d37d261bc28b0a91745f31936d36801c7f85149
+fb8c14065db52c910cff1d17fa3fdc6b06c46516
 
 project earphone_sdk/audio/
 6f458235c6aead8f45e67cde3d235322d67bf809
@@ -56,7 +56,7 @@ project earphone_sdk/lib/media/
 64b9a5db62b0e2de167b35a8df1c33eaebe94b04
 
 project earphone_sdk/lib/net/
-b9e34b72bbf38f56cce015f21beed5a4d3d35bd4
+cae3c75f115d9de5cf0be5a07263bb28cb381fa1
 
 project earphone_sdk/lib/system/
 2511437cb41e0ad639edc370841602b8f0466621

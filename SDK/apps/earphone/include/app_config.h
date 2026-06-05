@@ -1318,6 +1318,8 @@
 //*********************************************************************************//
 #if TCFG_APP_PC_EN && (TCFG_APP_BT_EN == 0) && (TCFG_APP_MUSIC_EN == 0) && (TCFG_APP_LINEIN_EN == 0)
 #define TCFG_TYPEC_EARPHONE_CASE            1
+#undef TCFG_OTG_MODE
+#define TCFG_OTG_MODE                       0
 #else
 #define TCFG_TYPEC_EARPHONE_CASE            0
 #endif
