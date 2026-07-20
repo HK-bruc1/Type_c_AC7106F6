@@ -1,0 +1,142 @@
+{
+ "name": "Type_c_AC7106F6",
+ "type": "type-c",
+ "sdk": "Type-C耳机",
+ "singleSeries": false,
+ "chip": "AC710N",
+ "version": "1.0.0",
+ "ingoreConfig": false,
+ "pack": "AC710N-demo",
+ "patch": {
+  "title": "1.0.1",
+  "sn": 1.05,
+  "relateVersion": ""
+ },
+ "specialPatchKey": "",
+ "projectType": "NormalProject",
+ "tabform": [
+  {
+   "type": 1,
+   "fileName": "src\\电源配置.json",
+   "binName": "powercfg.bin",
+   "showName": "电源配置"
+  },
+  {
+   "type": 1,
+   "fileName": "src\\板级配置.json",
+   "binName": "boardcfg.bin",
+   "showName": "板级配置"
+  },
+  {
+   "type": 1,
+   "fileName": "src\\按键配置.json",
+   "binName": "ledcfg.bin",
+   "showName": "按键配置",
+   "eventSource": true
+  },
+  {
+   "type": 1,
+   "fileName": "src\\蓝牙配置.json",
+   "binName": "btcfg.bin",
+   "showName": "蓝牙配置"
+  },
+  {
+   "type": 1,
+   "fileName": "src\\功能配置.json",
+   "binName": "modecfg.bin",
+   "showName": "功能配置"
+  },
+  {
+   "type": 1,
+   "fileName": "src\\升级配置.json",
+   "binName": "updatecfg.bin",
+   "showName": "升级配置"
+  },
+  {
+   "type": 1,
+   "fileName": "src\\音频配置.json",
+   "binName": "audiocfg.bin",
+   "showName": "音频配置"
+  },
+  {
+   "type": 3,
+   "fileName": "src\\提示音.tone",
+   "binName": "",
+   "showName": "提示音"
+  },
+  {
+   "type": 4,
+   "fileName": "src\\音频流程",
+   "binName": "stream.bin",
+   "showName": "音频流程",
+   "folder": true,
+   "files": [
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\系统模式.x6flow",
+     "binName": "stream.bin",
+     "showName": "系统模式"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\媒体.x6flow",
+     "binName": "stream.bin",
+     "showName": "媒体"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\蓝牙通话.x6flow",
+     "binName": "stream.bin",
+     "showName": "蓝牙通话"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\USB Audio.x6flow",
+     "binName": "stream.bin",
+     "showName": "USB Audio"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\产测模式.x6flow",
+     "binName": "stream.bin",
+     "showName": "产测模式"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\自定义.x6flow",
+     "binName": "stream.bin",
+     "showName": "自定义"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\麦克风音效.x6flow",
+     "binName": "stream.bin",
+     "showName": "麦克风音效"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\LE_Audio.x6flow",
+     "binName": "stream.bin",
+     "showName": "LE_Audio"
+    },
+    {
+     "type": 4,
+     "fileName": "src\\音频流程\\智能语音.x6flow",
+     "binName": "stream.bin",
+     "showName": "智能语音"
+    }
+   ]
+  }
+ ],
+ "create_time": "2026-07-20T06:44:44.415Z",
+ "update_time": "2026-07-20T06:45:05.982Z",
+ "lastOpenToolVersion": "4.10.4",
+ "lastStencilFlowTime": "20260720144459",
+ "proxyRepoid": "",
+ "versionName": "1.0.0",
+ "provider": "杰理",
+ "checkPatchTime": 0,
+ "relateVersion": "4.9.2",
+ "variant": [],
+ "defaultVariant": {}
+}

@@ -1,0 +1,1064 @@
+{
+ "fields": [
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "APP模式配置",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "template": "",
+    "span": 24,
+    "formId": 101,
+    "renderKey": "1011675221888158",
+    "children": [
+     {
+      "__config__": {
+       "label": "蓝牙模式",
+       "tag": "el-switch",
+       "tagIcon": "switch",
+       "defaultValue": 0,
+       "span": 4,
+       "showLabel": true,
+       "labelWidth": null,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 103,
+       "renderKey": "1031675233948298",
+       "saveWay": "macro",
+       "uuid": "TCFG_APP_BT_EN",
+       "paddingLeft": "",
+       "originValue": 1,
+       "eventField": []
+      },
+      "style": {},
+      "disabled": false,
+      "active-text": "",
+      "inactive-text": "",
+      "active-color": null,
+      "inactive-color": null,
+      "active-value": 1,
+      "inactive-value": 0,
+      "id": "id_1675233948298_1",
+      "__vModel__": "field103"
+     },
+     {
+      "__config__": {
+       "label": "音乐模式",
+       "tag": "el-switch",
+       "tagIcon": "switch",
+       "defaultValue": 0,
+       "span": 4,
+       "showLabel": true,
+       "labelWidth": null,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 104,
+       "renderKey": "1041675234141804",
+       "saveWay": "macro",
+       "uuid": "TCFG_APP_MUSIC_EN",
+       "tipAlways": false,
+       "originValue": 0,
+       "eventField": [],
+       "emptyValue": "0"
+      },
+      "style": {},
+      "disabled": false,
+      "active-text": "",
+      "inactive-text": "",
+      "active-color": null,
+      "inactive-color": null,
+      "active-value": 1,
+      "inactive-value": 0,
+      "id": "id_1675234141804_2",
+      "__vModel__": "field104"
+     },
+     {
+      "__config__": {
+       "label": "LINEIN模式",
+       "tag": "el-switch",
+       "tagIcon": "switch",
+       "defaultValue": 0,
+       "span": 4,
+       "showLabel": true,
+       "labelWidth": null,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 105,
+       "renderKey": "1051675235062540",
+       "saveWay": "macro",
+       "uuid": "TCFG_APP_LINEIN_EN",
+       "tipAlways": false,
+       "originValue": 0,
+       "eventField": []
+      },
+      "style": {},
+      "disabled": false,
+      "active-text": "",
+      "inactive-text": "",
+      "active-color": null,
+      "inactive-color": null,
+      "active-value": 1,
+      "inactive-value": 0,
+      "id": "id_1675235062540_3",
+      "__vModel__": "field105"
+     },
+     {
+      "__config__": {
+       "label": "PC模式",
+       "tag": "el-switch",
+       "tagIcon": "switch",
+       "defaultValue": 1,
+       "span": 4,
+       "showLabel": true,
+       "labelWidth": null,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 162,
+       "renderKey": "1621688214753243",
+       "originValue": 0,
+       "saveWay": "macro",
+       "uuid": "TCFG_APP_PC_EN",
+       "eventField": []
+      },
+      "style": {},
+      "disabled": false,
+      "active-text": "",
+      "inactive-text": "",
+      "active-color": null,
+      "inactive-color": null,
+      "active-value": 1,
+      "inactive-value": 0,
+      "id": "id_1694249791169_0",
+      "__vModel__": "field162"
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "100px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1675221888158_0"
+  },
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "耳机功能配置",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "template": "",
+    "span": 24,
+    "formId": 201,
+    "renderKey": "2011778831210267",
+    "children": [
+     {
+      "__config__": {
+       "label": "配置说明：",
+       "labelWidth": "",
+       "showLabel": true,
+       "tag": "el-input",
+       "tagIcon": "textarea",
+       "defaultValue": "使用四线/五线/六线耳机采用到的音频配置会有差异：\nADC配置：\n五线/六线推荐使用外置电阻配置！即ADC的“供电端口”选择为“MIC_LDO（PA0）”\nDAC配置：\n1.选择四线/五线耳机时，DAC配置中的“输出方式”需要选择“VCMO输出”。\n2.选择六线耳机时，DAC配置中的“输出方式”需要选择“差分输出”。\n",
+       "required": false,
+       "layout": "colFormItem",
+       "span": 23,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "string"
+       ],
+       "file": "",
+       "status": 0,
+       "filetype": 1,
+       "formId": 208,
+       "renderKey": "2081778832404664",
+       "originValue": "使用四线/五线/六线耳机采用到的音频配置会有差异：\nDAC配置：\n1.选择四线/五线耳机时，DAC配置中的“输出方式”需要选择“VCMO输出”。\n2.选择六线耳机时，DAC配置中的“输出方式”需要选择“差分输出”。\n",
+       "eventField": []
+      },
+      "type": "textarea",
+      "placeholder": "请输入配置说明：",
+      "autosize": {},
+      "style": {
+       "width": "100%"
+      },
+      "maxlength": "",
+      "show-word-limit": false,
+      "readonly": false,
+      "disabled": false,
+      "id": "id_1778832404664_7",
+      "__vModel__": "field208"
+     },
+     {
+      "__config__": {
+       "label": "耳机类型选择",
+       "showLabel": true,
+       "labelWidth": null,
+       "tag": "el-select",
+       "tagIcon": "select",
+       "layout": "colFormItem",
+       "span": 11,
+       "required": false,
+       "defaultValue": 0,
+       "regList": [],
+       "changeTag": true,
+       "status": "",
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 207,
+       "renderKey": "2071778832120517",
+       "eventField": [],
+       "originValue": 0,
+       "saveWay": "macro",
+       "uuid": "TCFG_EARPHONE_TYPE"
+      },
+      "__slot__": {
+       "options": [
+        {
+         "label": "四线耳机",
+         "value": 0,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "五线耳机",
+         "value": 1,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "六线耳机",
+         "value": 2,
+         "hide": false,
+         "disabled": false
+        }
+       ]
+      },
+      "placeholder": "请选择耳机类型选择",
+      "style": {
+       "width": "40%"
+      },
+      "searchSource": false,
+      "clearable": false,
+      "disabled": false,
+      "filterable": false,
+      "multiple": false,
+      "id": "id_1778832120517_6",
+      "__vModel__": "field207"
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "250px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1778831210267_0"
+  },
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "混响配置",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "status": 0,
+    "template": "",
+    "span": 24,
+    "formId": 163,
+    "renderKey": "1631684402101817",
+    "children": [
+     {
+      "__config__": {
+       "label": "混响使能",
+       "tag": "el-switch",
+       "tagIcon": "switch",
+       "defaultValue": 0,
+       "span": 8,
+       "showLabel": true,
+       "labelWidth": null,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "status": 0,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "formId": 163,
+       "renderKey": "1631684402134471",
+       "eventField": [],
+       "saveWay": "macro",
+       "uuid": "TCFG_MIC_EFFECT_ENABLE",
+       "originValue": 0
+      },
+      "style": {},
+      "disabled": false,
+      "active-text": "",
+      "inactive-text": "",
+      "active-color": null,
+      "inactive-color": null,
+      "active-value": 1,
+      "inactive-value": 0,
+      "id": "id_1684402134471_3",
+      "__vModel__": ""
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "100px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1684402101817_2"
+  },
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "音乐播放配置",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "status": 0,
+    "template": "",
+    "span": 24,
+    "formId": 159,
+    "renderKey": "1591681882799935",
+    "children": [
+     {
+      "__config__": {
+       "layout": "rowFormItem",
+       "tag": "group",
+       "tagIcon": "row",
+       "componentName": "row_145",
+       "enableUuid": "",
+       "showComponentName": false,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "template": "",
+       "span": 24,
+       "formId": 145,
+       "renderKey": "1451676942987159",
+       "children": [
+        {
+         "__config__": {
+          "label": "ID3_V2",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 142,
+          "renderKey": "1421676942853458",
+          "saveWay": "macro",
+          "uuid": "TCFG_DEC_ID3_V2_ENABLE",
+          "eventField": []
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1676942853458_14",
+         "__vModel__": "field142"
+        },
+        {
+         "__config__": {
+          "label": "ID3_V1",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 141,
+          "renderKey": "1411676942805861",
+          "saveWay": "macro",
+          "uuid": "TCFG_DEC_ID3_V1_ENABLE",
+          "eventField": []
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1676942805861_13",
+         "__vModel__": "field141"
+        }
+       ],
+       "eventField": []
+      },
+      "type": "default",
+      "justify": "start",
+      "align": "top",
+      "style": {
+       "height": "70px",
+       "paddingLeft": "0px"
+      },
+      "id": "id_1676942987159_17"
+     },
+     {
+      "__config__": {
+       "layout": "rowFormItem",
+       "tag": "group",
+       "tagIcon": "row",
+       "componentName": "row_161",
+       "enableUuid": "",
+       "showComponentName": false,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "template": "",
+       "span": 24,
+       "formId": 161,
+       "renderKey": "1611681883422602",
+       "children": [
+        {
+         "__config__": {
+          "label": "无缝循环播放",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 164,
+          "renderKey": "1641681883422602",
+          "saveWay": "macro",
+          "uuid": "FILE_DEC_REPEAT_EN",
+          "formItemWidth": "60"
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1681883422602_4",
+         "__vModel__": "field164"
+        },
+        {
+         "__config__": {
+          "label": "指定时间播放",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 165,
+          "renderKey": "1651681883422602",
+          "saveWay": "macro",
+          "uuid": "FILE_DEC_DEST_PLAY",
+          "eventField": []
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1681883422602_5",
+         "__vModel__": "field165"
+        },
+        {
+         "__config__": {
+          "label": "AB点复读",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 166,
+          "renderKey": "1661681883422602",
+          "saveWay": "macro",
+          "uuid": "FILE_DEC_AB_REPEAT_EN",
+          "originValue": 0,
+          "eventField": []
+         },
+         "style": {},
+         "disabled": true,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1681883422602_6",
+         "__vModel__": "field166"
+        }
+       ],
+       "eventField": []
+      },
+      "type": "default",
+      "justify": "start",
+      "align": "top",
+      "style": {
+       "height": "70px",
+       "paddingLeft": "0px"
+      },
+      "id": "id_1681883422602_1"
+     },
+     {
+      "__config__": {
+       "layout": "rowFormItem",
+       "tag": "group",
+       "tagIcon": "row",
+       "componentName": "row_143",
+       "enableUuid": "",
+       "showComponentName": false,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "template": "",
+       "span": 24,
+       "formId": 143,
+       "renderKey": "1431676942881879",
+       "children": [
+        {
+         "__config__": {
+          "label": "加密文件播",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 5,
+          "showLabel": true,
+          "labelWidth": 100,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 150,
+          "renderKey": "1501676943274003",
+          "uuid": "TCFG_DEC_DECRYPT_ENABLE",
+          "saveWay": "macro",
+          "eventField": [],
+          "formItemWidth": "100"
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1676943274003_22",
+         "__vModel__": "field150"
+        },
+        {
+         "__config__": {
+          "label": "加密KEY",
+          "labelWidth": 80,
+          "showLabel": true,
+          "changeTag": true,
+          "tag": "el-input",
+          "tagIcon": "input",
+          "defaultValue": "0x12345678",
+          "required": false,
+          "layout": "colFormItem",
+          "span": 5,
+          "regList": [],
+          "dataType": [
+           "macro"
+          ],
+          "formId": 151,
+          "renderKey": "1511676943356315",
+          "saveWay": "macro",
+          "uuid": "TCFG_DEC_DECRYPT_KEY",
+          "eventField": [],
+          "originValue": "0x12345678",
+          "emptyValue": "0x12345678"
+         },
+         "__slot__": {
+          "prepend": "",
+          "append": ""
+         },
+         "placeholder": "请输入加密KEY",
+         "style": {
+          "width": "100%"
+         },
+         "clearable": true,
+         "prefix-icon": "",
+         "suffix-icon": "",
+         "maxlength": null,
+         "show-word-limit": false,
+         "readonly": false,
+         "disabled": false,
+         "id": "id_1676943356315_23",
+         "__vModel__": "field151"
+        }
+       ],
+       "eventField": []
+      },
+      "type": "default",
+      "justify": "start",
+      "align": "top",
+      "style": {
+       "height": "70px",
+       "paddingLeft": "0px"
+      },
+      "id": "id_1676942881879_15"
+     },
+     {
+      "__config__": {
+       "layout": "rowFormItem",
+       "tag": "group",
+       "tagIcon": "row",
+       "componentName": "row_128",
+       "enableUuid": "",
+       "showComponentName": false,
+       "dataType": [
+        "8",
+        "1"
+       ],
+       "template": "",
+       "span": 24,
+       "formId": 128,
+       "renderKey": "1281677116589518",
+       "children": [
+        {
+         "__config__": {
+          "label": "循环播放模式是否循环所有设备",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 1,
+          "span": 8,
+          "showLabel": true,
+          "labelWidth": 220,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 130,
+          "renderKey": "1301677116642501",
+          "saveWay": "macro",
+          "uuid": "MUSIC_PLAYER_CYCLE_ALL_DEV_EN",
+          "originValue": 1,
+          "eventField": []
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1677116642501_2",
+         "__vModel__": "field130"
+        },
+        {
+         "__config__": {
+          "label": "切换文件夹播放时从第一首歌开始",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 8,
+          "showLabel": true,
+          "labelWidth": 240,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 131,
+          "renderKey": "1311677116701314",
+          "saveWay": "macro",
+          "uuid": "MUSIC_PLAYER_PLAY_FOLDER_PREV_FIRST_FILE_EN"
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1677116701314_3",
+         "__vModel__": "field131"
+        },
+        {
+         "__config__": {
+          "label": "设备提示音",
+          "tag": "el-switch",
+          "tagIcon": "switch",
+          "defaultValue": 0,
+          "span": 8,
+          "showLabel": true,
+          "labelWidth": null,
+          "layout": "colFormItem",
+          "required": false,
+          "regList": [],
+          "changeTag": true,
+          "status": 0,
+          "dataType": [
+           "8",
+           "1"
+          ],
+          "formId": 138,
+          "renderKey": "1381705629665868",
+          "saveWay": "macro",
+          "uuid": "TCFG_MUSIC_DEVICE_TONE_EN",
+          "tip": "切到音乐模式播放和切换设备时播放设备提示音，需要提示音文件存在设备提示音"
+         },
+         "style": {},
+         "disabled": false,
+         "active-text": "",
+         "inactive-text": "",
+         "active-color": null,
+         "inactive-color": null,
+         "active-value": 1,
+         "inactive-value": 0,
+         "id": "id_1705629665868_0",
+         "__vModel__": "field138"
+        }
+       ],
+       "eventField": []
+      },
+      "type": "default",
+      "justify": "start",
+      "align": "top",
+      "style": {
+       "height": "100px",
+       "paddingLeft": "0px"
+      },
+      "id": "id_1677116589518_0",
+      "show-text": false
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "200px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1681882799935_1"
+  },
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "上电挂载设备忽略时间配置",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "template": "",
+    "span": 24,
+    "formId": 604,
+    "renderKey": "6041676269572266",
+    "children": [
+     {
+      "__config__": {
+       "label": "设备忽略时间（单位：ms）",
+       "tag": "el-input-number",
+       "tagIcon": "number",
+       "defaultValue": 0,
+       "span": 24,
+       "showLabel": true,
+       "labelWidth": 200,
+       "layout": "colFormItem",
+       "required": false,
+       "regList": [],
+       "changeTag": true,
+       "dataType": [
+        "float"
+       ],
+       "formId": 605,
+       "renderKey": "6051676269572266",
+       "saveWay": "macro",
+       "uuid": "TWFG_APP_POWERON_IGNORE_DEV",
+       "emptyValue": "0",
+       "originValue": 5000,
+       "eventField": []
+      },
+      "placeholder": "计数器设备忽略时间（单位：ms）",
+      "min": 0,
+      "step": 1,
+      "step-strictly": false,
+      "controls-position": "right",
+      "disabled": false,
+      "id": "id_1676269572266_5",
+      "__vModel__": "field605"
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "70px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1676269572266_4"
+  },
+  {
+   "__config__": {
+    "layout": "rowFormItem",
+    "tag": "group",
+    "tagIcon": "row",
+    "componentName": "固定时钟频率",
+    "enableUuid": "",
+    "showComponentName": true,
+    "dataType": [
+     "8",
+     "1"
+    ],
+    "template": "",
+    "span": 24,
+    "formId": 101,
+    "renderKey": "1011778565610769",
+    "children": [
+     {
+      "__config__": {
+       "label": "固定时钟频率",
+       "showLabel": true,
+       "labelWidth": null,
+       "tag": "el-select",
+       "tagIcon": "select",
+       "layout": "colFormItem",
+       "span": 8,
+       "required": false,
+       "defaultValue": 192000000,
+       "regList": [],
+       "changeTag": true,
+       "status": 0,
+       "dataType": [
+        "32"
+       ],
+       "formId": 103,
+       "renderKey": "1031778565638391",
+       "originValue": 192000000,
+       "emptyValue": "0",
+       "eventField": [],
+       "saveWay": "macro",
+       "uuid": "TCFG_FIX_CLOCK_FREQ"
+      },
+      "__slot__": {
+       "options": [
+        {
+         "label": "自适应",
+         "value": 0,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "240M",
+         "value": 240000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "192M",
+         "value": 192000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "160M",
+         "value": 160000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "128M",
+         "value": 128000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "120M",
+         "value": 120000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "96M",
+         "value": 96000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "64M",
+         "value": 64000000,
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "48M",
+         "value": 48000000,
+         "hide": false,
+         "disabled": false
+        }
+       ]
+      },
+      "placeholder": "请选择固定时钟频率",
+      "style": {
+       "width": "100%"
+      },
+      "searchSource": false,
+      "clearable": false,
+      "disabled": false,
+      "filterable": false,
+      "multiple": false,
+      "id": "id_1778565638391_2",
+      "__vModel__": "field103"
+     }
+    ],
+    "eventField": []
+   },
+   "type": "default",
+   "justify": "start",
+   "align": "top",
+   "style": {
+    "height": "70px",
+    "paddingLeft": "0px"
+   },
+   "id": "id_1778565610769_0"
+  }
+ ],
+ "size": "small",
+ "labelPosition": "left",
+ "labelWidth": 100,
+ "gutter": 30,
+ "disabled": false,
+ "span": 11,
+ "unFocusedComponentBorder": false,
+ "maxFormId": 306,
+ "version": {
+  "code": 1,
+  "tool": "4.4.0"
+ }
+}
