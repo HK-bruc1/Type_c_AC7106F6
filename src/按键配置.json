@@ -1550,7 +1550,7 @@
        "layout": "colFormItem",
        "span": 24,
        "required": false,
-       "defaultValue": "IO_PORTA_04",
+       "defaultValue": "IO_PORTB_04",
        "regList": [],
        "changeTag": true,
        "status": 0,

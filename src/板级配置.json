@@ -39,7 +39,7 @@
         "gpio"
        ],
        "saveWay": "macro",
-       "defaultValue": "IO_PORTA_05",
+       "defaultValue": "IO_PORT_DP",
        "uuid": "TCFG_DEBUG_UART_TX_PIN",
        "originValue": "id_1647485267192_71"
       },
@@ -80,7 +80,7 @@
        "eventField": [],
        "saveWay": "macro",
        "uuid": "TCFG_DEBUG_UART_BAUDRATE",
-       "defaultValue": 2000000
+       "defaultValue": 1000000
       },
       "__slot__": {
        "options": [

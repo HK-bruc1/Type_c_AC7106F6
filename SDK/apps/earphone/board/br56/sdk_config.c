@@ -141,7 +141,7 @@ const struct mickey_res_value mickey_res_table =  {
     .extern_bias_res = 1500,
     .pp_res_value = 0,
     .up_res_value = 200,
-    .down_res_value = 400,
+    .down_res_value = 400
 };
 #endif // TCFG_MICKEY_ENABLE
 

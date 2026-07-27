@@ -10,18 +10,18 @@
 #define JLSTREAM_NODE_CFG_H
 
 // ------------提示音宏定义------------
-#define TCFG_TONE_EN_ENABLE                       0
-#define TCFG_TONE_ZH_ENABLE                       0
+#define TCFG_TONE_EN_ENABLE                       1               
+#define TCFG_TONE_ZH_ENABLE                       0               
 #define TCFG_TONE_AAC_ENABLE                      0                // AAC
 #define TCFG_TONE_F2A_ENABLE                      0                // F2A
 #define TCFG_TONE_MP3_ENABLE                      0                // MP3
 #define TCFG_TONE_MSBC_ENABLE                     0                // MSBC
 #define TCFG_TONE_MTY_ENABLE                      0                // MTY
 #define TCFG_TONE_SBC_ENABLE                      0                // SBC
-#define TCFG_TONE_SIN_ENABLE                      0                // SIN
+#define TCFG_TONE_SIN_ENABLE                      1                // SIN
 #define TCFG_TONE_WAV_ENABLE                      0                // WAV
 #define TCFG_TONE_WTG_ENABLE                      0                // WTG
-#define TCFG_TONE_WTS_ENABLE                      0                // WTS
+#define TCFG_TONE_WTS_ENABLE                      1                // WTS
 // ------------提示音宏定义------------
 
 // ------------流程图宏定义------------
