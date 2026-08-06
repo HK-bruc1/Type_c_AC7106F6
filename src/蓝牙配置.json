@@ -3386,7 +3386,7 @@
     "uuid": "",
     "eventField": [],
     "enableUuid": "TCFG_USER_BLE_ENABLE",
-    "disable": true
+    "disable": false
    },
    "type": "default",
    "justify": "start",
@@ -3458,7 +3458,9 @@
        "label": "第三方协议选择",
        "tag": "el-checkbox-group",
        "tagIcon": "checkbox",
-       "defaultValue": [],
+       "defaultValue": [
+        "RDX_EN"
+       ],
        "span": 24,
        "showLabel": true,
        "labelWidth": 150,
@@ -3477,7 +3479,9 @@
        "eventField": [],
        "uuid": "TCFG_THIRD_PARTY_PROTOCOLS_SEL",
        "saveWay": "macro",
-       "originValue": [],
+       "originValue": [
+        "RDX_EN"
+       ],
        "tipAlways": true,
        "tip": "",
        "formItemWidth": "400px"
@@ -3547,6 +3551,12 @@
         {
          "label": "JL_SBOX_EN(杰理彩屏仓)",
          "value": "JL_SBOX_EN",
+         "hide": false,
+         "disabled": false
+        },
+        {
+         "label": "RDX_EN(RDX BLE)",
+         "value": "RDX_EN",
          "hide": false,
          "disabled": false
         }
@@ -3692,7 +3702,7 @@
      }
     ],
     "eventField": [],
-    "disable": true,
+    "disable": false,
     "saveWay": "macro"
    },
    "type": "default",

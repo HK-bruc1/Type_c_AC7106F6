@@ -14,6 +14,14 @@
 #include "ble_rcsp_server.h"
 #include "hid_iso.h"
 
+#if TCFG_RDX_ENABLE
+#include "rdx_protocol/rdx_protocol_entry.h"
+#endif
+
+#if TCFG_APP_PC_EN && !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
+#include "app_msg.h"
+#endif
+
 #if (THIRD_PARTY_PROTOCOLS_SEL & XIMALAYA_EN)
 #include "xmly_protocol.h"
 #endif
@@ -30,7 +38,7 @@
 extern void app_ble_ancs_ams_init();
 #endif
 
-#if ((THIRD_PARTY_PROTOCOLS_SEL & (RCSP_MODE_EN | GFPS_EN | MMA_EN | FMNA_EN | TUYA_DEMO_EN | REALME_EN | SWIFT_PAIR_EN | DMA_EN | ONLINE_DEBUG_EN | CUSTOM_DEMO_EN | XIMALAYA_EN | MULTI_CLIENT_EN | JL_SBOX_EN | HID_ISO_EN)) || \
+#if ((THIRD_PARTY_PROTOCOLS_SEL & (RCSP_MODE_EN | GFPS_EN | MMA_EN | FMNA_EN | TUYA_DEMO_EN | REALME_EN | SWIFT_PAIR_EN | DMA_EN | ONLINE_DEBUG_EN | CUSTOM_DEMO_EN | XIMALAYA_EN | MULTI_CLIENT_EN | JL_SBOX_EN | HID_ISO_EN)) || TCFG_RDX_ENABLE || \
 		(TCFG_LE_AUDIO_APP_CONFIG & (LE_AUDIO_UNICAST_SINK_EN | LE_AUDIO_JL_UNICAST_SINK_EN | LE_AUDIO_JL_CIS_PERIPHERAL_EN | LE_AUDIO_AURACAST_SINK_EN | LE_AUDIO_JL_AURACAST_SINK_EN | LE_AUDIO_JL_BIS_RX_EN | LE_AUDIO_AURACAST_SOURCE_EN | LE_AUDIO_JL_BIS_TX_EN)))
 #define ATT_LOCAL_PAYLOAD_SIZE    (517)//(517)              //note: need >= 20
 #define ATT_SEND_CBUF_SIZE        (512*2)                   //note: need >= 20,缓存大小，可修改
@@ -460,6 +468,14 @@ void multi_protocol_bt_init(void)
 #if (THIRD_PARTY_PROTOCOLS_SEL & JL_SBOX_EN)
     sbox_demo_all_init();
 #endif
+#if TCFG_RDX_ENABLE
+    {
+        int ret = rdx_protocol_start();
+        if (ret) {
+            printf("[RDX] start failed=%d\n", ret);
+        }
+    }
+#endif
 }
 
 void multi_protocol_bt_exit(void)
@@ -520,9 +536,15 @@ void multi_protocol_bt_exit(void)
     sbox_demo_all_exit();
 #endif
 
+#if TCFG_RDX_ENABLE
+    rdx_protocol_stop();
+#endif
+
 #if !TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
     app_ble_exit();
+#if TCFG_BT_SUPPORT_SPP
     app_spp_exit();
+#endif
 #endif
 
 #if (THIRD_PARTY_PROTOCOLS_SEL & (MMA_EN | DMA_EN))
@@ -602,3 +624,49 @@ _WEAK_ void bt_ble_exit(void)
 }
 #endif
 
+#if TCFG_APP_PC_EN && !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
+static u8 multi_protocol_pc_stack_started;
+static u8 multi_protocol_pc_profile_started;
+
+static int multi_protocol_pc_stack_msg_handler(int *msg)
+{
+    struct bt_event *bt = (struct bt_event *)msg;
+
+    if (bt->event == BT_STATUS_INIT_OK && multi_protocol_pc_stack_started && !multi_protocol_pc_profile_started) {
+        multi_protocol_pc_profile_started = 1;
+        multi_protocol_bt_init();
+    }
+    return 0;
+}
+
+APP_MSG_HANDLER(multi_protocol_pc_stack_msg_entry) = {
+    .owner      = 0xff,
+    .from       = MSG_FROM_BT_STACK,
+    .handler    = multi_protocol_pc_stack_msg_handler,
+};
+
+void multi_protocol_pc_start(void)
+{
+    if (multi_protocol_pc_stack_started) {
+        return;
+    }
+
+    multi_protocol_pc_stack_started = 1;
+    multi_protocol_pc_profile_started = 0;
+    btstack_init();
+}
+
+void multi_protocol_pc_stop(void)
+{
+    if (!multi_protocol_pc_stack_started) {
+        return;
+    }
+
+    if (multi_protocol_pc_profile_started) {
+        multi_protocol_bt_exit();
+        multi_protocol_pc_profile_started = 0;
+    }
+    btstack_exit();
+    multi_protocol_pc_stack_started = 0;
+}
+#endif

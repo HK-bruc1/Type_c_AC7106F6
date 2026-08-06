@@ -25,6 +25,10 @@
 #include "pc_spk_player.h"
 #include "clock_manager/clock_manager.h"
 
+#if !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
+#include "multi_protocol_main.h"
+#endif
+
 #if ((TCFG_CHARGESTORE_ENABLE || TCFG_TEST_BOX_ENABLE || TCFG_ANC_BOX_ENABLE) \
      && TCFG_CHARGESTORE_PORT == IO_PORT_DP)
 #include "chargestore/chargestore.h"
@@ -94,6 +98,10 @@ static void pc_task_start(void)
     usb_message_to_stack(USBSTACK_START, 0, 1);
 #endif
 
+#if !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
+    multi_protocol_pc_start();
+#endif
+
     __this->onoff = 1;
 }
 
@@ -102,6 +110,10 @@ static void pc_task_start(void)
  */
 static void pc_task_stop(void)
 {
+#if !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
+    multi_protocol_pc_stop();
+#endif
+
     if (!__this->onoff) {
         log_info("PC is stop ");
 #if TCFG_PC_ENABLE

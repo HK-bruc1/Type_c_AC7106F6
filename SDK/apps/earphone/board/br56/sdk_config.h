@@ -254,7 +254,7 @@
 #define CONFIG_OSC_WIN_STEP                       400              // OSC窗口步进
 #endif // TCFG_BT_SNIFF_ENABLE
 
-#define TCFG_USER_BLE_ENABLE                      0                // BLE
+#define TCFG_USER_BLE_ENABLE                      1                // BLE
 #if TCFG_USER_BLE_ENABLE
 #define TCFG_BT_BLE_TX_POWER                      9                // 最大发射功率
 #define TCFG_BT_BLE_BREDR_SAME_ADDR               1                // 和2.1同地址
@@ -262,9 +262,9 @@
 #define TCFG_BLE_HIGH_PRIORITY_ENABLE             0                // 高优先级
 #endif // TCFG_USER_BLE_ENABLE
 
-#define TCFG_THIRD_PARTY_PROTOCOLS_ENABLE         0                // 第三方协议配置
+#define TCFG_THIRD_PARTY_PROTOCOLS_ENABLE         1                // 第三方协议配置
 #if TCFG_THIRD_PARTY_PROTOCOLS_ENABLE
-#define TCFG_THIRD_PARTY_PROTOCOLS_SEL            0                // 第三方协议选择
+#define TCFG_THIRD_PARTY_PROTOCOLS_SEL            RDX_EN           // 第三方协议选择
 #define RCSP_CHANNEL_SEL                          RCSP_USE_GATT_OVER_EDR // RCSP连接方式
 #define TCFG_RCSP_DUAL_CONN_ENABLE                0                // 支持连接两路RCSP
 #define TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED     0                // 三方协议轻量化

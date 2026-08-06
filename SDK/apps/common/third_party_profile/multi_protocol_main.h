@@ -26,6 +26,9 @@ extern const uint8_t rcsp_profile_data[];
 extern void multi_protocol_bt_init(void);
 extern void multi_protocol_bt_exit(void);
 
+extern void multi_protocol_pc_start(void);
+extern void multi_protocol_pc_stop(void);
+
 extern void bt_ble_adv_enable(u8 enable);
 extern void multi_protocol_common_callback_init(void);
 extern void multi_protocol_common_callback_exit(void);

@@ -365,6 +365,8 @@ const u8 config_le_credit_based_folw_control_mode = 0;
 const u8 btstack_emitter_support  = 0;  /*定义用于优化代码编译*/
 const u8 adt_profile_support = 0;
 const u8 pbg_support_enable = 0;
+/* The LE-only btstack still references this classic inquiry capability flag. */
+const u8 hci_inquiry_support = 0;
 #if ((THIRD_PARTY_PROTOCOLS_SEL && TCFG_USER_BLE_ENABLE) || (TCFG_LE_AUDIO_APP_CONFIG))
 const int config_stack_modules = BT_BTSTACK_LE;
 #elif (TCFG_USER_BLE_ENABLE)
