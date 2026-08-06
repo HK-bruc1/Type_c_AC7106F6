@@ -1814,7 +1814,7 @@
     "eventField": [],
     "saveWay": "code",
     "uuid": "",
-    "disable": false,
+    "disable": true,
     "structDef": "const struct mickey_res_value mickey_res_table",
     "structProp": "",
     "tipAlways": false,

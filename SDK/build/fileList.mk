@@ -66,7 +66,6 @@ c_SRC_FILES += apps/common/fat_nor/cfg_private.c
 c_SRC_FILES += apps/common/debug/memory_debug.c
 c_SRC_FILES += apps/common/jldtp/uart_transport.c apps/common/jldtp/jldtp_manager.c
 c_SRC_FILES += apps/common/device/key/key_driver.c
-c_SRC_FILES += apps/common/device/key/mickey.c
 c_SRC_FILES += apps/common/device/usb/usb_config.c apps/common/device/usb/device/descriptor.c apps/common/device/usb/device/usb_device.c apps/common/device/usb/device/user_setup.c apps/common/device/usb/device/task_pc.c
 c_SRC_FILES += apps/common/device/usb/device/usb_pll_trim.c
 c_SRC_FILES += apps/common/device/usb/device/msd_upgrade.c
