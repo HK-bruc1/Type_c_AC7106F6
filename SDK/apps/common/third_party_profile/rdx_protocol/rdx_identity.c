@@ -6,13 +6,22 @@
 #include "btstack/le/ble_api.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
+#include "rdx_protocol_defs.h"
 
 #define RDX_MAC_SIZE                         6
 #define RDX_CASE_IDENTITY_SIZE              95
 
 static u8 rdx_ble_mac[RDX_MAC_SIZE];
+static char rdx_ble_mac_string[RDX_MAC_STRING_SIZE + 1];
 static u8 rdx_read_value[RDX_CASE_IDENTITY_SIZE + 1];
 static u16 rdx_read_value_len;
+
+typedef char rdx_auth_key_size_check[
+    (sizeof(RDX_COMPAT_AUTH_KEY) - 1 == RDX_AUTH_KEY_STRING_SIZE) ? 1 : -1];
+typedef char rdx_wifi_mac_size_check[
+    (sizeof(RDX_COMPAT_WIFI_MAC) - 1 == RDX_MAC_STRING_SIZE) ? 1 : -1];
+typedef char rdx_label_sn_size_check[
+    (sizeof(RDX_COMPAT_LABEL_SN) - 1 == RDX_LABEL_SN_STRING_SIZE) ? 1 : -1];
 
 static void rdx_identity_build_read_value(void)
 {
@@ -47,6 +56,10 @@ int rdx_identity_init(void)
         printf("[RDX] read BLE MAC failed=%d\n", ret);
         return ret;
     }
+    snprintf(rdx_ble_mac_string, sizeof(rdx_ble_mac_string),
+             "%02X%02X%02X%02X%02X%02X",
+             rdx_ble_mac[5], rdx_ble_mac[4], rdx_ble_mac[3],
+             rdx_ble_mac[2], rdx_ble_mac[1], rdx_ble_mac[0]);
     memset(rdx_read_value, 0, sizeof(rdx_read_value));
     rdx_identity_build_read_value();
     return 0;
@@ -60,6 +73,26 @@ const char *rdx_identity_get_local_name(void)
 const u8 *rdx_identity_get_ble_mac(void)
 {
     return rdx_ble_mac;
+}
+
+const char *rdx_identity_get_auth_key(void)
+{
+    return RDX_COMPAT_AUTH_KEY;
+}
+
+const char *rdx_identity_get_ble_mac_string(void)
+{
+    return rdx_ble_mac_string;
+}
+
+const char *rdx_identity_get_wifi_mac_string(void)
+{
+    return RDX_COMPAT_WIFI_MAC;
+}
+
+const char *rdx_identity_get_label_sn(void)
+{
+    return RDX_COMPAT_LABEL_SN;
 }
 
 u16 rdx_identity_get_read_value(const u8 **data)

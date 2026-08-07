@@ -1,6 +1,8 @@
 #ifndef RDX_MVP0_COMPAT_CONFIG_H
 #define RDX_MVP0_COMPAT_CONFIG_H
 
+#include "rdx_protocol/rdx_protocol_defs.h"
+
 /*
  * MVP0 temporarily mirrors the selected 701 reference product so the BLE
  * transport can be validated with the same APP. Replace these values only
@@ -14,7 +16,7 @@
 
 #define RDX_COMPAT_PRODUCT_IS_CHARGE_CASE      1
 #define RDX_COMPAT_BOUND_STATE                 0
-#define RDX_COMPAT_DEVICE_ABILITY              0x00000022u
+#define RDX_COMPAT_DEVICE_ABILITY              (RDX_ABILITY_NONE)
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
 #define RDX_COMPAT_PROTOCOL_VERSION            0x18
 #define RDX_MVP0_FIXED_BATTERY_LEVEL           100
@@ -34,6 +36,7 @@
 
 /* Development-only identity placeholders. Never put production keys here. */
 #define RDX_COMPAT_AUTH_KEY                    "000000000000000000000000"
+#define RDX_COMPAT_WIFI_MAC                    "000000000000"
 #define RDX_COMPAT_LABEL_SN                    "0000000000000000"
 
 #endif
