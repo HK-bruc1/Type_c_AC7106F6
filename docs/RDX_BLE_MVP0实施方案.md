@@ -1,6 +1,6 @@
 # AC710N RDX BLE 0 号 MVP 实施方案
 
-> 文档状态：实施稿 v0.3（MVP0-A 代码与构建完成，实机联调待执行）
+> 文档状态：实施稿 v0.4（MVP0-A BLE Transport 实机验证完成，MVP0-B 目标 APP 握手待实现）
 > 编写日期：2026-08-06
 > 目标工程：AC710N / BR56 Type-C 有线耳机
 > 参考工程：`t2616cc-firmware/`（JL701N / BR28）
@@ -33,7 +33,7 @@ MVP 的最终验收不是“手机系统显示 BLE 已连接”，而是：
 
 `MVP0-A` 和 `MVP0-B` 只是验收里程碑，不是两个独立的产品配置开关，避免出现半启用组合。
 
-### 1.2 当前实施进度（2026-08-06）
+### 1.2 当前实施进度（2026-08-07）
 
 MVP0-A 的代码骨架已经落地：
 
@@ -45,7 +45,7 @@ MVP0-A 的代码骨架已经落地：
 - RDX ON 和 RDX OFF 均已完成干净编译。OFF 产物的构建列表、Map、ELF 中 `rdx_*` 计数均为 0，也不存在 PC bridge 运行符号；
 - ON 产物只包含 MVP0 RDX 对象和 BLE/Identity/Core 符号，不包含 701 的录音、文件、Wi-Fi、DUT、LED、按键、TWS 等全量 RDX 业务。
 
-当前固件仍属于“可上板联调”的 MVP0-A，不等于 APP 已在线：产品身份暂时镜像 701 当前的 Zenchord Case 测试配置，协议版本暂定为 `0x01`，AuthKey 和 Label SN 为全零开发占位值。目标 APP 实机验证和 Golden Trace 尚未完成，MVP0-B 最小握手必须以实测数据为准。
+当前固件已完成 MVP0-A BLE Transport 实机验证：使用 nRF Connect 验证了扫描、BLE 建链、GATT/MTU、TX CCC、RX Write、TX Notify、`RDX_MVP0_PING/PONG` 回环、Battery Read 以及断开重连。Battery 当前返回开发阶段固定值 `100%`，尚未接入真实电量。产品身份暂时镜像 701 当前的 Zenchord Case 测试配置，协议版本暂定为 `0x01`，AuthKey 和 Label SN 为全零开发占位值；目标 APP 的最小 RDX 握手和在线状态仍属于 MVP0-B，必须以 Golden Trace 和目标 APP 实测数据为准。
 
 ## 2. 当前工程事实
 
