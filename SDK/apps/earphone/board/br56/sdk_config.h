@@ -316,7 +316,7 @@
 #define TCFG_AUDIO_DAC_CONNECT_MODE               DAC_OUTPUT_LR    // 声道配置
 #define TCFG_AUDIO_DAC_MODE                       DAC_MODE_VCMO    // 输出方式
 #define TCFG_AUDIO_DAC_LIGHT_CLOSE_ENABLE         0X0              // 轻量关闭
-#define TCFG_AUDIO_DAC_BUFFER_TIME_MS             50               // DMA长度(ms)
+#define TCFG_AUDIO_DAC_BUFFER_TIME_MS             20               // DMA长度(ms)
 #define TCFG_DAC_PERFORMANCE_MODE                 DAC_MODE_HIGH_PERFORMANCE // 性能模式
 #define TCFG_AUDIO_DAC_PA_ISEL0                   5                // PA_ISEL0
 #define TCFG_AUDIO_DAC_PA_ISEL1                   6                // PA_ISEL1

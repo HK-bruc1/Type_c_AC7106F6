@@ -230,8 +230,8 @@
        "uuid": "TCFG_AUDIO_DAC_BUFFER_TIME_MS",
        "saveWay": "macro",
        "formItemWidth": "",
-       "originValue": 50,
-       "defaultValue": 50
+       "originValue": 20,
+       "defaultValue": 20
       },
       "placeholder": "DMA长度(ms)",
       "step": 1,

@@ -150,7 +150,11 @@ const int CONFIG_LNA_CHECK_VAL = -80;
 #endif
 #else //TCFG_USER_TWS_ENABLE
 	#if (TCFG_USER_BLE_ENABLE)
+		#if TCFG_RDX_ENABLE && !TCFG_USER_EDR_ENABLE
+			const int config_btctler_modules        = BT_MODULE_LE;
+		#else
 		const int config_btctler_modules        = BT_MODULE_CLASSIC | BT_MODULE_LE;
+		#endif
 	#else
 		const int config_btctler_modules        = BT_MODULE_CLASSIC;
 	#endif
@@ -424,7 +428,10 @@ const int config_delete_link_key          = 1;           //配置是否连接失
         #define MULTI_CLIENT_LE_FEATURES 0
     #endif
 
-#if TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
+#if TCFG_RDX_ENABLE
+	const int config_btctler_le_roles    = (LE_SLAVE | LE_ADV);
+	const uint64_t config_btctler_le_features = LE_ENCRYPTION;
+#elif TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
 	const int config_btctler_le_roles    = (LE_SLAVE | LE_ADV);
 	const uint64_t config_btctler_le_features = LE_ENCRYPTION;
 #else
@@ -439,7 +446,7 @@ const int config_delete_link_key          = 1;           //配置是否连接失
 
 
 // Slave multi-link
-#if TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
+#if TCFG_RDX_ENABLE || TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
 const int config_btctler_le_slave_multilink = 0;
 #else
 const int config_btctler_le_slave_multilink = 1;
@@ -516,7 +523,7 @@ const int config_btctler_le_acl_total_nums = 15;
  * @brief Bluetooth Analog setting
  */
 /*-----------------------------------------------------------*/
-const int config_btctler_single_carrier_en = 0;   // 单载波，如果是单模ble建议设置为1，否则会有部分芯片测试盒连接不上的情况。by zhibin
+const int config_btctler_single_carrier_en = TCFG_RDX_ENABLE ? 1 : 0;   // 单载波，如果是单模ble建议设置为1，否则会有部分芯片测试盒连接不上的情况。by zhibin
 
 const int sniff_support_reset_anchor_point = 0;   //sniff状态下是否支持reset到最近一次通信点，用于HID
 const int sniff_long_interval = (500 / 0.625);    //sniff状态下进入long interval的通信间隔(ms)
