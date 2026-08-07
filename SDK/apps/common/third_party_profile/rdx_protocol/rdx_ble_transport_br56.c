@@ -229,6 +229,7 @@ static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_h
 
     case RDX_HANDLE_IDENTITY:
         data_len = rdx_identity_get_read_value(&data);
+        rdx_mvp0_core_set_identity_read();
         break;
 
     case RDX_HANDLE_BATTERY:
@@ -278,6 +279,7 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
         multi_att_set_ccc_config(connection_handle, att_handle, ccc);
         if (att_handle == RDX_HANDLE_TX_CCC) {
             rdx_ble.tx_ccc = !!(ccc & 0x0001);
+            rdx_mvp0_core_set_ccc(rdx_ble.tx_ccc);
             printf("[RDX] tx ccc=%u\n", rdx_ble.tx_ccc);
         }
         break;

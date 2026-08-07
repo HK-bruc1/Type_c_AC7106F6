@@ -1054,7 +1054,11 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c \
     apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c \
     apps/common/third_party_profile/rdx_protocol/rdx_identity.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_mvp0_core.c
+    apps/common/third_party_profile/rdx_protocol/rdx_mvp0_core.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_crypto.c
+
+THIRD_PARTY_LIBS += \
+    apps/common/third_party_profile/rdx_protocol/librdxApp.a
 #endif
 
 #if (THIRD_PARTY_PROTOCOLS_SEL & HID_ISO_EN)
@@ -2405,4 +2409,3 @@ c_SRC_FILES += \
 	apps/earphone/ui/led/led_config.c \
 	apps/earphone/ui/led/led_ui_msg_handler.c
 #endif
-

@@ -256,6 +256,7 @@ LFLAGS := \
 	cpu/br56/liba/vm.a  \
 	cpu/br56/liba/fs.a  \
 	cpu/br56/liba/cfg_tool.a  \
+	$(THIRD_PARTY_LIBS) \
 	--end-group \
 	-Tcpu/br56/sdk.ld \
 	-M=cpu/br56/tools/sdk.map \

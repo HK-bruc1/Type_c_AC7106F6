@@ -1,6 +1,6 @@
 # AC710N RDX BLE 0 号 MVP 实施方案
 
-> 文档状态：实施稿 v0.4（MVP0-A BLE Transport 实机验证完成，MVP0-B 目标 APP 握手待实现）
+> 文档状态：实施稿 v1.0（MVP0-A、MVP0-B 已完成；阶段 4 USB 共存与稳定性待验收）
 > 编写日期：2026-08-06
 > 目标工程：AC710N / BR56 Type-C 有线耳机
 > 参考工程：`t2616cc-firmware/`（JL701N / BR28）
@@ -40,12 +40,18 @@ MVP0-A 的代码骨架已经落地：
 - AC710N 使用未占用的 bit 17 定义 `RDX_EN`，并派生唯一总门控 `TCFG_RDX_ENABLE`；
 - 配置源 `src/蓝牙配置.json` 与生成配置已同步开启 BLE、第三方协议并选择 RDX；
 - PC/UAC 路径只增加通用 `multi_protocol_pc_start/stop`，`pc.c` 不包含任何 `rdx_*` 头文件、函数或业务判断；
-- RDX 被隔离为 Entry、BR56 BLE Transport、Identity、MVP0 Core 和 Product Config，构建系统仅在总门控开启时加入 4 个 `.c` 文件；
+- RDX 被隔离为 Entry、BR56 BLE Transport、Identity、MVP0 Core、Crypto Adapter 和 Product Config，构建系统仅在总门控开启时加入 5 个 `.c` 文件及官方 `librdxApp.a`；
 - GATT Profile 已与 701 参考工程按字节核对一致，均为 387 bytes；
 - RDX ON 和 RDX OFF 均已完成干净编译。OFF 产物的构建列表、Map、ELF 中 `rdx_*` 计数均为 0，也不存在 PC bridge 运行符号；
 - ON 产物只包含 MVP0 RDX 对象和 BLE/Identity/Core 符号，不包含 701 的录音、文件、Wi-Fi、DUT、LED、按键、TWS 等全量 RDX 业务。
 
-当前固件已完成 MVP0-A BLE Transport 实机验证：使用 nRF Connect 验证了扫描、BLE 建链、GATT/MTU、TX CCC、RX Write、TX Notify、`RDX_MVP0_PING/PONG` 回环、Battery Read 以及断开重连。Battery 当前返回开发阶段固定值 `100%`，尚未接入真实电量。产品身份暂时镜像 701 当前的 Zenchord Case 测试配置，协议版本暂定为 `0x01`，AuthKey 和 Label SN 为全零开发占位值；目标 APP 的最小 RDX 握手和在线状态仍属于 MVP0-B，必须以 Golden Trace 和目标 APP 实测数据为准。
+当前固件已完成 MVP0-A BLE Transport 实机验证：使用 nRF Connect 验证了扫描、BLE 建链、GATT/MTU、TX CCC、RX Write、TX Notify、`RDX_MVP0_PING/PONG` 回环、Battery Read 以及断开重连。Battery 当前返回开发阶段固定值 `100%`，尚未接入真实电量。产品身份暂时镜像 701 当前的 Zenchord Case 测试配置，协议版本已按参考固件修正为 V24（`0x18`），AuthKey 和 Label SN 仍为全零开发占位值。
+
+MVP0-B 已根据 701 Golden Trace 实现第一版最小状态机：处理 `battery`、`version`、`appkey`、`rtc` 和 `ostype` 请求；AppKey 通过 Crypto Adapter 调用官方 `librdxApp.a` 中的 `rdx_appkey_decryption_handle()` 做真实校验，请求严格校验为 45 bytes，解密一次后与 Zenchord 三组正式兼容 AppKey 比较，校验失败会返回失败并断开，校验成功且 TX CCC 已开启、应答可发送时才进入 `APP-ready`。Identity Read 可能只在 APP 首次发现设备时出现，后续连接可因 GATT/身份缓存而跳过，因此只用于返回身份和诊断，不作为每次握手的硬门槛。`rtc` 当前只返回兼容性成功回执并原样带回时间戳，不修改或持久化系统 RTC。全量 `rdx_protocol.c.o` 未接入，录音、文件、Wi-Fi、OTA 等依赖仍保持隔离。
+
+2026-08-07 已对该候选重新执行 RDX OFF/ON 两套干净编译：OFF 的构建列表、Map、ELF 中 RDX 命中均为 0，PC bridge 运行符号为 0；ON 编译和固件后处理返回成功，Map 只从官方 `librdxApp.a` 抽取 `rdx_encryption.c.o`，未发现 `rdx_protocol.c.o`、`rdx_uxfile.c.o`、`xxpUart.c.o`、录音、Wi-Fi 或 OTA 对象。
+
+目标 APP 实机联调已经完成 MVP0-B 验收。最终复验日志 `COM3_2026-08-07_13-41-10.log` 中，设备在一次 `0x3E` 短暂断开后自动恢复广播并重新连接，随后完成 MTU、TX CCC、Battery、Version、AppKey、RTC 和 OS Type 时序；AppKey 返回成功并出现 `[RDX] APP-ready`，RTC 回执已严格修正为单个尾分隔符 `*DEV#rtc#0#<timestamp>#`。APP 能进入设备页并显示在线。后续未响应的 `len=18/12/13` 请求属于录音等未移植业务，不纳入 MVP0-B。至此 MVP0-A、MVP0-B 均可收尾；整个 0 号 MVP 仍需完成阶段 4 的 10 分钟在线、反复连接/插拔及 USB Audio/Mic/HID 共存验收。
 
 ## 2. 当前工程事实
 
@@ -123,7 +129,7 @@ PC/UAC 模式启动
 #define RDX_SEL_DEVICE DEVICE_ZENCORD_CC_T2616
 ```
 
-`DEVICE_ZENCORD_CC_T2616` 是 Case/充电仓形态，对应的产品码、广播字段和 Read Characteristic 内容不一定适用于当前 Type-C 耳机。为先完成 BLE 通路联调，MVP0-A 暂时用隔离的开发配置镜像该身份；MVP0-B 前必须冻结目标 APP 所期待的产品身份，不能把这组占位配置直接转为量产配置。
+`DEVICE_ZENCORD_CC_T2616` 是 Case/充电仓形态，对应的产品码、广播字段和 Read Characteristic 内容不一定适用于当前 Type-C 耳机。MVP0 使用隔离的开发配置镜像该身份，并已完成目标 APP 最小握手验证；这只证明协议兼容，不代表量产身份已经确定，不能把该占位配置直接转为量产配置。
 
 ### 2.6 单一 RDX 总门控
 
@@ -284,7 +290,7 @@ Handle 是否必须固定取决于 APP，但复用 701 profile 数据成本最�
 - 录音卡片/PIN 类产品通常返回 24 字节 AuthKey；
 - Case 类产品会拼接本机 MAC、耳机 MAC、AuthKey 和 Wi-Fi MAC 等字段。
 
-因此 Identity Read 不能在产品形态未确认前实现。它很可能是“系统 BLE 已连接但 APP 不认设备”的第一处差异。
+当前 MVP0 已按确认的 Zenchord Case 形态实现 Identity Read。APP 首次发现设备时通常会读取该特征，但后续连接可能复用 GATT/身份缓存而不再读取；因此实现必须保持该特征可读，同时不能把“本次连接已读 Identity”作为 AppKey 认证或 `APP-ready` 的前置条件。
 
 ### 5.4 安全和绑定
 
@@ -433,7 +439,7 @@ PC 模式退出或关机时：
 ```text
 ADVERTISING
     → GATT_CONNECTED
-    → IDENTITY_READ
+    → IDENTITY_READ（首次发现或缓存失效时，可选）
     → CCC_READY
     → MIN_HANDSHAKE_RX
     → MIN_HANDSHAKE_TX
@@ -442,9 +448,9 @@ ADVERTISING
 
 每次只增加一个 APP 必需响应，并记录 APP 行为变化。APP 显示在线后停止扩展命令集，不进入录音、文件、Wi-Fi 或 OTA 业务。
 
-如果 APP 只依赖广播、Identity Read 和 CCC，MVP0-B 不需要链接 `librdxApp.a`。
+实测目标 APP 要求 AppKey 加密认证。当前实现只通过 Crypto Adapter 引用官方 `librdxApp.a` 的解密接口，并由 Map 保证仅抽取 `rdx_encryption.c.o`；协议、文件、UART 等对象均未进入固件。
 
-如果 APP 要求加密认证或 RDX 包级协议，则进入第 9 节的协议库决策闸门。
+阶段验收结果：通过。目标 APP 已完成最小握手并进入 `APP-ready`；录音、文件、Wi-Fi 和 OTA 等业务请求继续保持不响应，不扩大 MVP0-B 范围。
 
 ### 阶段 4：USB 共存与稳定性
 
@@ -464,6 +470,8 @@ ADVERTISING
 - `rdx_uxfile.c.o`；
 - `xxpUart.c.o`。
 
+当前 MVP0-B 直接复用这份原始官方库，不再维护二次拆包的静态库。`rdx_crypto.c` 只引用 `rdx_appkey_decryption_handle()`，利用静态库按需抽取机制仅链接 `rdx_encryption.c.o`；RDX OFF 时库路径不进入生成的链接列表。每次库或调用面发生变化后，都必须用 Map 复核其余四个对象仍未被抽取。
+
 701 和 710 都使用 PI32v2、`mcpu=r3`，所以该库存在复用可能；但不能据此认定二进制兼容：
 
 - 701 使用 BR28 平台和 `r3-large` 构建选项；
@@ -476,7 +484,7 @@ ADVERTISING
 
 1. APP 不需要包级握手：不链接库；
 2. APP 只需少量、已知且无加密的命令：在 `rdx_mvp0_core.c` 实现最小状态机；
-3. APP 需要现有加密/认证：先做 `librdxApp.a` 的最小链接实验；
+3. APP 需要现有加密/认证：直接链接官方 `librdxApp.a`，并通过 Map 限定只抽取 `rdx_encryption.c.o`；
 4. 链接实验引入大量业务符号：向 RDX 协议提供方申请 BR56/AC710N 版本的核心库，或申请把 transport/core 与 uxfile/uart 分库；
 5. 只有最小核心库可用后，才把协议任务接入 MVP0 BLE transport。
 
@@ -501,8 +509,9 @@ librdx_wifi.a       # Wi-Fi/UART，MVP0 不链接
 | `SDK/apps/common/third_party_profile/multi_protocol_event.c` | 将 RDX 纳入第三方协议公共状态回调的编译条件，不增加 RDX 业务逻辑 |
 | `SDK/apps/earphone/mode/pc/pc.c` | USB 栈启动后和 PC 停止时各调用一个通用 third-party hook；不得包含 RDX 头文件或业务判断 |
 | `SDK/build/genFileList.c` | 按 `TCFG_RDX_ENABLE` 加入 RDX 文件；RDX OFF 时不进入编译列表 |
+| `SDK/build/Makefile.mk` | 在链接组中提供通用 `THIRD_PARTY_LIBS` 扩展点；具体 RDX 库只由 `genFileList.c` 按总门控注入 |
 | `SDK/apps/common/config/bt_profile_config.c` | 在 `TCFG_APP_BT_EN=0` 的通用纯 LE 分支补齐 btstack 已引用的 `hci_inquiry_support=0` 平台能力常量 |
-| `SDK/apps/common/third_party_profile/rdx_protocol/` | 新增全部 RDX BLE、Identity、MVP0 core 和产品配置实现 |
+| `SDK/apps/common/third_party_profile/rdx_protocol/` | 新增 RDX BLE、Identity、MVP0 core、Crypto Adapter、产品配置及原始官方 `librdxApp.a` |
 
 `SDK/apps/common/config/include/bt_profile_cfg.h` 保持只审计、不修改。`bt_profile_config.c` 的实际修改仅补齐纯 LE 链接所需的关闭态能力常量，不为 RDX 打开 SPP、经典蓝牙或完整 BT 应用。
 
@@ -584,17 +593,17 @@ USB 描述符、`task_pc.c`、`usb_device.c`、`uac_stream.c`、USB Audio/Mic/HI
 9. JL 原生修改白名单核对结果；
 10. 下一阶段全量 RDX 业务移植的依赖清单。
 
-## 14. MVP0-B 联调前需要确认的输入
+## 14. 量产化前仍需确认的输入
 
-进入 APP 最小握手编码和实机验收前，需要产品或 APP 侧确认以下信息：
+MVP0-B 已使用 Zenchord Case 开发占位身份完成实机验证。进入量产身份和后续 RDX 业务移植前，仍需产品或 APP 侧确认：
 
 - 目标 APP 名称、Android/iOS 包名和版本；
-- 当前 710 产品应在 APP 中表现为耳机、录音卡片还是 Case；
+- 当前 710 量产产品应在 APP 中表现为耳机、录音卡片还是 Case；
 - 应使用哪组 `BLE_LOCAL_NAME`、`PRODUCT_CODE`、`FACTORY_CODE` 和 `PRODUCT_TYPE`；
 - 目标 APP 是否要求未绑定、绑定或两种状态；
-- 可用于开发的测试 AuthKey/AppKey 或合法测试身份；
-- 701 参考板是否能正常连接同一版本 APP；
-- “连接成功”的产品口径：进入设备页、显示在线，还是还要完成某一条最小命令。
+- 量产 AuthKey、Label SN 和合法身份的注入、保存与更新方案；
+- 已绑定、未绑定及换机后的完整行为；
+- 下一阶段必须开放的 RDX 业务及其独立子功能门控。
 
 ## 15. 粗略工作量
 

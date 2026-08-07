@@ -17,7 +17,7 @@ int rdx_protocol_start(void)
         return 0;
     }
 
-    rdx_mvp0_core_init(rdx_ble_transport_send);
+    rdx_mvp0_core_init(rdx_ble_transport_send, rdx_ble_transport_disconnect);
     ret = rdx_ble_transport_init();
     if (ret) {
         rdx_mvp0_core_exit();
