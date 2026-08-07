@@ -3,16 +3,16 @@
 #if TCFG_RDX_ENABLE
 
 #include "system/includes.h"
-#include "rdx_crypto.h"
+#include "rdx_appkey_verifier.h"
 
 #define RDX_APPKEY_BLOCK_SIZE                 16
 #define RDX_APPKEY_PAYLOAD_SIZE               (RDX_APPKEY_BLOCK_SIZE * 2)
 
 extern void rdx_appkey_decryption_handle(u8 *ciphertext, u8 *key, u8 *plaintext);
 
-int rdx_crypto_verify_appkey(const u8 *payload, u16 len,
-                             const char *const *expected_keys,
-                             u8 expected_key_count)
+int rdx_appkey_verify(const u8 *payload, u16 len,
+                      const char *const *expected_keys,
+                      u8 expected_key_count)
 {
     u8 key[RDX_APPKEY_BLOCK_SIZE];
     u8 plaintext[RDX_APPKEY_BLOCK_SIZE];

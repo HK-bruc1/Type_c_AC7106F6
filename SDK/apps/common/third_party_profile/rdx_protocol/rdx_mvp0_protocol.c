@@ -3,9 +3,9 @@
 #if TCFG_RDX_ENABLE
 
 #include "system/includes.h"
-#include "rdx_crypto.h"
-#include "rdx_mvp0_core.h"
-#include "rdx_product_config.h"
+#include "rdx_appkey_verifier.h"
+#include "rdx_mvp0_compat_config.h"
+#include "rdx_mvp0_protocol.h"
 
 #define RDX_APPKEY_PAYLOAD_SIZE               32
 
@@ -18,7 +18,7 @@ static const u8 rdx_cmd_rtc[] = "*APP#rtc#";
 static const u8 rdx_cmd_ostype[] = "*APP#ostype#";
 static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
 static const char *const rdx_mvp0_app_keys[] = {
-    RDX_MVP0_APP_KEY_LIST
+    RDX_COMPAT_APP_KEY_LIST
 };
 
 static rdx_mvp0_send_callback_t rdx_mvp0_send_callback;
@@ -61,7 +61,7 @@ static void rdx_mvp0_send_battery(void)
 
     /* The 701 application keeps the legacy wire order C, R, L. */
     len = snprintf((char *)response, sizeof(response),
-                   "*DEV#battery#0#0#%u#", RDX_MVP0_BATTERY_LEVEL);
+                   "*DEV#battery#0#0#%u#", RDX_MVP0_FIXED_BATTERY_LEVEL);
     if (len > 0 && len < sizeof(response)) {
         rdx_mvp0_send(response, len);
     }
@@ -74,7 +74,7 @@ static void rdx_mvp0_send_version(void)
 
     len = snprintf((char *)response, sizeof(response),
                    "*DEV#version#%s#%s#",
-                   RDX_MVP0_HARDWARE_VERSION, RDX_MVP0_FIRMWARE_VERSION);
+                   RDX_COMPAT_HARDWARE_VERSION, RDX_COMPAT_FIRMWARE_VERSION);
     if (len > 0 && len < sizeof(response)) {
         rdx_mvp0_send(response, len);
     }
@@ -93,11 +93,11 @@ static void rdx_mvp0_handle_appkey(const u8 *data, u16 len)
         goto reject;
     }
 
-    result = rdx_crypto_verify_appkey(data + prefix_len,
-                                      RDX_APPKEY_PAYLOAD_SIZE,
-                                      rdx_mvp0_app_keys,
-                                      sizeof(rdx_mvp0_app_keys)
-                                      / sizeof(rdx_mvp0_app_keys[0]));
+    result = rdx_appkey_verify(data + prefix_len,
+                               RDX_APPKEY_PAYLOAD_SIZE,
+                               rdx_mvp0_app_keys,
+                               sizeof(rdx_mvp0_app_keys)
+                               / sizeof(rdx_mvp0_app_keys[0]));
     if (result) {
         printf("[RDX] appkey verify failed\n");
         goto reject;
@@ -155,29 +155,29 @@ static void rdx_mvp0_handle_rtc(const u8 *data, u16 len)
     rdx_mvp0_send(response, response_len);
 }
 
-void rdx_mvp0_core_init(rdx_mvp0_send_callback_t send_callback,
-                        rdx_mvp0_disconnect_callback_t disconnect_callback)
+void rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
+                            rdx_mvp0_disconnect_callback_t disconnect_callback)
 {
     rdx_mvp0_send_callback = send_callback;
     rdx_mvp0_disconnect_callback = disconnect_callback;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 }
 
-void rdx_mvp0_core_exit(void)
+void rdx_mvp0_protocol_exit(void)
 {
     rdx_mvp0_send_callback = NULL;
     rdx_mvp0_disconnect_callback = NULL;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 }
 
-void rdx_mvp0_core_set_connected(u8 connected)
+void rdx_mvp0_protocol_set_connected(u8 connected)
 {
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
     rdx_mvp0_state.connected = !!connected;
     printf("[RDX] link %s\n", rdx_mvp0_state.connected ? "connected" : "disconnected");
 }
 
-void rdx_mvp0_core_set_identity_read(void)
+void rdx_mvp0_protocol_set_identity_read(void)
 {
     if (rdx_mvp0_state.connected && !rdx_mvp0_state.identity_read) {
         rdx_mvp0_state.identity_read = 1;
@@ -185,7 +185,7 @@ void rdx_mvp0_core_set_identity_read(void)
     }
 }
 
-void rdx_mvp0_core_set_ccc(u8 enabled)
+void rdx_mvp0_protocol_set_ccc(u8 enabled)
 {
     rdx_mvp0_state.ccc_ready = !!enabled;
     if (!rdx_mvp0_state.ccc_ready) {
@@ -193,7 +193,7 @@ void rdx_mvp0_core_set_ccc(u8 enabled)
     }
 }
 
-void rdx_mvp0_core_receive(const u8 *data, u16 len)
+void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
 {
     if (!data || !len) {
         return;

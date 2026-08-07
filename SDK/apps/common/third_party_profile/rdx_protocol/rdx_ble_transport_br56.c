@@ -8,8 +8,8 @@
 #include "btstack/le/att.h"
 #include "rdx_ble_transport_br56.h"
 #include "rdx_identity.h"
-#include "rdx_mvp0_core.h"
-#include "rdx_product_config.h"
+#include "rdx_mvp0_compat_config.h"
+#include "rdx_mvp0_protocol.h"
 
 #define RDX_HANDLE_GAP_NAME                   0x0003
 #define RDX_HANDLE_RX                         0x0006
@@ -140,7 +140,7 @@ static int rdx_ble_adv_enable(u8 enable)
             return -1;
         }
 
-        ret = app_ble_set_adv_param(rdx_ble.hdl, RDX_MVP0_ADV_INTERVAL,
+        ret = app_ble_set_adv_param(rdx_ble.hdl, RDX_BLE_ADV_INTERVAL,
                                     APP_ADV_IND, APP_ADV_CHANNEL_ALL);
         if (ret) {
             return ret;
@@ -180,7 +180,7 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.con_handle = con_handle;
             rdx_ble.mtu = 23;
             rdx_ble.tx_ccc = 0;
-            rdx_mvp0_core_set_connected(1);
+            rdx_mvp0_protocol_set_connected(1);
             att_server_set_exchange_mtu(con_handle);
             printf("[RDX] connected handle=%04x\n", con_handle);
         }
@@ -199,7 +199,7 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.con_handle = 0;
             rdx_ble.mtu = 0;
             rdx_ble.tx_ccc = 0;
-            rdx_mvp0_core_set_connected(0);
+            rdx_mvp0_protocol_set_connected(0);
             if (rdx_ble.initialized) {
                 rdx_ble_adv_enable(1);
             }
@@ -229,11 +229,11 @@ static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_h
 
     case RDX_HANDLE_IDENTITY:
         data_len = rdx_identity_get_read_value(&data);
-        rdx_mvp0_core_set_identity_read();
+        rdx_mvp0_protocol_set_identity_read();
         break;
 
     case RDX_HANDLE_BATTERY:
-        value[0] = rdx_identity_get_battery_level();
+        value[0] = RDX_MVP0_FIXED_BATTERY_LEVEL;
         data = value;
         data_len = 1;
         break;
@@ -266,7 +266,7 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
 
     switch (att_handle) {
     case RDX_HANDLE_RX:
-        rdx_mvp0_core_receive(buffer, buffer_size);
+        rdx_mvp0_protocol_receive(buffer, buffer_size);
         break;
 
     case RDX_HANDLE_TX_CCC:
@@ -279,7 +279,7 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
         multi_att_set_ccc_config(connection_handle, att_handle, ccc);
         if (att_handle == RDX_HANDLE_TX_CCC) {
             rdx_ble.tx_ccc = !!(ccc & 0x0001);
-            rdx_mvp0_core_set_ccc(rdx_ble.tx_ccc);
+            rdx_mvp0_protocol_set_ccc(rdx_ble.tx_ccc);
             printf("[RDX] tx ccc=%u\n", rdx_ble.tx_ccc);
         }
         break;

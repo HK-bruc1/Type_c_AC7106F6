@@ -1054,8 +1054,8 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c \
     apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c \
     apps/common/third_party_profile/rdx_protocol/rdx_identity.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_mvp0_core.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_crypto.c
+    apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
 
 THIRD_PARTY_LIBS += \
     apps/common/third_party_profile/rdx_protocol/librdxApp.a

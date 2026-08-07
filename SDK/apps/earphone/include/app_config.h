@@ -101,18 +101,8 @@
 #define TCFG_THIRD_PARTY_PROTOCOLS_SEL 0 // 第三方协议选择
 #endif
 
-#if TCFG_THIRD_PARTY_PROTOCOLS_ENABLE && (TCFG_THIRD_PARTY_PROTOCOLS_SEL & RDX_EN)
-#define TCFG_RDX_ENABLE            1
-#else
-#define TCFG_RDX_ENABLE            0
-#endif
-
 #if THIRD_PARTY_PROTOCOLS_SEL && (TCFG_USER_BLE_ENABLE == 0)
 #error "开启 第三方协议功能 需要使能 TCFG_USER_BLE_ENABLE"
-#endif
-
-#if TCFG_RDX_ENABLE && TCFG_APP_BT_EN
-#error "RDX BLE MVP0 requires PC/UAC mode with TCFG_APP_BT_EN disabled"
 #endif
 
 #ifndef TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
@@ -1339,6 +1329,9 @@
 #undef TCFG_AUDIO_DAC_POWER_ON_AT_SETUP
 #define TCFG_AUDIO_DAC_POWER_ON_AT_SETUP    1
 #endif
+
+/* RDX final gate depends on the resolved BLE and Type-C application config. */
+#include "rdx_integration_config.h"
 
 #ifndef __LD__
 #include "bt_profile_cfg.h"

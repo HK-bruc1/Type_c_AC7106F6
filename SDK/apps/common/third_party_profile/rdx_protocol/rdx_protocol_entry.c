@@ -5,7 +5,7 @@
 #include "system/includes.h"
 #include "rdx_protocol_entry.h"
 #include "rdx_ble_transport_br56.h"
-#include "rdx_mvp0_core.h"
+#include "rdx_mvp0_protocol.h"
 
 static u8 rdx_protocol_started;
 
@@ -17,10 +17,10 @@ int rdx_protocol_start(void)
         return 0;
     }
 
-    rdx_mvp0_core_init(rdx_ble_transport_send, rdx_ble_transport_disconnect);
+    rdx_mvp0_protocol_init(rdx_ble_transport_send, rdx_ble_transport_disconnect);
     ret = rdx_ble_transport_init();
     if (ret) {
-        rdx_mvp0_core_exit();
+        rdx_mvp0_protocol_exit();
         return ret;
     }
 
@@ -36,7 +36,7 @@ void rdx_protocol_stop(void)
     }
 
     rdx_ble_transport_exit();
-    rdx_mvp0_core_exit();
+    rdx_mvp0_protocol_exit();
     rdx_protocol_started = 0;
     printf("[RDX] MVP0 stopped\n");
 }
