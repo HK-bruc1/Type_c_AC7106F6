@@ -36,6 +36,11 @@
 #define adc_file_log(...)
 #endif/*log_en*/
 
+/* ADC原始采样调试：1=每秒打印peak/min/max，0=关闭诊断代码 wang++*/
+#ifndef ADC_MIC_RAW_DATA_DEBUG_ENABLE
+#define ADC_MIC_RAW_DATA_DEBUG_ENABLE     0
+#endif
+
 extern struct audio_adc_hdl adc_hdl;
 extern const u8 const_adc_async_en;
 extern const struct adc_platform_cfg adc_platform_cfg_table[AUDIO_ADC_MAX_NUM];
@@ -63,6 +68,11 @@ struct adc_file_hdl {
     u8 dump_cnt;
     u8 ch_num;
     u8 multi_ch_adc_en;
+#if ADC_MIC_RAW_DATA_DEBUG_ENABLE
+    u32 debug_sample_count;
+    int debug_sample_min;
+    int debug_sample_max;
+#endif
 };
 
 struct adc_file_common {
@@ -658,7 +668,6 @@ static void adc_mic_output_handler(void *_hdl, s16 *data, int len)
 {
     struct adc_file_hdl *hdl = (struct adc_file_hdl *)_hdl;
     struct stream_frame *frame;
-    /* printf(">> %d %d\n", data[0], data[1]); */
 
     if (hdl->dump_cnt < 10) {
         hdl->dump_cnt++;
@@ -668,6 +677,35 @@ static void adc_mic_output_handler(void *_hdl, s16 *data, int len)
         hdl->value[0] = 0;
         return;
     }
+
+#if ADC_MIC_RAW_DATA_DEBUG_ENABLE
+    if ((adc_hdl.bit_width == ADC_BIT_WIDTH_16) && hdl->ch_num && len) {
+        int sample_num = (len * hdl->ch_num) / sizeof(*data);
+
+        if ((hdl->debug_sample_count == 0) && sample_num) {
+            hdl->debug_sample_min = data[0];
+            hdl->debug_sample_max = data[0];
+        }
+        for (int i = 0; i < sample_num; i++) {
+            if (data[i] < hdl->debug_sample_min) {
+                hdl->debug_sample_min = data[i];
+            }
+            if (data[i] > hdl->debug_sample_max) {
+                hdl->debug_sample_max = data[i];
+            }
+        }
+        hdl->debug_sample_count += len / sizeof(*data);
+        if (hdl->debug_sample_count >= hdl->sample_rate) {
+            int peak = hdl->debug_sample_max;
+            if (-hdl->debug_sample_min > peak) {
+                peak = -hdl->debug_sample_min;
+            }
+            printf("[ADC_MIC] peak:%d min:%d max:%d\n",
+                   peak, hdl->debug_sample_min, hdl->debug_sample_max);
+            hdl->debug_sample_count = 0;
+        }
+    }
+#endif
 
     frame = source_plug_get_output_frame(hdl->source_node, (len * hdl->ch_num));
 

@@ -349,7 +349,7 @@ int uac_mic_stream_read(u8 *buf, u32 len)
         memset(buf, 0, len);
         return len;
     }
-#if 0//48K 1ksin
+#if 0//48K 1ksin 上行链路绕过ADC注入测试音 wang++
     const s16 sin_48k[] ALIGNED(4) = {
         0, 2139, 4240, 6270, 8192, 9974, 11585, 12998,
         14189, 15137, 15826, 16244, 16384, 16244, 15826, 15137,
