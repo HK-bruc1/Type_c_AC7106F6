@@ -4,6 +4,7 @@
 
 #include "system/includes.h"
 #include "btstack/le/ble_api.h"
+#include "rdx_device_state.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
 #include "rdx_protocol_defs.h"
@@ -107,6 +108,7 @@ u8 rdx_identity_fill_manufacturer_data(u8 *buffer, u8 buffer_size)
 {
     u8 offset = 0;
     u8 i;
+    u8 bound = rdx_device_state_get_bound();
     u32 ability = RDX_COMPAT_DEVICE_ABILITY;
     const u8 required = (sizeof(RDX_COMPAT_PRODUCT_CODE) - 1)
                         + RDX_MAC_SIZE
@@ -132,7 +134,7 @@ u8 rdx_identity_fill_manufacturer_data(u8 *buffer, u8 buffer_size)
     memcpy(buffer + offset, RDX_COMPAT_FACTORY_CODE, sizeof(RDX_COMPAT_FACTORY_CODE) - 1);
     offset += sizeof(RDX_COMPAT_FACTORY_CODE) - 1;
 
-    buffer[offset++] = RDX_COMPAT_BOUND_STATE ? BIT(6) : 0;
+    buffer[offset++] = bound ? BIT(6) : 0;
     buffer[offset++] = ability & 0xff;
     buffer[offset++] = (ability >> 8) & 0xff;
     buffer[offset++] = (ability >> 16) & 0xff;
@@ -146,6 +148,9 @@ u8 rdx_identity_fill_manufacturer_data(u8 *buffer, u8 buffer_size)
     offset += sizeof(RDX_COMPAT_PRODUCT_TYPE) - 1;
     memcpy(buffer + offset, RDX_COMPAT_SELF_MARK, sizeof(RDX_COMPAT_SELF_MARK) - 1);
     offset += sizeof(RDX_COMPAT_SELF_MARK) - 1;
+
+    printf("[RDX][SESSION] advertising bound=%u ability=%08X\n",
+           bound, (unsigned int)ability);
 
     return offset;
 }

@@ -21,6 +21,7 @@
 
 #define     TUYA_SYNC_KEY_INFO              12
 #define     CFG_USER_COMMON_ADDR            13
+#define     CFG_RDX_DEVICE_STATE            15
 
 
 #define     CFG_EQ0_INDEX               	19

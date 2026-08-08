@@ -303,10 +303,6 @@ int rdx_ble_transport_init(void)
     }
 
     memset(&rdx_ble, 0, sizeof(rdx_ble));
-    ret = rdx_identity_init();
-    if (ret) {
-        return ret;
-    }
 
     rdx_ble.hdl = app_ble_hdl_alloc();
     if (!rdx_ble.hdl) {

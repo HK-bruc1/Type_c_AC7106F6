@@ -4,6 +4,7 @@
 
 #include "system/includes.h"
 #include "rdx_appkey_verifier.h"
+#include "rdx_device_management.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
 #include "rdx_mvp0_protocol.h"
@@ -22,6 +23,7 @@ static const u8 rdx_cmd_rtc[] = "*APP#rtc#";
 static const u8 rdx_cmd_ostype[] = "*APP#ostype#";
 static const u8 rdx_cmd_auth_sn[] = RDX_CMD_DL_AUTH_SN;
 static const u8 rdx_cmd_offtime_check[] = RDX_CMD_DL_OFFTIME_CHECK;
+static const u8 rdx_cmd_bound[] = RDX_CMD_DL_BOUND;
 static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
 static const char *const rdx_mvp0_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
@@ -179,6 +181,51 @@ static u8 rdx_mvp0_management_query_ready(const char *command, u16 len)
 
     printf("[RDX][DROP] cmd=%s reason=app_not_ready len=%u\n", command, len);
     return 0;
+}
+
+static void rdx_mvp0_send_bound_result(u8 result)
+{
+    u8 response[32];
+    u8 bound = rdx_device_management_get_bound();
+    int len;
+    int ret;
+
+    len = snprintf((char *)response, sizeof(response),
+                   RDX_CMD_UP_BOUND "%u#%u#", result, bound);
+    if (len <= 0 || len >= sizeof(response)) {
+        printf("[RDX][TX] cmd=bound reason=encode_failed len=%d\n", len);
+        return;
+    }
+
+    ret = rdx_mvp0_send(response, len);
+    printf("[RDX][TX] cmd=bound wire=%s result=%u bound=%u len=%d ret=%d\n",
+           (char *)response, result, bound, len, ret);
+}
+
+static void rdx_mvp0_handle_bound(const u8 *data, u16 len)
+{
+    const u16 prefix_len = sizeof(rdx_cmd_bound) - 1;
+    const u16 request_len = prefix_len + 2;
+    int ret;
+
+    if (len != request_len || data[len - 1] != '#'
+        || (data[prefix_len] != '0' && data[prefix_len] != '1')) {
+        printf("[RDX][DROP] cmd=bound reason=malformed len=%u\n", len);
+        return;
+    }
+
+    if (!rdx_mvp0_management_query_ready("bound", len)) {
+        return;
+    }
+
+    if (data[prefix_len] != '1') {
+        printf("[RDX][DROP] cmd=bound reason=unbind_deferred len=%u\n", len);
+        rdx_mvp0_send_bound_result(1);
+        return;
+    }
+
+    ret = rdx_device_management_bind();
+    rdx_mvp0_send_bound_result(ret ? 1 : 0);
 }
 
 static void rdx_mvp0_handle_appkey(const u8 *data, u16 len)
@@ -383,6 +430,10 @@ void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
         } else if (rdx_mvp0_management_query_ready("cofftime", len)) {
             rdx_mvp0_send_offtime_check();
         }
+    } else if (rdx_mvp0_data_starts_with(data, len, rdx_cmd_bound,
+                                         sizeof(rdx_cmd_bound) - 1)) {
+        rdx_mvp0_log_rx("bound", data, len);
+        rdx_mvp0_handle_bound(data, len);
     } else {
         printf("[RDX][DROP] cmd=unknown wire=%.*s len=%u type=%02X%02X\n",
                (int)len, (char *)data, len,

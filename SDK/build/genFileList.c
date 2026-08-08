@@ -1053,6 +1053,8 @@ c_SRC_FILES += \
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c \
     apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_device_management.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_device_state.c \
     apps/common/third_party_profile/rdx_protocol/rdx_identity.c \
     apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c \
     apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c \

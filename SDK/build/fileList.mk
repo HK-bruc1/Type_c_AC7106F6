@@ -64,6 +64,9 @@ c_SRC_FILES += apps/common/fat_nor/cfg_private.c
 
 
 c_SRC_FILES += apps/common/debug/memory_debug.c
+c_SRC_FILES += apps/common/third_party_profile/multi_protocol_main.c apps/common/third_party_profile/multi_protocol_common.c apps/common/third_party_profile/multi_protocol_event.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c apps/common/third_party_profile/rdx_protocol/rdx_device_management.c apps/common/third_party_profile/rdx_protocol/rdx_device_state.c apps/common/third_party_profile/rdx_protocol/rdx_identity.c apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
+THIRD_PARTY_LIBS += apps/common/third_party_profile/rdx_protocol/librdxApp.a
 c_SRC_FILES += apps/common/jldtp/uart_transport.c apps/common/jldtp/jldtp_manager.c
 c_SRC_FILES += apps/common/device/key/key_driver.c
 c_SRC_FILES += apps/common/device/usb/usb_config.c apps/common/device/usb/device/descriptor.c apps/common/device/usb/device/usb_device.c apps/common/device/usb/device/user_setup.c apps/common/device/usb/device/task_pc.c

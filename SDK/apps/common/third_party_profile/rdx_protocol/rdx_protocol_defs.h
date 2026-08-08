@@ -1,13 +1,15 @@
 #ifndef RDX_PROTOCOL_DEFS_H
 #define RDX_PROTOCOL_DEFS_H
 
-/* APP -> device read-only management commands. */
+/* APP -> device management commands. */
 #define RDX_CMD_DL_AUTH_SN                      "*APP#authsn#"
 #define RDX_CMD_DL_OFFTIME_CHECK                "*APP#cofftime#"
+#define RDX_CMD_DL_BOUND                        "*APP#bound#"
 
-/* Device -> APP read-only management responses. */
+/* Device -> APP management responses. */
 #define RDX_CMD_UP_AUTH_SN                      "*DEV#authsn#"
 #define RDX_CMD_UP_OFFTIME_CHECK                "*DEV#cofftime#"
+#define RDX_CMD_UP_BOUND                        "*DEV#bound#"
 
 /* Fixed-width text fields used by the auth/SN response. */
 #define RDX_AUTH_KEY_STRING_SIZE                24
