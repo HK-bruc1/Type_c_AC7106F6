@@ -5,11 +5,15 @@
 #define RDX_CMD_DL_AUTH_SN                      "*APP#authsn#"
 #define RDX_CMD_DL_OFFTIME_CHECK                "*APP#cofftime#"
 #define RDX_CMD_DL_BOUND                        "*APP#bound#"
+#define RDX_CMD_DL_UNBOUND                      "*APP#unbound#"
+#define RDX_CMD_DL_SET_DEFAULT                  "*APP#default#"
 
 /* Device -> APP management responses. */
 #define RDX_CMD_UP_AUTH_SN                      "*DEV#authsn#"
 #define RDX_CMD_UP_OFFTIME_CHECK                "*DEV#cofftime#"
 #define RDX_CMD_UP_BOUND                        "*DEV#bound#"
+#define RDX_CMD_UP_UNBOUND                      "*DEV#unbound#"
+#define RDX_CMD_UP_SET_DEFAULT                  "*DEV#default#"
 
 /* Fixed-width text fields used by the auth/SN response. */
 #define RDX_AUTH_KEY_STRING_SIZE                24

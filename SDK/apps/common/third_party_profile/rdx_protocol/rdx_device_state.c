@@ -15,11 +15,11 @@ typedef char rdx_default_bound_check[
 static rdx_device_state_t rdx_device_state;
 static u8 rdx_device_state_initialized;
 
-static void rdx_device_state_set_defaults(void)
+static void rdx_device_state_fill_defaults(rdx_device_state_t *state)
 {
-    memset(&rdx_device_state, 0, sizeof(rdx_device_state));
-    rdx_device_state.version = RDX_DEVICE_STATE_VERSION;
-    rdx_device_state.bound = RDX_COMPAT_BOUND_STATE;
+    memset(state, 0, sizeof(*state));
+    state->version = RDX_DEVICE_STATE_VERSION;
+    state->bound = RDX_COMPAT_BOUND_STATE;
 }
 
 int rdx_device_state_init(void)
@@ -27,7 +27,7 @@ int rdx_device_state_init(void)
     rdx_device_state_t stored_state;
     int ret;
 
-    rdx_device_state_set_defaults();
+    rdx_device_state_fill_defaults(&rdx_device_state);
     memset(&stored_state, 0, sizeof(stored_state));
     ret = syscfg_read(CFG_RDX_DEVICE_STATE, &stored_state,
                       sizeof(stored_state));
@@ -56,7 +56,7 @@ int rdx_device_state_init(void)
 void rdx_device_state_exit(void)
 {
     rdx_device_state_initialized = 0;
-    rdx_device_state_set_defaults();
+    rdx_device_state_fill_defaults(&rdx_device_state);
 }
 
 void rdx_device_state_get_snapshot(rdx_device_state_t *snapshot)
@@ -90,8 +90,7 @@ int rdx_device_state_set_bound(u8 bound)
         return 0;
     }
 
-    memset(&next_state, 0, sizeof(next_state));
-    next_state.version = RDX_DEVICE_STATE_VERSION;
+    next_state = rdx_device_state;
     next_state.bound = bound;
     ret = syscfg_write(CFG_RDX_DEVICE_STATE, &next_state,
                        sizeof(next_state));
@@ -104,6 +103,39 @@ int rdx_device_state_set_bound(u8 bound)
     rdx_device_state = next_state;
     printf("[RDX][SESSION] state_transition old_bound=%u target_bound=%u vm_id=%u vm_ret=%d result=ok\n",
            old_bound, bound, CFG_RDX_DEVICE_STATE, ret);
+    return 0;
+}
+
+int rdx_device_state_restore_defaults(void)
+{
+    rdx_device_state_t default_state;
+    u8 old_bound;
+    int ret;
+
+    if (!rdx_device_state_initialized) {
+        printf("[RDX][DROP] cmd=state_restore reason=not_initialized\n");
+        return -1;
+    }
+
+    rdx_device_state_fill_defaults(&default_state);
+    old_bound = rdx_device_state.bound;
+    if (!memcmp(&rdx_device_state, &default_state, sizeof(default_state))) {
+        printf("[RDX][SESSION] state_restore old_bound=%u target_bound=%u vm=skip\n",
+               old_bound, default_state.bound);
+        return 0;
+    }
+
+    ret = syscfg_write(CFG_RDX_DEVICE_STATE, &default_state,
+                       sizeof(default_state));
+    if (ret != sizeof(default_state)) {
+        printf("[RDX][SESSION] state_restore old_bound=%u target_bound=%u vm_id=%u vm_ret=%d result=failed\n",
+               old_bound, default_state.bound, CFG_RDX_DEVICE_STATE, ret);
+        return -2;
+    }
+
+    rdx_device_state = default_state;
+    printf("[RDX][SESSION] state_restore old_bound=%u target_bound=%u vm_id=%u vm_ret=%d result=ok\n",
+           old_bound, default_state.bound, CFG_RDX_DEVICE_STATE, ret);
     return 0;
 }
 

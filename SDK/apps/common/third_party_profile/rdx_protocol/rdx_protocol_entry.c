@@ -47,8 +47,8 @@ void rdx_protocol_stop(void)
         return;
     }
 
-    rdx_ble_transport_exit();
     rdx_mvp0_protocol_exit();
+    rdx_ble_transport_exit();
     rdx_device_state_exit();
     rdx_protocol_started = 0;
     printf("[RDX] MVP0 stopped\n");

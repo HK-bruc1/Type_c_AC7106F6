@@ -16,5 +16,6 @@ void rdx_device_state_exit(void);
 void rdx_device_state_get_snapshot(rdx_device_state_t *snapshot);
 u8 rdx_device_state_get_bound(void);
 int rdx_device_state_set_bound(u8 bound);
+int rdx_device_state_restore_defaults(void);
 
 #endif
