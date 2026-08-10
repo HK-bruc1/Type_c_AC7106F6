@@ -41,6 +41,20 @@
 #error "RDX RTC year range is invalid"
 #endif
 
+#ifndef TCFG_RDX_RESOURCE_MONITOR_ENABLE
+/* Development diagnostics are enabled for this MVP product by default. */
+#define TCFG_RDX_RESOURCE_MONITOR_ENABLE  1
+#endif
+
+#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
+#ifndef RDX_RESOURCE_MONITOR_PERIOD_MS
+#define RDX_RESOURCE_MONITOR_PERIOD_MS    (10 * 1000UL)
+#endif
+#if (RDX_RESOURCE_MONITOR_PERIOD_MS == 0)
+#error "RDX resource monitor period must be greater than zero"
+#endif
+#endif
+
 #define TCFG_RDX_ENABLE            1
 #else
 #define TCFG_RDX_ENABLE            0

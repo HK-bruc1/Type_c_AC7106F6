@@ -1061,6 +1061,11 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c \
     apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
 
+#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_resource_monitor.c
+#endif
+
 THIRD_PARTY_LIBS += \
     apps/common/third_party_profile/rdx_protocol/librdxApp.a
 #endif
