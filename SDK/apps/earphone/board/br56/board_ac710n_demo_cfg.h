@@ -17,6 +17,11 @@
 
 #define NO_CONFIG_PORT						(-1)
 
+/* On-chip RTC is an independent board capability used by alarms and wakeup. */
+#ifndef TCFG_APP_RTC_EN
+#define TCFG_APP_RTC_EN                     1
+#endif
+
 //*********************************************************************************//
 //                                 UART配置                                        //
 //*********************************************************************************//

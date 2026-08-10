@@ -6,6 +6,8 @@ c_SRC_FILES := \
 	apps/common/dev_manager/dev_manager.c \
 	apps/common/temp_trim/dtemp_pll_trim.c \
 	apps/earphone/app_main.c \
+	apps/earphone/rtc_alarm_bridge.c \
+	apps/earphone/rtc_test.c \
 	apps/earphone/audio/jlstream_event_handler.c \
 	apps/earphone/audio/scene_switch.c \
 	apps/earphone/audio/tone_table.c \
@@ -97,6 +99,7 @@ LFLAGS := \
 	--gc-sections \
 	--plugin-opt=-pi32v2-csync-before-rti=true \
 	--start-group \
+	cpu/br56/liba/rtc_br56.a \
 	cpu/br56/liba/cpu.a \
 	cpu/br56/liba/system.a \
 	cpu/br56/liba/btstack.a \

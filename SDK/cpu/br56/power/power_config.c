@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "gpio_config.h"
 #include "system/init.h"
+#include "rtc/rtc_dev.h"
 
 const u32 dcdc_L = DCDC_L_10uH;//DCDC_L_4p7uH;
 
@@ -33,6 +34,11 @@ void board_power_init()
 
     power_control(PCONTROL_PD_VDDIO_KEEP, VDDIO_KEEP_TYPE_NORMAL);
     power_control(PCONTROL_SF_VDDIO_KEEP, VDDIO_KEEP_TYPE_NORMAL);
+
+#if TCFG_APP_RTC_EN
+    /* RTC clock selection is supplied by control_rtc_clk_sel. */
+    power_control(PCONTROL_SF_KEEP_LRC, 1);
+#endif
 
     /*power_control(PCONTROL_SF_KEEP_PVDD, 1);*/
     /*power_set_dcdc_type(TCFG_DCDC_TYPE);*/

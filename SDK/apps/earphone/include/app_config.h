@@ -610,8 +610,62 @@
 #define BT_NORMAL_HZ	            24000000
 
 //*********************************************************************************//
-#define RTC_CLK_RES_SEL	            CLK_SEL_32K
+#define RTC_CLK_RES_SEL	            CLK_SEL_LRC
 
+//*********************************************************************************//
+//                                  RTC测试配置                                    //
+//*********************************************************************************//
+#define RTC_TEST_ITEM_NONE                  0x00000000UL
+#define RTC_TEST_ITEM_REG_DUMP              0x00000001UL
+#define RTC_TEST_ITEM_BASIC_RW              0x00000002UL
+#define RTC_TEST_ITEM_TIMING                0x00000004UL
+#define RTC_TEST_ITEM_ALARM                 0x00000008UL
+#define RTC_TEST_ITEM_UTILS                 0x00000010UL
+#define RTC_TEST_ITEM_SOFTOFF_WAKE          0x00000020UL
+#define RTC_TEST_ITEM_SAFE                  (RTC_TEST_ITEM_REG_DUMP | \
+                                             RTC_TEST_ITEM_TIMING | \
+                                             RTC_TEST_ITEM_UTILS)
+#define RTC_TEST_ITEM_SOFTOFF               (RTC_TEST_ITEM_REG_DUMP | \
+                                             RTC_TEST_ITEM_SOFTOFF_WAKE)
+#define RTC_TEST_ITEM_ALL                   (RTC_TEST_ITEM_SAFE | \
+                                             RTC_TEST_ITEM_BASIC_RW | \
+                                             RTC_TEST_ITEM_ALARM)
+
+#ifndef RTC_TEST_ENABLE
+#define RTC_TEST_ENABLE                     0
+#endif
+
+#ifndef RTC_TEST_ITEM_MASK
+#define RTC_TEST_ITEM_MASK                  RTC_TEST_ITEM_ALL
+#endif
+
+#ifndef RTC_TEST_TIMING_SAMPLE_PERIOD_MS
+#define RTC_TEST_TIMING_SAMPLE_PERIOD_MS    (10 * 1000UL)
+#endif
+
+#ifndef RTC_TEST_TIMING_SAMPLE_COUNT
+#define RTC_TEST_TIMING_SAMPLE_COUNT        6
+#endif
+
+#ifndef RTC_TEST_ALARM_DELAY_SEC
+#define RTC_TEST_ALARM_DELAY_SEC            20
+#endif
+
+#ifndef RTC_TEST_ALARM_START_DELAY_MS
+#define RTC_TEST_ALARM_START_DELAY_MS       3000
+#endif
+
+#ifndef RTC_TEST_SOFTOFF_ALARM_DELAY_SEC
+#define RTC_TEST_SOFTOFF_ALARM_DELAY_SEC    60
+#endif
+
+#ifndef RTC_TEST_SOFTOFF_ENTER_DELAY_MS
+#define RTC_TEST_SOFTOFF_ENTER_DELAY_MS     2000
+#endif
+
+#ifndef RTC_TEST_TIMING_TOLERANCE_SEC
+#define RTC_TEST_TIMING_TOLERANCE_SEC       2
+#endif
 
 //*********************************************************************************//
 //                                  低功耗配置                                     //
