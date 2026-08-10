@@ -50,6 +50,8 @@
 #include "lib_update_config.h"
 #include "app_mode_sink.h"
 #include "audio_avc.h"
+#include "rtc_alarm_bridge.h"
+#include "rtc_test.h"
 
 #define LOG_TAG             "[APP]"
 #define LOG_ERROR_ENABLE
@@ -449,6 +451,10 @@ static struct app_mode *app_task_init()
     struct app_mode *mode;
     mode = app_mode_switch_handler(msg);
     ASSERT(mode != NULL);
+#if TCFG_APP_RTC_EN
+    rtc_alarm_wakeup_event_replay();
+    rtc_test_init();
+#endif
     return mode;
 }
 

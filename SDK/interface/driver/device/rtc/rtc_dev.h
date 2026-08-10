@@ -1,85 +1,64 @@
-#ifndef __RTC_DEV_H__
-#define __RTC_DEV_H__
+#ifndef RTC_DEV_H
+#define RTC_DEV_H
 
 #include "typedef.h"
 #include "utils/sys_time.h"
 
-enum RTC_CLK {
-    CLK_SEL_32K = 1,
-    CLK_SEL_BTOSC_DIV1 = 2,
-    CLK_SEL_12M = 2,
-    CLK_SEL_BTOSC_DIV2 = 3,
-    CLK_SEL_24M = 3,
-    CLK_SEL_LRC = 4,
-};
+extern const bool control_rtc_enable;
+extern const u32 control_rtc_clk_sel;
 
-enum RTC_SEL {
-    HW_RTC,
-    VIR_RTC,
-};
+#define CLK_SEL_32K                         1
+#define CLK_SEL_12M                         2
+#define CLK_SEL_24M                         3
+#define CLK_SEL_LRC                         4
 
 enum {
     RTC_UNACCESSIBLE = 0,
     RTC_ACCESSIBLE_TIME_UNRELIABLE,
     RTC_ACCESSIBLE_TIME_RELIABLE,
+    RTC_SUCC,
+    RTC_ERROR_ALM_DIS,
+    RTC_ERROR_ALM_NO_EFFECT,
+};
+
+enum rtc_event {
+    RTC_ALARM_EVENT,
+    RTC_WKUP_EVENT,
+    RTC_1HZ_EVENT,
+    RTC_TRIM_EVENT,
+};
+
+struct rtc_event_t {
+    enum rtc_event event;
 };
 
 struct rtc_dev_platform_data {
     const struct sys_time *default_sys_time;
-    const struct sys_time *default_alarm;
-    enum RTC_CLK rtc_clk;
-    enum RTC_SEL rtc_sel;
-    /* u8 clk_sel; */
-    u8 x32xs;
-    void (*cbfun)(u8);
+    void (*cbfun)(const struct rtc_event_t *event);
+    u8 trim_interval;
 };
-
-struct _rtc_trim {
-    u64 sfr_time_to_sec;
-    u64 now_time_to_sec;
-    u64 last_time_remain;
-};
-struct p11_sys_time {
-    u32 mask;
-    struct sys_time ram_time;
-    struct _rtc_trim ram_lrc_trim;
-};
-
-void get_lrc_rtc_trim(struct _rtc_trim *lrc_trim);
-int write_p11_sys_time(int param);
-static void write_p11_sys_time_by_timer(void *priv);
-bool read_p11_sys_time(struct sys_time *t, struct _rtc_trim *lrc_trim);
-void p11_sys_time_init();
-
-
 
 #define RTC_DEV_PLATFORM_DATA_BEGIN(data) \
-	const struct rtc_dev_platform_data data = {
+    const struct rtc_dev_platform_data data = {
 
-#define RTC_DEV_PLATFORM_DATA_END()  \
-    .x32xs = 0, \
+#define RTC_DEV_PLATFORM_DATA_END() \
 };
 
-extern const struct device_operations rtc_dev_ops;
-extern const u8 control_rtc_enable;
-int rtc_init(const struct rtc_dev_platform_data *arg);
-int rtc_ioctl(u32 cmd, u32 arg);
-void rtc_wakup_source();
-void set_alarm_ctrl(u32 set_alarm);
-void write_sys_time(const struct sys_time *curr_time);
-void read_sys_time(struct sys_time *curr_time);
-void write_alarm(const struct sys_time *alarm_time);
-void read_alarm(struct sys_time *alarm_time);
-
-u32 month_to_day(u32 year, u32 month);
-void day_to_ymd(u32 day, struct sys_time *sys_time);
+bool is_leap_year(u32 year);
+u32 days_in_year(u32 year);
+u32 days_in_month(u32 year, u32 month);
+u64 datetime_to_timestamp(const struct sys_time *time);
+u64 datetime_to_timestamp_us(const struct sys_time *time);
+void timestamp_to_datetime(u64 total_seconds, struct sys_time *time);
+u32 get_weekday_from_time(const struct sys_time *time);
+s32 get_seconds_delta(const struct sys_time *old_time,
+                      const struct sys_time *curr_time);
+void datetime_add_seconds(struct sys_time *time, s32 sec);
+void printf_datetime(const struct sys_time *time);
+void day_to_ymd(u32 day, struct sys_time *time);
 u32 ymd_to_day(const struct sys_time *time);
-u32 caculate_weekday_by_time(const struct sys_time *r_time);
-u32 time_diff_for_sec(struct sys_time *old_time, struct sys_time *curr_time);
-void time_add_sec(struct sys_time *time, s64 sec);
-void copy_time(struct sys_time *old_time, struct sys_time *new_time);
-u64 datetime_to_sec(const struct sys_time *curr_time);
-void sec_to_datetime(u64 total_seconds, struct sys_time *curr_time);
+
+extern const struct device_operations rtc_dev_ops;
 
 int rtc_port_pr_read(u32 port);
 int rtc_port_pr_out(u32 port, u32 value);
@@ -92,28 +71,68 @@ int rtc_port_pr_pd1(u32 port, u32 value);
 int rtc_port_pr_hd0(u32 port, u32 value);
 int rtc_port_pr_hd1(u32 port, u32 value);
 
-
-struct rtc_dev_fun_cfg {
-    void (*rtc_init)(const struct rtc_dev_platform_data *arg);
-    void (*rtc_get_time)(struct sys_time *curr_time);
-    void (*rtc_set_time)(const struct sys_time *curr_time);
-    void (*rtc_get_alarm)(struct sys_time *alarm_time);
-    void (*rtc_set_alarm)(const struct sys_time *alarm_time);
-    void (*rtc_time_dump)(void);
-    void (*rtc_alm_en)(u32 set_alarm);
-    u32(*get_rtc_alm_en)(void);
-
-};
-
-void rtc_config_init(const struct rtc_dev_platform_data *arg);
-void rtc_read_time(struct sys_time *curr_time);
-void rtc_write_time(const struct sys_time *curr_time);
-void rtc_read_alarm(struct sys_time *alarm_time);
-void rtc_write_alarm(const struct sys_time *alarm_time);
+int rtc_init(const struct rtc_dev_platform_data *arg);
+u32 rtc_dev_deinit(void);
+/* Low-level RTC IRQ entry. Do not invoke from task context. */
+void rtc_wakup_source(void);
+u32 rtc_read_time(struct sys_time *time);
+u32 rtc_write_time(const struct sys_time *time);
+u32 rtc_read_alarm(struct sys_time *time);
+u32 rtc_write_alarm(const struct sys_time *time);
 void rtc_debug_dump(void);
-void rtc_alarm_en(u32 set_alarm);
-u32 rtc_get_alarm_en(void);
+void rtc_alarm_switch(u32 en);
+u32 rtc_is_alarm_en(void);
+u32 rtc_is_soff_need_keep_clk(void);
+void rtc_save_context_to_vm(void);
+void rtc_lptmr_wakeup_enable(u32 wakeup_ms);
+u64 rtc_sys_timestamp_us(void);
 
-void poweroff_save_rtc_time();
+/* Compatibility names used by existing application and test code. */
+static inline u32 month_to_day(u32 year, u32 month)
+{
+    return days_in_month(year, month);
+}
 
-#endif // __RTC_API_H__
+static inline u32 caculate_weekday_by_time(const struct sys_time *time)
+{
+    return get_weekday_from_time(time);
+}
+
+static inline u32 time_diff_for_sec(struct sys_time *old_time,
+                                    struct sys_time *curr_time)
+{
+    s32 delta = get_seconds_delta(old_time, curr_time);
+    return delta < 0 ? 0 : (u32)delta;
+}
+
+static inline void time_add_sec(struct sys_time *time, s32 sec)
+{
+    datetime_add_seconds(time, sec);
+}
+
+static inline u64 datetime_to_sec(const struct sys_time *time)
+{
+    return datetime_to_timestamp(time);
+}
+
+static inline void sec_to_datetime(u64 seconds, struct sys_time *time)
+{
+    timestamp_to_datetime(seconds, time);
+}
+
+static inline void rtc_alarm_en(u32 en)
+{
+    rtc_alarm_switch(en);
+}
+
+static inline u32 rtc_get_alarm_en(void)
+{
+    return rtc_is_alarm_en();
+}
+
+static inline void poweroff_save_rtc_time(void)
+{
+    rtc_save_context_to_vm();
+}
+
+#endif /* RTC_DEV_H */

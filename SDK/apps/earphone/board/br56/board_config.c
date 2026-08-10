@@ -7,6 +7,8 @@
 #include "asm/sdmmc.h"
 #include "asm/spi_hw.h"
 #include "rtc/rtc_dev.h"
+#include "rtc_alarm_bridge.h"
+#include "rtc_test.h"
 #include "linein_dev.h"
 #include "usb/host/usb_storage.h"
 #include "spi.h"
@@ -180,7 +182,7 @@ struct linein_dev_data linein_data = {
 #if TCFG_APP_RTC_EN
 //初始一下当前时间
 const struct sys_time def_sys_time = {
-    .year = 2020,
+    .year = 2000,
     .month = 1,
     .day = 1,
     .hour = 0,
@@ -188,27 +190,15 @@ const struct sys_time def_sys_time = {
     .sec = 0,
 };
 
-//初始一下目标时间，即闹钟时间
-const struct sys_time def_alarm = {
-    .year = 2050,
-    .month = 1,
-    .day = 1,
-    .hour = 0,
-    .min = 0,
-    .sec = 0,
-};
-
-const struct rtc_dev_platform_data data = {
+RTC_DEV_PLATFORM_DATA_BEGIN(rtc_data)
     .default_sys_time = &def_sys_time,
-    .default_alarm = &def_alarm,
-
-    .rtc_clk = RTC_CLK_RES_SEL,
-    .rtc_sel = HW_RTC,
-    //闹钟中断的回调函数,用户自行定义
-    .cbfun = NULL,
-    /* .cbfun = alarm_isr_user_cbfun, */
-    .x32xs = 0,
-};
+#if RTC_TEST_ENABLE && (RTC_TEST_ITEM_MASK & RTC_TEST_ITEM_ALARM)
+    .cbfun = rtc_test_alarm_callback,
+#else
+    .cbfun = rtc_alarm_isr_callback,
+#endif
+    .trim_interval = 0,
+RTC_DEV_PLATFORM_DATA_END()
 
 #endif
 

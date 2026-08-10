@@ -69,5 +69,10 @@ const bool control_poff = 1;
 const bool control_poff = 0;
 #endif
 
+#if TCFG_APP_RTC_EN
 const bool control_rtc_enable = 1;
+#else
+const bool control_rtc_enable = 0;
+#endif
 
+const u32 control_rtc_clk_sel = RTC_CLK_RES_SEL;
