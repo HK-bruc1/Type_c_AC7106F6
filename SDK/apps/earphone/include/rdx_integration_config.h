@@ -24,6 +24,23 @@
 #error "RDX BLE MVP0 requires the Type-C dedicated PC application mode"
 #endif
 
+#if !TCFG_APP_RTC_EN
+#error "RDX requires the on-chip hardware RTC"
+#endif
+
+/* RDX RTC calendar policy; products may override these before this include. */
+#ifndef RDX_RTC_VALID_YEAR_MIN
+#define RDX_RTC_VALID_YEAR_MIN     2000
+#endif
+#ifndef RDX_RTC_VALID_YEAR_MAX
+#define RDX_RTC_VALID_YEAR_MAX     2099
+#endif
+
+#if (RDX_RTC_VALID_YEAR_MIN < 1970) || \
+    (RDX_RTC_VALID_YEAR_MAX < RDX_RTC_VALID_YEAR_MIN)
+#error "RDX RTC year range is invalid"
+#endif
+
 #define TCFG_RDX_ENABLE            1
 #else
 #define TCFG_RDX_ENABLE            0

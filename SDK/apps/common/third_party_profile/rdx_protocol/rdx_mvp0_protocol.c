@@ -10,6 +10,7 @@
 #include "rdx_mvp0_protocol.h"
 #include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
+#include "rdx_rtc.h"
 
 #define RDX_APPKEY_PAYLOAD_SIZE               32
 #define RDX_APPKEY_HEX_STRING_SIZE            (RDX_APPKEY_PAYLOAD_SIZE * 2 + 1)
@@ -543,41 +544,55 @@ reject:
 static void rdx_mvp0_handle_rtc(const u8 *data, u16 len)
 {
     const u16 prefix_len = sizeof(rdx_cmd_rtc) - 1;
-    static const u8 response_prefix[] = "*DEV#rtc#0#";
     u8 response[40];
     u16 value_len;
-    u16 response_len;
     u16 i;
+    u32 timestamp = 0;
+    u8 result = 1;
+    int response_len;
     int ret;
 
     if (len <= prefix_len || data[len - 1] != '#') {
         printf("[RDX][DROP] cmd=rtc reason=malformed len=%u\n", len);
-        return;
+        goto send_ack;
     }
 
     value_len = len - prefix_len - 1;
     if (!value_len || value_len > 10) {
         printf("[RDX][DROP] cmd=rtc reason=invalid_timestamp_length value_len=%u\n",
                value_len);
-        return;
+        goto send_ack;
     }
 
     for (i = 0; i < value_len; i++) {
         if (data[prefix_len + i] < '0' || data[prefix_len + i] > '9') {
             printf("[RDX][DROP] cmd=rtc reason=invalid_timestamp index=%u\n", i);
-            return;
+            timestamp = 0;
+            goto send_ack;
         }
+        if (timestamp > (0xffffffffUL - (data[prefix_len + i] - '0')) / 10) {
+            printf("[RDX][DROP] cmd=rtc reason=timestamp_overflow\n");
+            timestamp = 0;
+            goto send_ack;
+        }
+        timestamp = timestamp * 10 + data[prefix_len + i] - '0';
     }
 
-    response_len = sizeof(response_prefix) - 1 + value_len + 1;
-    memcpy(response, response_prefix, sizeof(response_prefix) - 1);
-    memcpy(response + sizeof(response_prefix) - 1,
-           data + prefix_len, value_len);
-    response[response_len - 1] = '#';
-    response[response_len] = '\0';
+    ret = rdx_rtc_set_timestamp(timestamp);
+    result = ret == 0 ? 0 : 1;
+
+send_ack:
+    response_len = snprintf((char *)response, sizeof(response),
+                             "*DEV#rtc#%u#%u#", result,
+                             (unsigned int)timestamp);
+    if (response_len <= 0 || response_len >= sizeof(response)) {
+        printf("[RDX][TX] cmd=rtc reason=encode_failed len=%d\n",
+               response_len);
+        return;
+    }
     ret = rdx_mvp0_send(response, response_len);
     printf("[RDX][TX] cmd=rtc wire=%s len=%u ret=%d\n",
-           (char *)response, response_len, ret);
+           (char *)response, (unsigned int)response_len, ret);
 }
 
 void rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,

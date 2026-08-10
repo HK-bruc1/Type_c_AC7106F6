@@ -8,6 +8,8 @@
 #include "rdx_device_state.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_protocol.h"
+#include "system/init.h"
+#include "rdx_rtc.h"
 
 static u8 rdx_protocol_started;
 
@@ -24,6 +26,11 @@ int rdx_protocol_start(void)
         return ret;
     }
     ret = rdx_identity_init();
+    if (ret) {
+        rdx_device_state_exit();
+        return ret;
+    }
+    ret = rdx_rtc_init();
     if (ret) {
         rdx_device_state_exit();
         return ret;
@@ -47,11 +54,21 @@ void rdx_protocol_stop(void)
         return;
     }
 
+    rdx_rtc_store_backup();
     rdx_mvp0_protocol_exit();
     rdx_ble_transport_exit();
     rdx_device_state_exit();
     rdx_protocol_started = 0;
     printf("[RDX] MVP0 stopped\n");
 }
+
+static void rdx_protocol_poweroff_backup(void)
+{
+    if (rdx_protocol_started) {
+        rdx_rtc_store_backup();
+    }
+}
+
+platform_uninitcall(rdx_protocol_poweroff_backup);
 
 #endif
