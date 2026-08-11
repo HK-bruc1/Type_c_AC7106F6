@@ -30,9 +30,9 @@
 #define TCFG_3BAND_MERGE_ENABLE                   0                // 3Band Merge
 #define TCFG_3D_PLUS_MODULE_NODE_ENABLE           0                // 3D Plus
 #define TCFG_ADC_NODE_ENABLE                      1                // ADC
-#define TCFG_AGC_NODE_ENABLE                      0                // AGC
+#define TCFG_AGC_NODE_ENABLE                      1                // AGC
 #define TCFG_AI_RX_NODE_ENABLE                    0                // AI_RX
-#define TCFG_AI_TX_NODE_ENABLE                    0                // AI_TX
+#define TCFG_AI_TX_NODE_ENABLE                    1                // AI_TX
 #define TCFG_AUDIO_AVC_NODE_ENABLE                0                // AVC
 #define TCFG_AUDIO_CVP_3MIC_MODE                  0                // 3MIC通话
 #define TCFG_AUDIO_CVP_DEVELOP_ENABLE             0                // 通话第三方算法
@@ -75,7 +75,7 @@
 #define TCFG_EFFECT_DEV2_NODE_ENABLE              0                // EffectDev2
 #define TCFG_EFFECT_DEV3_NODE_ENABLE              0                // EffectDev3
 #define TCFG_EFFECT_DEV4_NODE_ENABLE              0                // EffectDev4
-#define TCFG_ENCODER_NODE_ENABLE                  0                // 编码器
+#define TCFG_ENCODER_NODE_ENABLE                  1                // 编码器
 #define TCFG_ENERGY_DETECT_NODE_ENABLE            0                // Energy Detect
 #define TCFG_EQ_ENABLE                            1                // EQ
 #define TCFG_ESCO_TX_NODE_ENABLE                  0                // ESCO_TX
@@ -157,6 +157,7 @@
 // ------------表单节点全局配置宏------------
 #define TCFG_CVP_V3_NN_TABLE_TYPE                 NN_TABLE_CVP_GENERAL_V4 // NN网络配置
 #define CVP_BF_VERSION                            2                // Version
+#define MULTI_BAND_PHASE_COMPENSATION_EN          0                // MDRC 相位补偿
 // ------------表单节点全局配置宏------------
 #define EQ_SECTION_MAX                            0xc              // EQ_SECTION_MAX
 #define TCFG_AVC_ALGO_SELECT                      0                // AVC-算法类型选择
@@ -165,7 +166,7 @@
 #define TCFG_CVP_ALGO_TYPE                        1                // CVP_V3-通话算法
 #define TCFG_CVP_FLEXIBLE_MODE                    1                // CVP_V3-Mode_Type:
 #define TCFG_LLNS_DNS_MODE                        0                // LLNS_DNS-Mode
-#define TCFG_ENCODER_CHANNEL_NUM                  0                // 编码器-声道
+#define TCFG_ENCODER_CHANNEL_NUM                  1                // 编码器-声道
 #define CVP_THIRD_ALGO_TYPE                       0                // 通话第三方算法-算法预设
 #define CVP_THIRD_ALGO_VPU_ENABLE                 0                // 通话第三方算法-VPU方案
 #define TCFG_STREAM_BIN_ENC_ENABLE                0                // stream.bin加密使能
@@ -179,9 +180,9 @@
 #define TCFG_AUDIO_EFX_4C00_RUN_MODE              EFx_BW_UNUSED    // 3D Plus
 #define TCFG_AUDIO_EFX_F975_RUN_MODE              EFx_BW_UNUSED    // A2DP_RX
 #define TCFG_AUDIO_EFX_D06D_RUN_MODE              EFx_BW_16t16     // ADC
-#define TCFG_AUDIO_EFX_DFDA_RUN_MODE              EFx_BW_UNUSED    // AI_TX
+#define TCFG_AUDIO_EFX_DFDA_RUN_MODE              EFx_BW_16t16     // AI_TX
 #define TCFG_AUDIO_EFX_86B9_RUN_MODE              EFx_BW_UNUSED    // automute
-#define TCFG_AUDIO_EFX_D0D0_RUN_MODE              EFx_BW_UNUSED    // AGC
+#define TCFG_AUDIO_EFX_D0D0_RUN_MODE              EFx_BW_16t16     // AGC
 #define TCFG_AUDIO_EFX_C07A_RUN_MODE              EFx_BW_UNUSED    // Autotune
 #define TCFG_AUDIO_EFX_2F5E_RUN_MODE              EFx_BW_UNUSED    // Auto Wah
 #define TCFG_AUDIO_EFX_6CE5_RUN_MODE              EFx_BW_UNUSED    // AutoDuck
@@ -290,7 +291,7 @@
 #define TCFG_AUDIO_EFX_DCD4_RUN_MODE              EFx_BW_UNUSED    // Virtual Surround Headphone 2t4
 #define TCFG_AUDIO_EFX_8346_RUN_MODE              EFx_BW_32t32     // 按键音
 #define TCFG_AUDIO_EFX_6FEC_RUN_MODE              EFx_BW_UNUSED    // 本地音乐
-#define TCFG_AUDIO_EFX_0A2C_RUN_MODE              EFx_BW_UNUSED    // 编码器
+#define TCFG_AUDIO_EFX_0A2C_RUN_MODE              EFx_BW_16t16     // 编码器
 #define TCFG_AUDIO_EFX_9B3B_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // 播放同步
 #define TCFG_AUDIO_EFX_E76E_RUN_MODE              EFx_BW_UNUSED    // 串口打印
 #define TCFG_AUDIO_EFX_299E_RUN_MODE              EFx_BW_UNUSED    // 单麦AEC

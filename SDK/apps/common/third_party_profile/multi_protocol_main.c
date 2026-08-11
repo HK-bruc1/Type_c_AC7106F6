@@ -41,8 +41,8 @@ extern void app_ble_ancs_ams_init();
 #if ((THIRD_PARTY_PROTOCOLS_SEL & (RCSP_MODE_EN | GFPS_EN | MMA_EN | FMNA_EN | TUYA_DEMO_EN | REALME_EN | SWIFT_PAIR_EN | DMA_EN | ONLINE_DEBUG_EN | CUSTOM_DEMO_EN | XIMALAYA_EN | MULTI_CLIENT_EN | JL_SBOX_EN | HID_ISO_EN)) || TCFG_RDX_ENABLE || \
 		(TCFG_LE_AUDIO_APP_CONFIG & (LE_AUDIO_UNICAST_SINK_EN | LE_AUDIO_JL_UNICAST_SINK_EN | LE_AUDIO_JL_CIS_PERIPHERAL_EN | LE_AUDIO_AURACAST_SINK_EN | LE_AUDIO_JL_AURACAST_SINK_EN | LE_AUDIO_JL_BIS_RX_EN | LE_AUDIO_AURACAST_SOURCE_EN | LE_AUDIO_JL_BIS_TX_EN)))
 #if TCFG_RDX_ENABLE && (THIRD_PARTY_PROTOCOLS_SEL == RDX_EN)
-#define ATT_LOCAL_PAYLOAD_SIZE    (64)                      // MVP0 maximum message is less than 64 bytes
-#define ATT_SEND_CBUF_SIZE        (512)
+#define ATT_LOCAL_PAYLOAD_SIZE    (128)                     // RDX record stream packet is 98 bytes
+#define ATT_SEND_CBUF_SIZE        (4096)                    // match the reference RDX transport buffer
 #else
 #define ATT_LOCAL_PAYLOAD_SIZE    (517)//(517)              //note: need >= 20
 #define ATT_SEND_CBUF_SIZE        (512*2)                   //note: need >= 20,缓存大小，可修改

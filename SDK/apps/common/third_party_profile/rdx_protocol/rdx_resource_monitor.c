@@ -51,6 +51,11 @@ static void rdx_resource_monitor_dump_ram(const char *reason)
            RDX_RESOURCE_BYTES_TO_KB(rdx_resource_monitor_min_ram_free));
 }
 
+void rdx_resource_monitor_snapshot(const char *reason)
+{
+    rdx_resource_monitor_dump_ram(reason);
+}
+
 static void rdx_resource_monitor_timer(void *priv)
 {
     rdx_resource_monitor_dump_ram("periodic");

@@ -6292,7 +6292,7 @@
           "label": "OPUS",
           "tag": "el-switch",
           "tagIcon": "switch",
-          "defaultValue": 0,
+          "defaultValue": 1,
           "span": 5,
           "showLabel": true,
           "labelWidth": 60,

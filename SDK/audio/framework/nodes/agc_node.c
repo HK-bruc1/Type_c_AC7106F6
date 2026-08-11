@@ -22,6 +22,16 @@
 #define AGC_FRAME_POINTS   128
 #define AGC_FRAME_SIZE     (AGC_FRAME_POINTS << 1)
 
+/* RDX diagnostic: capture aligned PCM before and after AGC. */
+#ifndef AGC_RDX_PCM_CAPTURE_ENABLE
+#define AGC_RDX_PCM_CAPTURE_ENABLE        0
+#endif
+
+#define AGC_RDX_PCM_CAPTURE_SKIP_BYTES    (16000 * sizeof(s16))
+#define AGC_RDX_PCM_CAPTURE_BYTES         (16000 * sizeof(s16))
+#define AGC_RDX_PCM_CAPTURE_TOTAL_BYTES   (AGC_RDX_PCM_CAPTURE_BYTES * 2)
+#define AGC_RDX_PCM_DUMP_CHUNK            256
+
 #if TCFG_AGC_NODE_ENABLE
 
 extern void aec_code_movable_load(void);
@@ -46,6 +56,145 @@ struct agc_node_hdl {
     u8 updata;
     u8 bypass;
 };
+
+#if AGC_RDX_PCM_CAPTURE_ENABLE
+static u8 *agc_rdx_pcm_capture;
+static u32 agc_rdx_pcm_skip_len;
+static u32 agc_rdx_pcm_capture_len;
+static u32 agc_rdx_pcm_dump_offset;
+static u16 agc_rdx_pcm_dump_timer;
+static u8 agc_rdx_pcm_capture_active;
+static u8 agc_rdx_pcm_dump_stage;
+
+static const char *agc_rdx_pcm_stage_name(u8 stage)
+{
+    return stage == 0 ? "pre" : "post";
+}
+
+static void agc_rdx_pcm_capture_release(void)
+{
+    if (agc_rdx_pcm_capture) {
+        free(agc_rdx_pcm_capture);
+        agc_rdx_pcm_capture = NULL;
+    }
+}
+
+static void agc_rdx_pcm_dump_chunk(void *priv)
+{
+    const char *stage = agc_rdx_pcm_stage_name(agc_rdx_pcm_dump_stage);
+    u8 *data = agc_rdx_pcm_capture +
+               agc_rdx_pcm_dump_stage * AGC_RDX_PCM_CAPTURE_BYTES;
+    u32 remain = agc_rdx_pcm_capture_len - agc_rdx_pcm_dump_offset;
+    u32 chunk = remain > AGC_RDX_PCM_DUMP_CHUNK
+                ? AGC_RDX_PCM_DUMP_CHUNK : remain;
+
+    if (agc_rdx_pcm_dump_offset == 0) {
+        printf("[AGC_PCM_DUMP_BEGIN] stage=%s bytes=%u sr=16000 ch=1 bits=16\n",
+               stage, (unsigned int)agc_rdx_pcm_capture_len);
+    }
+    printf("[AGC_PCM_CHUNK] stage=%s offset=%u bytes=%u\n",
+           stage, (unsigned int)agc_rdx_pcm_dump_offset,
+           (unsigned int)chunk);
+    put_buf(data + agc_rdx_pcm_dump_offset, chunk);
+    agc_rdx_pcm_dump_offset += chunk;
+
+    if (agc_rdx_pcm_dump_offset < agc_rdx_pcm_capture_len) {
+        return;
+    }
+
+    printf("[AGC_PCM_DUMP_END] stage=%s bytes=%u\n",
+           stage, (unsigned int)agc_rdx_pcm_capture_len);
+    if (agc_rdx_pcm_dump_stage == 0) {
+        agc_rdx_pcm_dump_stage = 1;
+        agc_rdx_pcm_dump_offset = 0;
+        return;
+    }
+
+    if (agc_rdx_pcm_dump_timer) {
+        sys_timer_del(agc_rdx_pcm_dump_timer);
+        agc_rdx_pcm_dump_timer = 0;
+    }
+    agc_rdx_pcm_capture_release();
+}
+
+static void agc_rdx_pcm_capture_start(void)
+{
+    if (agc_rdx_pcm_dump_timer) {
+        sys_timer_del(agc_rdx_pcm_dump_timer);
+        agc_rdx_pcm_dump_timer = 0;
+    }
+    agc_rdx_pcm_capture_release();
+    agc_rdx_pcm_skip_len = 0;
+    agc_rdx_pcm_capture_len = 0;
+    agc_rdx_pcm_dump_offset = 0;
+    agc_rdx_pcm_dump_stage = 0;
+    agc_rdx_pcm_capture = zalloc(AGC_RDX_PCM_CAPTURE_TOTAL_BYTES);
+    if (!agc_rdx_pcm_capture) {
+        agc_rdx_pcm_capture_active = 0;
+        printf("[AGC_PCM_CAPTURE] alloc_failed bytes=%u\n",
+               (unsigned int)AGC_RDX_PCM_CAPTURE_TOTAL_BYTES);
+        return;
+    }
+    agc_rdx_pcm_capture_active = 1;
+    printf("[AGC_PCM_CAPTURE] armed skip_bytes=%u capture_bytes=%u total_bytes=%u\n",
+           (unsigned int)AGC_RDX_PCM_CAPTURE_SKIP_BYTES,
+           (unsigned int)AGC_RDX_PCM_CAPTURE_BYTES,
+           (unsigned int)AGC_RDX_PCM_CAPTURE_TOTAL_BYTES);
+}
+
+static void agc_rdx_pcm_capture_feed(const u8 *in, const u8 *out, u32 len)
+{
+    u32 offset = 0;
+    u32 remain;
+    u32 capture_len;
+
+    if (!agc_rdx_pcm_capture_active) {
+        return;
+    }
+    if (agc_rdx_pcm_skip_len < AGC_RDX_PCM_CAPTURE_SKIP_BYTES) {
+        u32 skip_remain = AGC_RDX_PCM_CAPTURE_SKIP_BYTES -
+                          agc_rdx_pcm_skip_len;
+        u32 skip_len = len > skip_remain ? skip_remain : len;
+        agc_rdx_pcm_skip_len += skip_len;
+        offset += skip_len;
+    }
+    if (offset >= len) {
+        return;
+    }
+
+    remain = AGC_RDX_PCM_CAPTURE_BYTES - agc_rdx_pcm_capture_len;
+    capture_len = (len - offset) > remain ? remain : (len - offset);
+    memcpy(agc_rdx_pcm_capture + agc_rdx_pcm_capture_len,
+           in + offset, capture_len);
+    memcpy(agc_rdx_pcm_capture + AGC_RDX_PCM_CAPTURE_BYTES +
+           agc_rdx_pcm_capture_len, out + offset, capture_len);
+    agc_rdx_pcm_capture_len += capture_len;
+    if (agc_rdx_pcm_capture_len >= AGC_RDX_PCM_CAPTURE_BYTES) {
+        agc_rdx_pcm_capture_active = 0;
+        printf("[AGC_PCM_CAPTURE] complete bytes_per_stage=%u\n",
+               (unsigned int)agc_rdx_pcm_capture_len);
+    }
+}
+
+static void agc_rdx_pcm_capture_stop(void)
+{
+    agc_rdx_pcm_capture_active = 0;
+    if (!agc_rdx_pcm_capture_len) {
+        agc_rdx_pcm_capture_release();
+        return;
+    }
+    agc_rdx_pcm_dump_offset = 0;
+    agc_rdx_pcm_dump_stage = 0;
+    agc_rdx_pcm_dump_timer = sys_timer_add(NULL,
+                                           agc_rdx_pcm_dump_chunk,
+                                           20);
+    if (!agc_rdx_pcm_dump_timer) {
+        printf("[AGC_PCM_CAPTURE] dump_timer_failed bytes_per_stage=%u\n",
+               (unsigned int)agc_rdx_pcm_capture_len);
+        agc_rdx_pcm_capture_release();
+    }
+}
+#endif
 
 static int agc_param_cfg_read(struct stream_node *node)
 {
@@ -102,7 +251,7 @@ static int agc_node_fixed_frame_run(void *priv, u8 *in, u8 *out, int len)
         }
         hdl->updata = 0;
         memcpy(out, in, len);
-        return len;
+        wlen = len;
     } else {
         if (hdl->updata) {
             if (hdl->agc) {
@@ -119,6 +268,11 @@ static int agc_node_fixed_frame_run(void *priv, u8 *in, u8 *out, int len)
             wlen = audio_agc_run(hdl->agc, (s16 *)in, (s16 *)out, len);
         }
     }
+#if AGC_RDX_PCM_CAPTURE_ENABLE
+    if (wlen > 0) {
+        agc_rdx_pcm_capture_feed(in, out, wlen);
+    }
+#endif
     return wlen;
 }
 
@@ -198,11 +352,17 @@ static void agc_ioc_start(struct agc_node_hdl *hdl)
     aec_code_movable_load();
     hdl->agc = audio_agc_open(&hdl->parm);
     hdl->fixed_hdl = audio_fixed_frame_len_init(AGC_FRAME_SIZE, agc_node_fixed_frame_run, hdl);
+#if AGC_RDX_PCM_CAPTURE_ENABLE
+    agc_rdx_pcm_capture_start();
+#endif
 }
 
 /*节点stop函数*/
 static void agc_ioc_stop(struct agc_node_hdl *hdl)
 {
+#if AGC_RDX_PCM_CAPTURE_ENABLE
+    agc_rdx_pcm_capture_stop();
+#endif
     if (hdl->agc) {
         audio_agc_close(hdl->agc);
         hdl->agc = NULL;
@@ -287,4 +447,3 @@ REGISTER_ONLINE_ADJUST_TARGET(agc_process) = {
 };
 
 #endif /*TCFG_AGC_NODE_ENABLE*/
-

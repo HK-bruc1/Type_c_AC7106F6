@@ -427,7 +427,7 @@
 #define TCFG_DEC_MTY_ENABLE                       0                // MTY
 #define TCFG_DEC_WTS_ENABLE                       0                // WTS
 #define TCFG_DEC_JLA_ENABLE                       0                // JLA
-#define TCFG_ENC_OPUS_ENABLE                      0                // OPUS
+#define TCFG_ENC_OPUS_ENABLE                      1                // OPUS
 #define TCFG_ENC_SBC_ENABLE                       0                // SBC
 #define TCFG_ENC_MSBC_ENABLE                      0                // MSBC
 

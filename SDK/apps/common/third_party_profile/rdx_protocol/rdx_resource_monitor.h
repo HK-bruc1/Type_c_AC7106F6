@@ -3,5 +3,6 @@
 
 void rdx_resource_monitor_start(void);
 void rdx_resource_monitor_stop(void);
+void rdx_resource_monitor_snapshot(const char *reason);
 
 #endif /* RDX_RESOURCE_MONITOR_H */

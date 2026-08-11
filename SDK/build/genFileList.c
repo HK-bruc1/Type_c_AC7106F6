@@ -1066,6 +1066,11 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_resource_monitor.c
 #endif
 
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_record_spike.c
+#endif
+
 THIRD_PARTY_LIBS += \
     apps/common/third_party_profile/rdx_protocol/librdxApp.a
 #endif

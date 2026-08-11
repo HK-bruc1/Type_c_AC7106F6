@@ -24,7 +24,7 @@
      RDX_ABILITY_RECORD_MARK                  | \
      RDX_ABILITY_FLASHNOTE)
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
-#define RDX_COMPAT_PROTOCOL_VERSION            0x18
+#define RDX_COMPAT_PROTOCOL_VERSION            0x17
 #define RDX_MVP0_FIXED_BATTERY_LEVEL           100
 #define RDX_BLE_ADV_INTERVAL                   160
 

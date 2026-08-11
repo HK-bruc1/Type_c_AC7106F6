@@ -23,6 +23,17 @@
 #define RDX_HANDLE_OTA_TX_CCC                 0x0015
 
 #define RDX_BLE_HANDLE_UUID                   0x52445830u
+#define RDX_RECORD_CONN_INTERVAL_MIN          6
+#define RDX_RECORD_CONN_INTERVAL_MAX          6
+#define RDX_RECORD_DLE_TX_OCTETS              251
+#define RDX_RECORD_DLE_TX_TIME                2120
+
+static const struct conn_update_param_t rdx_record_conn_param = {
+    RDX_RECORD_CONN_INTERVAL_MIN,
+    RDX_RECORD_CONN_INTERVAL_MAX,
+    0,
+    600,
+};
 
 typedef struct {
     void *hdl;
@@ -30,9 +41,55 @@ typedef struct {
     u16 mtu;
     u8 tx_ccc;
     u8 initialized;
+    u8 record_streaming;
 } rdx_ble_transport_t;
 
 static rdx_ble_transport_t rdx_ble;
+
+static int rdx_ble_request_record_conn_param(const char *reason)
+{
+    int ret;
+
+    if (!rdx_ble.hdl || !rdx_ble.con_handle) {
+        return -1;
+    }
+
+    ret = ble_op_conn_param_request(rdx_ble.con_handle,
+                                    (void *)&rdx_record_conn_param);
+    printf("[RDX][BLE] conn_param_request reason=%s interval=%u-%u"
+           " latency=%u timeout=%u ret=%d\n",
+           reason,
+           RDX_RECORD_CONN_INTERVAL_MIN,
+           RDX_RECORD_CONN_INTERVAL_MAX,
+           rdx_record_conn_param.latency,
+           rdx_record_conn_param.timeout,
+           ret);
+    return ret;
+}
+
+static void rdx_ble_request_high_throughput(const char *reason)
+{
+    int dle_ret;
+    int phy_ret;
+
+    if (!rdx_ble.hdl || !rdx_ble.con_handle) {
+        return;
+    }
+
+    dle_ret = ble_op_set_data_length(rdx_ble.con_handle,
+                                     RDX_RECORD_DLE_TX_OCTETS,
+                                     RDX_RECORD_DLE_TX_TIME);
+    phy_ret = ble_op_set_ext_phy(rdx_ble.con_handle, 0,
+                                 CONN_SET_2M_PHY, CONN_SET_2M_PHY,
+                                 CONN_SET_PHY_OPTIONS_NONE);
+    printf("[RDX][BLE] throughput_request reason=%s dle=%u/%u ret=%d"
+           " phy=2M ret=%d\n",
+           reason,
+           RDX_RECORD_DLE_TX_OCTETS,
+           RDX_RECORD_DLE_TX_TIME,
+           dle_ret,
+           phy_ret);
+}
 
 static const u8 rdx_profile_data[] = {
     /* GAP service and Device Name, handles 0x0001 - 0x0003. */
@@ -182,7 +239,40 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.tx_ccc = 0;
             rdx_mvp0_protocol_set_connected(1);
             att_server_set_exchange_mtu(con_handle);
-            printf("[RDX] connected handle=%04x\n", con_handle);
+            printf("[RDX] connected handle=%04x interval=%u latency=%u"
+                   " timeout=%u\n",
+                   con_handle,
+                   hci_subevent_le_connection_complete_get_conn_interval(packet),
+                   hci_subevent_le_connection_complete_get_conn_latency(packet),
+                   hci_subevent_le_connection_complete_get_supervision_timeout(packet));
+            rdx_ble_request_record_conn_param("connected");
+            rdx_ble_request_high_throughput("connected");
+        } else if (subevent == HCI_SUBEVENT_LE_CONNECTION_UPDATE_COMPLETE) {
+            u8 status = hci_subevent_le_connection_update_complete_get_status(packet);
+            u16 interval = hci_subevent_le_connection_update_complete_get_conn_interval(packet);
+            u16 latency = hci_subevent_le_connection_update_complete_get_conn_latency(packet);
+            u16 timeout = hci_subevent_le_connection_update_complete_get_supervision_timeout(packet);
+
+            printf("[RDX][BLE] conn_param_update status=%u interval=%u"
+                   " latency=%u timeout=%u streaming=%u\n",
+                   status, interval, latency, timeout,
+                   rdx_ble.record_streaming);
+            if (!status
+                && (interval > RDX_RECORD_CONN_INTERVAL_MAX || latency)) {
+                rdx_ble_request_record_conn_param("slow_update");
+            }
+        } else if (subevent == HCI_SUBEVENT_LE_DATA_LENGTH_CHANGE) {
+            printf("[RDX][BLE] data_length tx_octets=%u tx_time=%u"
+                   " rx_octets=%u rx_time=%u\n",
+                   hci_subevent_le_data_length_change_get_max_tx_octets(packet),
+                   hci_subevent_le_data_length_change_get_max_tx_time(packet),
+                   hci_subevent_le_data_length_change_get_max_rx_octets(packet),
+                   hci_subevent_le_data_length_change_get_max_rx_time(packet));
+        } else if (subevent == HCI_SUBEVENT_LE_PHY_UPDATE_COMPLETE) {
+            printf("[RDX][BLE] phy_update status=%u tx=%u rx=%u\n",
+                   hci_event_le_meta_get_phy_update_complete_status(packet),
+                   hci_event_le_meta_get_phy_update_complete_tx_phy(packet),
+                   hci_event_le_meta_get_phy_update_complete_rx_phy(packet));
         }
         break;
 
@@ -358,6 +448,16 @@ int rdx_ble_transport_send(const u8 *data, u16 len)
 
     return app_ble_att_send_data(rdx_ble.hdl, RDX_HANDLE_TX, (u8 *)data,
                                  len, ATT_OP_AUTO_READ_CCC);
+}
+
+int rdx_ble_transport_set_record_streaming(u8 enabled)
+{
+    rdx_ble.record_streaming = !!enabled;
+    if (!rdx_ble.record_streaming) {
+        return 0;
+    }
+    rdx_ble_request_high_throughput("record_start");
+    return rdx_ble_request_record_conn_param("record_start");
 }
 
 void rdx_ble_transport_disconnect(void)

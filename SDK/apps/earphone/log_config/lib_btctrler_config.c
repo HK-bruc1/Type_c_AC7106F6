@@ -430,7 +430,8 @@ const int config_delete_link_key          = 1;           //配置是否连接失
 
 #if TCFG_RDX_ENABLE
 	const int config_btctler_le_roles    = (LE_SLAVE | LE_ADV);
-	const uint64_t config_btctler_le_features = LE_ENCRYPTION;
+	const uint64_t config_btctler_le_features =
+		LE_ENCRYPTION | LE_DATA_PACKET_LENGTH_EXTENSION | LE_2M_PHY;
 #elif TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED
 	const int config_btctler_le_roles    = (LE_SLAVE | LE_ADV);
 	const uint64_t config_btctler_le_features = LE_ENCRYPTION;
@@ -548,5 +549,4 @@ const int ll_vendor_ctrl_cmd_support = 1; //1:for testbox or private transmissio
 //const int CONFIG_BTCTLER_FUN = 0;
 //#endif
 //#endif
-
 

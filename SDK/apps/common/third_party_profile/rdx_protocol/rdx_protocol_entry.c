@@ -13,6 +13,9 @@
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
 #include "rdx_resource_monitor.h"
 #endif
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+#include "rdx_record_spike.h"
+#endif
 
 static u8 rdx_protocol_started;
 
@@ -50,6 +53,9 @@ int rdx_protocol_start(void)
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
     rdx_resource_monitor_start();
 #endif
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+    rdx_record_spike_schedule();
+#endif
     printf("[RDX] MVP0 started\n");
     return 0;
 }
@@ -60,6 +66,9 @@ void rdx_protocol_stop(void)
         return;
     }
 
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+    rdx_record_spike_cancel();
+#endif
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
     rdx_resource_monitor_stop();
 #endif
@@ -74,6 +83,9 @@ void rdx_protocol_stop(void)
 static void rdx_protocol_poweroff_backup(void)
 {
     if (rdx_protocol_started) {
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+        rdx_record_spike_cancel();
+#endif
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
         rdx_resource_monitor_stop();
 #endif

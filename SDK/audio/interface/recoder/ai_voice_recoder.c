@@ -37,15 +37,19 @@ void ai_voice_recoder_set_ai_tx_node_func(int (*func)(u8 *, u32))
     }
 }
 
-int ai_voice_recoder_open(u32 code_type, u8 ai_type)
+static int ai_voice_recoder_open_internal(u32 code_type, u8 ai_type,
+                                          int (*tx_func)(u8 *, u32),
+                                          u8 use_fixed_opus_fmt)
 {
     int err;
-    struct stream_fmt fmt;
-    struct encoder_fmt enc_fmt;
+    struct stream_fmt fmt = {0};
+    struct encoder_fmt enc_fmt = {0};
     struct ai_voice_recoder *recoder;
-    struct stream_fmt s_fmt;
-    struct cvp_param_fmt cvp_fmt;
+    struct stream_fmt s_fmt = {0};
+    struct stream_enc_fmt stream_enc_fmt = {0};
+    struct cvp_param_fmt cvp_fmt = {0};
     u16 source_uuid = 0;
+    u8 stream_enc_fmt_valid = 0;
 
     if (g_ai_voice_recoder) {
         return -EBUSY;
@@ -98,11 +102,28 @@ int ai_voice_recoder_open(u32 code_type, u8 ai_type)
         //   不起效的参数：
         //   bit_rate, sample_rate, ch_num, bit_width
         //   不起效参数只用作阅读，需要修改请到音频流程图的”编码器“节点修改
-        enc_fmt.bit_rate = 16000;
+        enc_fmt.bit_rate = use_fixed_opus_fmt ? 32000 : 16000;
         enc_fmt.complexity = 0;
         enc_fmt.sample_rate = 16000;
-        enc_fmt.format = (ai_type >> 6);   //传入的ai_type实参是bit7:6，用于选择封装格式，兼容以前调用的接口
-        /* enc_fmt.frame_dms = 20 * 10;//与工具保持一致，要乘以10,表示20ms */
+        enc_fmt.format = use_fixed_opus_fmt ? 0 : (ai_type >> 6);
+        if (use_fixed_opus_fmt) {
+            enc_fmt.ch_num = 1;
+            enc_fmt.bit_width = DATA_BIT_WIDE_16BIT;
+            enc_fmt.frame_dms = 20 * 10;
+
+            stream_enc_fmt.channel = 1;
+            stream_enc_fmt.bit_width = DATA_BIT_WIDE_16BIT;
+            stream_enc_fmt.frame_dms = 20 * 10;
+            stream_enc_fmt.sample_rate = 16000;
+            stream_enc_fmt.bit_rate = 32000;
+            stream_enc_fmt.coding_type = AUDIO_CODING_OPUS;
+            stream_enc_fmt_valid = 1;
+
+            fmt.sample_rate = 16000;
+            fmt.frame_dms = 20 * 10;
+            fmt.channel_mode = AUDIO_CH_MIX;
+            fmt.bit_rate = 32000;
+        }
         fmt.coding_type = AUDIO_CODING_OPUS;
         break;
     case AUDIO_CODING_SPEEX:
@@ -118,8 +139,30 @@ int ai_voice_recoder_open(u32 code_type, u8 ai_type)
         goto __exit1;
         break;
     }
-    err = jlstream_node_ioctl(recoder->stream, NODE_UUID_ENCODER, NODE_IOC_SET_PRIV_FMT, (int)(&enc_fmt));
-    err += jlstream_node_ioctl(recoder->stream, NODE_UUID_AI_TX, NODE_IOC_SET_FMT, (int)(&fmt));
+    if (stream_enc_fmt_valid) {
+        err = jlstream_ioctl(recoder->stream, NODE_IOC_SET_ENC_FMT,
+                             (int)&stream_enc_fmt);
+        if (err) {
+            goto __exit1;
+        }
+    }
+    err = jlstream_node_ioctl(recoder->stream, NODE_UUID_ENCODER,
+                              NODE_IOC_SET_PRIV_FMT, (int)&enc_fmt);
+    if (err) {
+        goto __exit1;
+    }
+    err = jlstream_node_ioctl(recoder->stream, NODE_UUID_AI_TX,
+                              NODE_IOC_SET_FMT, (int)&fmt);
+    if (err) {
+        goto __exit1;
+    }
+    if (tx_func) {
+        err = jlstream_node_ioctl(recoder->stream, NODE_UUID_AI_TX,
+                                  NODE_IOC_SET_PRIV_FMT, (int)tx_func);
+        if (err) {
+            goto __exit1;
+        }
+    }
 
     //设置ADC的中断点数
     err += jlstream_node_ioctl(recoder->stream, NODE_UUID_SOURCE, NODE_IOC_SET_PRIV_FMT, 320);
@@ -162,6 +205,17 @@ __exit0:
     return err;
 }
 
+int ai_voice_recoder_open(u32 code_type, u8 ai_type)
+{
+    return ai_voice_recoder_open_internal(code_type, ai_type, NULL, 0);
+}
+
+int ai_voice_recoder_open_with_tx(u32 code_type, u8 ai_type,
+                                  int (*tx_func)(u8 *, u32))
+{
+    return ai_voice_recoder_open_internal(code_type, ai_type, tx_func, 1);
+}
+
 void ai_voice_recoder_close()
 {
     struct ai_voice_recoder *recoder = g_ai_voice_recoder;
@@ -177,6 +231,3 @@ void ai_voice_recoder_close()
 
     jlstream_event_notify(STREAM_EVENT_CLOSE_RECODER, (int)"ai_voice");
 }
-
-
-

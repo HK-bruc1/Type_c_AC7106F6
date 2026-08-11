@@ -1,12 +1,12 @@
 {
- "enable": false,
+ "enable": true,
  "name": "pipeline-AI-voice",
  "uuid": "0x5475",
  "childrenGroup": [
   {
    "id": 1666574754050,
    "title": "智能语音",
-   "select": false,
+   "select": true,
    "tabs": [
     {
      "id": "id_1747399267259_0",
@@ -21,7 +21,7 @@
   {
    "id": "id_1747399552945_0",
    "title": "AI翻译",
-   "select": true,
+   "select": false,
    "tabs": [
     {
      "id": "id_1735781136293_1",
@@ -38,7 +38,7 @@
   "cells": [
    {
     "position": {
-     "x": 360,
+     "x": -120,
      "y": 400
     },
     "size": {
@@ -72,7 +72,7 @@
       "list": [
        {
         "name": "ADC1",
-        "current": "",
+        "current": "arg0",
         "list": [
          {
           "name": "arg0",
@@ -92,8 +92,8 @@
             "id": "id_1675824280474_161",
             "list": [
              {
-              "id": "id_1675824280474_155",
-              "value": 10
+              "id": "id_1736386659686_0",
+              "value": 7
              },
              {
               "id": "id_1671073072823_3",
@@ -105,46 +105,22 @@
             "id": "id_1671176268890_10",
             "list": [
              {
-              "id": "id_1671176268890_12",
-              "value": 10
+              "id": "id_1736386791672_1",
+              "value": 7
              },
              {
               "id": "id_1671176268890_13",
               "value": 1
              }
             ]
-           },
-           {
-            "id": "id_1673164303524_0",
-            "list": [
-             {
-              "id": "id_1673164303524_2",
-              "value": 10
-             },
-             {
-              "id": "id_1673164303524_3",
-              "value": 1
-             }
-            ]
-           },
-           {
-            "id": "id_1673164306360_9",
-            "list": [
-             {
-              "id": "id_1673164306360_11",
-              "value": 10
-             },
-             {
-              "id": "id_1673164306360_12",
-              "value": 1
-             }
-            ]
            }
           ],
-          "enable": true
+          "enable": true,
+          "bypass": false
          }
         ],
-        "modeId": "id_1747399267259_0"
+        "modeId": "id_1747399267259_0",
+        "bypass": false
        }
       ]
      }
@@ -198,11 +174,10 @@
        "strokeWidth": 2,
        "fill": "#A4A5A9",
        "stroke": "#A4A5A9"
-      },
-      "distance": 40
+      }
      }
     },
-    "id": "24ddc160-c549-491a-87ce-8ce23e28ca41",
+    "id": "848715b4-d835-47b4-840b-3801b0fe1ac1",
     "data": {
      "itemId": 1666574754050
     },
@@ -211,13 +186,169 @@
      "port": "5114f0b1-23ea-4659-844f-a8bd9b1e634d"
     },
     "target": {
+     "cell": "75d4d290-5c46-40a4-a2d3-6564e61ee973",
+     "port": "10da2899-0100-4c21-9678-b00544436caf"
+    }
+   },
+   {
+    "position": {
+     "x": 40,
+     "y": 400
+    },
+    "size": {
+     "width": 80,
+     "height": 80
+    },
+    "view": "vue-shape-view",
+    "shape": "vue-shape",
+    "id": "75d4d290-5c46-40a4-a2d3-6564e61ee973",
+    "component": "node-cust",
+    "group": "hardware",
+    "data": {
+     "name": "AGC",
+     "group": "渲染",
+     "uuid": "0XD0D0",
+     "type": 1,
+     "fun": 1,
+     "formFile": "../../.cvp_agc配置.json",
+     "marco": "TCFG_AGC_NODE_ENABLE",
+     "sAlias": "",
+     "dynamicPort": {
+      "iMax": 0,
+      "iMin": 0,
+      "oMax": 0,
+      "oMin": 0
+     },
+     "nodeDoc": "\\docs\\html\\SDK\\audio_effects\\agc.html",
+     "subId": 1,
+     "itemId": 1666574754050,
+     "configs": {
+      "name": "AGC1",
+      "list": [
+       {
+        "modeId": "id_1747399267259_0",
+        "name": "AGC1",
+        "current": "arg0",
+        "bypass": false,
+        "list": [
+         {
+          "name": "arg0",
+          "data": [
+           {
+            "id": "id_1723797015585_0",
+            "value": 0
+           },
+           {
+            "id": "id_1648192624776_0",
+            "list": [
+             {
+              "id": "id_1696816199138_0",
+              "value": -3
+             },
+             {
+              "id": "id_1648192653566_1",
+              "value": 1.3
+             },
+             {
+              "id": "id_1648192727857_5",
+              "value": 1.3
+             },
+             {
+              "id": "id_1650802172768_2",
+              "value": 5
+             },
+             {
+              "id": "id_1656413606352_0",
+              "value": 0
+             },
+             {
+              "id": "id_1650802261398_7",
+              "value": -50
+             }
+            ]
+           }
+          ],
+          "enable": true,
+          "bypass": false
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "ports": {
+     "groups": {
+      "in": {
+       "position": "left"
+      },
+      "out": {
+       "position": "right",
+       "attrs": {
+        "text": {
+         "fill": "#2b3f57",
+         "font-size": "12",
+         "visibility": "visible",
+         "text": ""
+        },
+        "circle": {
+         "r": 6,
+         "magnet": true,
+         "stroke": "#7DC06E",
+         "strokeWidth": 2,
+         "fill": "#f2f2f2",
+         "event": "port:click",
+         "style": {
+          "visibility": "visible"
+         }
+        }
+       }
+      }
+     },
+     "items": [
+      {
+       "group": "in",
+       "index": 0,
+       "id": "10da2899-0100-4c21-9678-b00544436caf"
+      },
+      {
+       "group": "out",
+       "index": 1,
+       "id": "03b6141c-54fb-4420-8152-11a12d2d049a"
+      }
+     ]
+    }
+   },
+   {
+    "shape": "edge",
+    "attrs": {
+     "line": {
+      "stroke": "#A4A5A9",
+      "strokeWidth": "2px",
+      "targetMarker": {
+       "tagName": "path",
+       "d": "M 12 -5 0 0 12 5 Z",
+       "strokeWidth": 2,
+       "fill": "#A4A5A9",
+       "stroke": "#A4A5A9"
+      }
+     }
+    },
+    "id": "cb8e037c-c2ed-43c7-9d50-6a552739c01a",
+    "data": {
+     "itemId": 1666574754050
+    },
+    "source": {
+     "cell": "75d4d290-5c46-40a4-a2d3-6564e61ee973",
+     "port": "03b6141c-54fb-4420-8152-11a12d2d049a"
+    },
+    "target": {
      "cell": "776f19d4-9d10-4e2d-bf2f-a44ca115fb03",
      "port": "25ac1764-1e03-461d-8a28-4d109b881a7f"
     }
    },
    {
     "position": {
-     "x": 680,
+     "x": 280,
      "y": 400
     },
     "size": {
@@ -275,7 +406,7 @@
              },
              {
               "id": "id_1682667012781_7",
-              "value": 16000
+              "value": 32000
              },
              {
               "id": "id_1682580918689_1",
@@ -369,7 +500,7 @@
    },
    {
     "position": {
-     "x": 880,
+     "x": 520,
      "y": 400
     },
     "size": {
@@ -2050,7 +2181,7 @@
   ]
  },
  "bitWidth": 16,
- "showConfigName": false,
+ "showConfigName": true,
  "abFlow": false,
  "version": {
   "code": 1,

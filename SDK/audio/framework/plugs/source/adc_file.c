@@ -41,6 +41,19 @@
 #define ADC_MIC_RAW_DATA_DEBUG_ENABLE     0
 #endif
 
+/* RDX 链路定位：用已知 PCM 验证 Opus/BLE/APP，验证后关闭。 */
+#ifndef ADC_AI_VOICE_TEST_TONE_ENABLE
+#define ADC_AI_VOICE_TEST_TONE_ENABLE     0
+#endif
+
+/* RDX 定位：抓取 AGC 前的单声道 PCM，STOP 后通过串口分块导出。 */
+#ifndef ADC_AI_VOICE_PCM_CAPTURE_ENABLE
+#define ADC_AI_VOICE_PCM_CAPTURE_ENABLE   0
+#endif
+
+#define ADC_AI_VOICE_PCM_CAPTURE_BYTES    (16000 * sizeof(s16))
+#define ADC_AI_VOICE_PCM_DUMP_CHUNK       256
+
 extern struct audio_adc_hdl adc_hdl;
 extern const u8 const_adc_async_en;
 extern const struct adc_platform_cfg adc_platform_cfg_table[AUDIO_ADC_MAX_NUM];
@@ -73,6 +86,9 @@ struct adc_file_hdl {
     int debug_sample_min;
     int debug_sample_max;
 #endif
+#if ADC_AI_VOICE_TEST_TONE_ENABLE
+    u8 test_tone_phase;
+#endif
 };
 
 struct adc_file_common {
@@ -91,6 +107,107 @@ struct adc_file_global {
 static struct adc_file_common esco_adc_f;
 static struct adc_file_global esco_adc_file_g;
 static u8 adc_file_global_open_cnt = 0;
+
+#if ADC_AI_VOICE_PCM_CAPTURE_ENABLE
+static u8 *adc_ai_voice_pcm_capture;
+static u32 adc_ai_voice_pcm_capture_len;
+static u32 adc_ai_voice_pcm_dump_offset;
+static u16 adc_ai_voice_pcm_dump_timer;
+static volatile u8 adc_ai_voice_pcm_capture_active;
+static u8 adc_ai_voice_pcm_dump_ready;
+
+static void adc_ai_voice_pcm_dump_chunk(void *priv)
+{
+    u32 remain;
+    u32 chunk;
+
+    if (!adc_ai_voice_pcm_dump_ready) {
+        if (adc_ai_voice_pcm_dump_timer) {
+            sys_timer_del(adc_ai_voice_pcm_dump_timer);
+            adc_ai_voice_pcm_dump_timer = 0;
+        }
+        if (adc_ai_voice_pcm_capture) {
+            free(adc_ai_voice_pcm_capture);
+            adc_ai_voice_pcm_capture = NULL;
+        }
+        return;
+    }
+    if (adc_ai_voice_pcm_dump_offset == 0) {
+        printf("[ADC_PCM_DUMP_BEGIN] bytes=%u sr=16000 ch=1 bits=16\n",
+               (unsigned int)adc_ai_voice_pcm_capture_len);
+    }
+
+    remain = adc_ai_voice_pcm_capture_len - adc_ai_voice_pcm_dump_offset;
+    chunk = remain > ADC_AI_VOICE_PCM_DUMP_CHUNK
+            ? ADC_AI_VOICE_PCM_DUMP_CHUNK : remain;
+    printf("[ADC_PCM_CHUNK] offset=%u bytes=%u\n",
+           (unsigned int)adc_ai_voice_pcm_dump_offset,
+           (unsigned int)chunk);
+    put_buf(adc_ai_voice_pcm_capture + adc_ai_voice_pcm_dump_offset, chunk);
+    adc_ai_voice_pcm_dump_offset += chunk;
+
+    if (adc_ai_voice_pcm_dump_offset >= adc_ai_voice_pcm_capture_len) {
+        printf("[ADC_PCM_DUMP_END] bytes=%u\n",
+               (unsigned int)adc_ai_voice_pcm_capture_len);
+        adc_ai_voice_pcm_dump_ready = 0;
+        if (adc_ai_voice_pcm_dump_timer) {
+            sys_timer_del(adc_ai_voice_pcm_dump_timer);
+            adc_ai_voice_pcm_dump_timer = 0;
+        }
+        free(adc_ai_voice_pcm_capture);
+        adc_ai_voice_pcm_capture = NULL;
+    }
+}
+
+static void adc_ai_voice_pcm_capture_start(void)
+{
+    if (adc_ai_voice_pcm_dump_timer) {
+        sys_timer_del(adc_ai_voice_pcm_dump_timer);
+        adc_ai_voice_pcm_dump_timer = 0;
+    }
+    if (adc_ai_voice_pcm_capture) {
+        free(adc_ai_voice_pcm_capture);
+        adc_ai_voice_pcm_capture = NULL;
+    }
+    adc_ai_voice_pcm_capture_len = 0;
+    adc_ai_voice_pcm_dump_offset = 0;
+    adc_ai_voice_pcm_dump_ready = 0;
+    adc_ai_voice_pcm_capture = zalloc(ADC_AI_VOICE_PCM_CAPTURE_BYTES);
+    if (!adc_ai_voice_pcm_capture) {
+        adc_ai_voice_pcm_capture_active = 0;
+        printf("[ADC_PCM_CAPTURE] alloc_failed bytes=%u\n",
+               (unsigned int)ADC_AI_VOICE_PCM_CAPTURE_BYTES);
+        return;
+    }
+    adc_ai_voice_pcm_capture_active = 1;
+    printf("[ADC_PCM_CAPTURE] armed bytes=%u\n",
+           (unsigned int)ADC_AI_VOICE_PCM_CAPTURE_BYTES);
+}
+
+static void adc_ai_voice_pcm_capture_stop(void)
+{
+    adc_ai_voice_pcm_capture_active = 0;
+    if (!adc_ai_voice_pcm_capture_len) {
+        if (adc_ai_voice_pcm_capture) {
+            free(adc_ai_voice_pcm_capture);
+            adc_ai_voice_pcm_capture = NULL;
+        }
+        return;
+    }
+    adc_ai_voice_pcm_dump_offset = 0;
+    adc_ai_voice_pcm_dump_ready = 1;
+    adc_ai_voice_pcm_dump_timer = sys_timer_add(NULL,
+                                                adc_ai_voice_pcm_dump_chunk,
+                                                20);
+    if (!adc_ai_voice_pcm_dump_timer) {
+        adc_ai_voice_pcm_dump_ready = 0;
+        free(adc_ai_voice_pcm_capture);
+        adc_ai_voice_pcm_capture = NULL;
+        printf("[ADC_PCM_CAPTURE] dump_timer_failed bytes=%u\n",
+               (unsigned int)adc_ai_voice_pcm_capture_len);
+    }
+}
+#endif
 
 /*判断adc 节点是否再跑*/
 u8 adc_file_is_runing(void)
@@ -750,6 +867,43 @@ static void adc_mic_output_handler(void *_hdl, s16 *data, int len)
             memset((u8 *)frame->data, 0x0, len);
         }
 
+#if ADC_AI_VOICE_PCM_CAPTURE_ENABLE
+        if (adc_ai_voice_pcm_capture_active &&
+            (hdl->scene == STREAM_SCENE_AI_VOICE) &&
+            !strcmp(hdl->name, "ADC1")) {
+            u32 remain = ADC_AI_VOICE_PCM_CAPTURE_BYTES -
+                         adc_ai_voice_pcm_capture_len;
+            u32 capture_len = len > remain ? remain : len;
+
+            if (capture_len) {
+                memcpy(adc_ai_voice_pcm_capture + adc_ai_voice_pcm_capture_len,
+                       frame->data, capture_len);
+                adc_ai_voice_pcm_capture_len += capture_len;
+            }
+            if (adc_ai_voice_pcm_capture_len >=
+                ADC_AI_VOICE_PCM_CAPTURE_BYTES) {
+                adc_ai_voice_pcm_capture_active = 0;
+                printf("[ADC_PCM_CAPTURE] complete bytes=%u\n",
+                       (unsigned int)adc_ai_voice_pcm_capture_len);
+            }
+        }
+#endif
+
+#if ADC_AI_VOICE_TEST_TONE_ENABLE
+        if ((hdl->scene == STREAM_SCENE_AI_VOICE) && !strcmp(hdl->name, "ADC1")) {
+            static const s16 tone_1khz_16k[] = {
+                0, 1567, 2896, 3784, 4096, 3784, 2896, 1567,
+                0, -1567, -2896, -3784, -4096, -3784, -2896, -1567,
+            };
+            s16 *pcm = (s16 *)frame->data;
+            int points = len / sizeof(*pcm);
+
+            for (int i = 0; i < points; i++) {
+                pcm[i] = tone_1khz_16k[hdl->test_tone_phase++ & 0x0f];
+            }
+        }
+#endif
+
         frame->len          = len;
 #if 1
         frame->flags        = FRAME_FLAG_TIMESTAMP_ENABLE | FRAME_FLAG_PERIOD_SAMPLE | FRAME_FLAG_UPDATE_TIMESTAMP;
@@ -1025,6 +1179,17 @@ static int adc_file_ioc_start(struct adc_file_hdl *hdl)
         smart_voice_mcu_mic_suspend();
 #endif
         hdl->dump_cnt = 0;
+#if ADC_AI_VOICE_TEST_TONE_ENABLE
+        if ((hdl->scene == STREAM_SCENE_AI_VOICE) && !strcmp(hdl->name, "ADC1")) {
+            hdl->test_tone_phase = 0;
+            printf("[ADC_TEST] ADC1 replacing MIC with 1kHz/-18dBFS tone\n");
+        }
+#endif
+#if ADC_AI_VOICE_PCM_CAPTURE_ENABLE
+        if ((hdl->scene == STREAM_SCENE_AI_VOICE) && !strcmp(hdl->name, "ADC1")) {
+            adc_ai_voice_pcm_capture_start();
+        }
+#endif
 
         //br50的LPADC需要根据采样率配置模拟部分的时钟分频,需要先设置采样率才能打开MIC
         audio_adc_mic_set_sample_rate(&hdl->mic_ch, hdl->sample_rate);
@@ -1110,6 +1275,11 @@ static int adc_file_ioc_stop(struct adc_file_hdl *hdl)
         os_task_del("adc_open");
 #endif
         audio_adc_mic_close(&hdl->mic_ch);
+#if ADC_AI_VOICE_PCM_CAPTURE_ENABLE
+        if ((hdl->scene == STREAM_SCENE_AI_VOICE) && !strcmp(hdl->name, "ADC1")) {
+            adc_ai_voice_pcm_capture_stop();
+        }
+#endif
         if (!esco_adc_file_g.fixed_buf) {
             hdl->adc_buf = NULL; //在adc 驱动中释放了这个buffer
         }
@@ -1167,7 +1337,8 @@ static int adc_ioctl(void *_hdl, int cmd, int arg)
     case NODE_IOC_SET_SCENE:
         hdl->scene = arg;
         //adc节点需要根据场景配置位宽
-        if ((hdl->scene == STREAM_SCENE_ESCO) || (hdl->scene == STREAM_SCENE_PC_MIC) || (hdl->scene == STREAM_SCENE_LEA_CALL)) {
+        if ((hdl->scene == STREAM_SCENE_ESCO) || (hdl->scene == STREAM_SCENE_PC_MIC) ||
+            (hdl->scene == STREAM_SCENE_LEA_CALL) || (hdl->scene == STREAM_SCENE_AI_VOICE)) {
             adc_hdl.bit_width = 0;
         } else {
             adc_hdl.bit_width = audio_general_in_dev_bit_width();

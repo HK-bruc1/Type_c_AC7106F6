@@ -55,6 +55,24 @@
 #endif
 #endif
 
+/* One-shot firmware-only audio link test; keep disabled in business builds. */
+#ifndef TCFG_RDX_RECORD_SPIKE_ENABLE
+#define TCFG_RDX_RECORD_SPIKE_ENABLE       0
+#endif
+
+#if TCFG_RDX_RECORD_SPIKE_ENABLE
+#ifndef RDX_RECORD_SPIKE_START_DELAY_MS
+#define RDX_RECORD_SPIKE_START_DELAY_MS    5000
+#endif
+#ifndef RDX_RECORD_SPIKE_DURATION_MS
+#define RDX_RECORD_SPIKE_DURATION_MS       10000
+#endif
+#if (RDX_RECORD_SPIKE_START_DELAY_MS == 0) || \
+    (RDX_RECORD_SPIKE_DURATION_MS == 0)
+#error "RDX record Spike timing must be greater than zero"
+#endif
+#endif
+
 #define TCFG_RDX_ENABLE            1
 #else
 #define TCFG_RDX_ENABLE            0
