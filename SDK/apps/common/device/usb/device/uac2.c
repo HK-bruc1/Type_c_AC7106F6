@@ -908,7 +908,7 @@ struct mic_info_t _mic_info SEC(.usb.data.bss.exchange);
 #endif
 
 static void open_spk(struct usb_device_t *usb_device);
-static void open_mic(struct usb_device_t *usb_device);
+static int open_mic(struct usb_device_t *usb_device);
 
 #define AUDIO_SAMPLE_FREQ_NUM(num) \
     DW1BYTE(num), DW2BYTE(num)
@@ -1918,7 +1918,7 @@ static void mic_drop_data_when_upstream_halt(struct usb_device_t *usb_device, u3
     }
     mic_info->upstream_halt++;
 }
-static void open_mic(struct usb_device_t *usb_device)
+static int open_mic(struct usb_device_t *usb_device)
 {
     const usb_dev usb_id = usb_device2id(usb_device);
     u8 *ep_buffer;
@@ -1926,7 +1926,7 @@ static void open_mic(struct usb_device_t *usb_device)
     u32 mic_res = 0;
 
     if (mic_info == NULL) {
-        return;
+        return -1;
     }
     log_info("%s", __func__);
     mic_info->mic_no_data = 1;
@@ -1944,7 +1944,7 @@ static void open_mic(struct usb_device_t *usb_device)
     } else if (mic_info->alternate_setting == 2) {
         mic_res = MIC_AUDIO_RES_2;
     } else {
-        return;
+        return -1;
     }
 #if UAC_24BIT_IN_4BYTE
     if (mic_res == 24) {
@@ -1967,7 +1967,12 @@ static void open_mic(struct usb_device_t *usb_device)
 #endif
 
     mic_info->res = mic_res;
-    uac_mic_stream_open(mic_info->mic_sampling_rate, MIC_CHANNEL, mic_res);
+    if (uac_mic_stream_open(mic_info->mic_sampling_rate,
+                            MIC_CHANNEL, mic_res)) {
+        usb_clr_intr_txe(usb_id, MIC_ISO_EP_IN);
+        usb_g_set_intr_hander(usb_id, MIC_ISO_EP_IN | USB_DIR_IN, NULL);
+        return -1;
+    }
 
     mic_info->sof_cnt = 0;
     mic_info->upstream_halt = 0;
@@ -1979,6 +1984,7 @@ static void open_mic(struct usb_device_t *usb_device)
                     1, ep_buffer, mic_frame_len);
 
     mic_transfer(usb_device, MIC_ISO_EP_IN);
+    return 0;
 }
 static void close_mic(struct usb_device_t *usb_device)
 {
@@ -2019,7 +2025,10 @@ static u32 mic_as_itf_hander(struct usb_device_t *usb_device, struct usb_ctrlreq
             } else {
                 usb_set_setup_phase(usb_device, USB_EP0_STAGE_SETUP);
                 if (setup->wValue == 1) {//alt 1
-                    open_mic(usb_device);
+                    if (open_mic(usb_device)) {
+                        mic_info->alternate_setting = 0;
+                        usb_set_setup_phase(usb_device, USB_EP0_SET_STALL);
+                    }
                 } else if (setup->wValue == 0) { //alt 0
                     close_mic(usb_device);
                 } else {
@@ -2029,9 +2038,15 @@ static u32 mic_as_itf_hander(struct usb_device_t *usb_device, struct usb_ctrlreq
 #else
             usb_set_setup_phase(usb_device, USB_EP0_STAGE_SETUP);
             if (setup->wValue == 1) {//alt 1
-                open_mic(usb_device);
+                if (open_mic(usb_device)) {
+                    mic_info->alternate_setting = 0;
+                    usb_set_setup_phase(usb_device, USB_EP0_SET_STALL);
+                }
             } else if (setup->wValue == 2) {//alt 2
-                open_mic(usb_device);
+                if (open_mic(usb_device)) {
+                    mic_info->alternate_setting = 0;
+                    usb_set_setup_phase(usb_device, USB_EP0_SET_STALL);
+                }
             } else if (setup->wValue == 0) { //alt 0
                 close_mic(usb_device);
             } else {

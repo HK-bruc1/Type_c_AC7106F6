@@ -38,7 +38,10 @@
 #define UAC_SPEAKER_STREAM_DETECT_COUNT     5
 
 static volatile u8 speaker_stream_is_open = 0;
-static volatile u8 mic_stream_is_open = 0;
+static volatile u8 mic_capture_requested = 0;
+static volatile u8 mic_capture_start_pending = 0;
+static volatile u8 mic_capture_stop_pending = 0;
+static volatile u8 mic_capture_is_open = 0;
 static struct audio_capture_lease uac_mic_capture_lease;
 static const struct audio_capture_lease_client uac_capture_lease_client = {
     .name = "usb_audio",
@@ -309,7 +312,7 @@ void uac_mute_volume(u32 type, u32 l_vol, u32 r_vol)
 
     switch (type) {
     case MIC_FEATURE_UNIT_ID: //MIC
-        if (mic_stream_is_open == 0) {
+        if (mic_capture_is_open == 0) {
             return ;
         }
         if (l_vol == last_mic_vol) {
@@ -353,7 +356,7 @@ static u32 mic_timestamp;
 
 int uac_mic_stream_read(u8 *buf, u32 len)
 {
-    if (mic_stream_is_open == 0) {
+    if (mic_capture_is_open == 0) {
         memset(buf, 0, len);
         return len;
     }
@@ -451,20 +454,99 @@ void uac_mic_stream_get_volume(u16 *vol)
 
 u8 uac_get_mic_stream_status(void)
 {
-    return mic_stream_is_open;
+    return mic_capture_requested;
+}
+
+static void uac_mic_capture_start(void)
+{
+    int lease_ret;
+    int recorder_ret = 0;
+    u8 cancelled;
+
+    if (!mic_capture_requested) {
+        mic_capture_start_pending = 0;
+        return;
+    }
+
+    lease_ret = audio_capture_lease_acquire(&uac_capture_lease_client,
+                                            &uac_mic_capture_lease,
+                                            1,
+                                            UAC_MIC_CAPTURE_PREEMPT_TIMEOUT_TICKS);
+    if (lease_ret) {
+        mic_capture_start_pending = 0;
+        log_error("mic lease failed=%d", lease_ret);
+        return;
+    }
+
+    if (!mic_capture_requested) {
+        mic_capture_start_pending = 0;
+        audio_capture_lease_release(&uac_mic_capture_lease);
+        return;
+    }
+
+    mic_tx_handler = NULL;
+
+#if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
+    recorder_ret = pc_mic_recoder_open();
+#endif
+
+    if (recorder_ret) {
+        mic_capture_start_pending = 0;
+        audio_capture_lease_release(&uac_mic_capture_lease);
+        log_error("mic recorder open failed=%d", recorder_ret);
+        return;
+    }
+
+    if (!mic_capture_requested) {
+#if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
+        pc_mic_recoder_close();
+#endif
+        mic_capture_start_pending = 0;
+        audio_capture_lease_release(&uac_mic_capture_lease);
+        return;
+    }
+
+    log_info("%s", __func__);
+
+#if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
+    log_info("## Func:%s, Line:%d, Open Mic!!\n", __func__, __LINE__);
+    app_send_message(APP_MSG_PC_AUDIO_MIC_OPEN,
+                     (int)(((mic_bitwidth == 24 ? 1 : 0) << 28) |
+                           (mic_channel << 24) |
+                           mic_samplerate));
+#endif
+
+    local_irq_disable();
+    cancelled = !mic_capture_requested;
+    if (!cancelled) {
+        mic_capture_is_open = 1;
+        mic_timestamp = jiffies;
+    }
+    mic_capture_start_pending = 0;
+    local_irq_enable();
+
+    if (cancelled) {
+#if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
+        pc_mic_recoder_close();
+        app_send_message(APP_MSG_PC_AUDIO_MIC_CLOSE, 0);
+#endif
+        audio_capture_lease_release(&uac_mic_capture_lease);
+        return;
+    }
 }
 
 u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
 {
-    u32 last_sr = 0;
-    int lease_ret;
+    int msg[2];
+    int post_ret;
 
 #if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
-    last_sr = pc_mic_get_fmt_sample_rate();
     pc_mic_set_fmt(ch, bitwidth, samplerate);
 #endif
 
-    if (mic_stream_is_open) {
+    mic_capture_requested = 1;
+
+    if (mic_capture_is_open) {
         if (mic_close_tid) {
             sys_hi_timeout_del(mic_close_tid);
             mic_close_tid = 0;
@@ -490,60 +572,86 @@ u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
         return 0;
     }
 
-    lease_ret = audio_capture_lease_acquire(&uac_capture_lease_client,
-                                            &uac_mic_capture_lease,
-                                            1,
-                                            UAC_MIC_CAPTURE_PREEMPT_TIMEOUT_TICKS);
-    if (lease_ret) {
-        log_error("mic lease failed=%d", lease_ret);
-        return lease_ret;
-    }
-
-    mic_tx_handler = NULL;	//这里需要赋值为NULL
     mic_samplerate = samplerate;
     mic_bitwidth = bitwidth;
     mic_channel = ch;
 
-    log_info("%s", __func__);
+    if (mic_capture_start_pending) {
+        return 0;
+    }
 
-    mic_stream_is_open = 1;
-
-#if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
-    log_info("## Func:%s, Line:%d, Open Mic!!\n", __func__, __LINE__);
-    pc_mic_recoder_open_by_taskq();
-    app_send_message(APP_MSG_PC_AUDIO_MIC_OPEN,
-                     (int)(((bitwidth == 24 ? 1 : 0) << 28) |
-                           (ch << 24) |
-                           samplerate));
-#endif
-
-    mic_timestamp = jiffies;
-    return 0;
+    mic_capture_start_pending = 1;
+    msg[0] = (int)uac_mic_capture_start;
+    msg[1] = 0;
+    post_ret = os_taskq_post_type("app_core", Q_CALLBACK, 2, msg);
+    if (post_ret) {
+        mic_capture_requested = 0;
+        mic_capture_start_pending = 0;
+        log_error("mic start post failed=%d", post_ret);
+    }
+    return post_ret;
 }
 
-static void uac_mic_stream_close_delay(void *priv)
+static void uac_mic_capture_stop(void)
 {
-    int release = (u8)priv;
-    mic_close_tid = 0;
+    local_irq_disable();
+    if (mic_capture_requested || !mic_capture_is_open) {
+        mic_capture_stop_pending = 0;
+        local_irq_enable();
+        return;
+    }
+    mic_capture_is_open = 0;
+    mic_capture_stop_pending = 0;
+    local_irq_enable();
+
     log_info("%s", __func__);
-    mic_stream_is_open = 0;
 
 #if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
     log_info("## Func:%s, Line:%d, Close Mic!!\n", __func__, __LINE__);
-    if (release) {
-        pc_mic_recoder_close();
-    } else {
-        pc_mic_recoder_close_by_taskq();
-    }
+    pc_mic_recoder_close();
     app_send_message(APP_MSG_PC_AUDIO_MIC_CLOSE, 0);
 #endif
     audio_capture_lease_release(&uac_mic_capture_lease);
 }
 
+static void uac_mic_stream_close_delay(void *priv)
+{
+    int msg[2];
+    int post_ret;
+
+    (void)priv;
+    mic_close_tid = 0;
+    if (mic_capture_stop_pending || !mic_capture_is_open) {
+        return;
+    }
+
+    mic_capture_stop_pending = 1;
+    msg[0] = (int)uac_mic_capture_stop;
+    msg[1] = 0;
+    post_ret = os_taskq_post_type("app_core", Q_CALLBACK, 2, msg);
+    if (post_ret) {
+        mic_capture_stop_pending = 0;
+        log_error("mic stop post failed=%d", post_ret);
+        if (!mic_capture_requested) {
+            mic_close_tid = sys_hi_timeout_add(
+                NULL, uac_mic_stream_close_delay, 10);
+        }
+    }
+}
+
 void uac_mic_stream_close(int release)
 {
-    if (mic_stream_is_open == 0) {
+    mic_capture_requested = 0;
+    if (mic_capture_is_open == 0) {
         return ;
+    }
+    if (release) {
+        if (mic_close_tid) {
+            sys_hi_timeout_del(mic_close_tid);
+            mic_close_tid = 0;
+        }
+        uac_mic_capture_stop();
+        return;
     }
     //FIXME:
     //未知原因出现频繁开关mic，导致出现audio或者蓝牙工作异常，
