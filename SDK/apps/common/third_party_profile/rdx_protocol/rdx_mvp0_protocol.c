@@ -11,19 +11,12 @@
 #include "rdx_mvp0_protocol.h"
 #include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
+#include "rdx_record_engine.h"
 #include "rdx_rtc.h"
-#include "media/audio_base.h"
-#include "ai_voice_recoder.h"
-#if TCFG_APP_PC_EN && (TCFG_USB_SLAVE_AUDIO_MIC_ENABLE || TCFG_USB_SLAVE_AUDIO_SPK_ENABLE)
-#include "uac_stream.h"
-#endif
 
 #define RDX_APPKEY_PAYLOAD_SIZE               32
 #define RDX_APPKEY_HEX_STRING_SIZE            (RDX_APPKEY_PAYLOAD_SIZE * 2 + 1)
 #define RDX_POST_ACK_DISCONNECT_DELAY_MS       100
-#define RDX_RECORD_WARMUP_FRAMES                10
-#define RDX_RECORD_EXPECTED_FRAME_SIZE           80
-#define RDX_RECORD_MAX_FRAME_SIZE                96
 #define RDX_RECORD_STREAM_PACKET_SIZE           128
 #define RDX_RECORD_TX_QUEUE_DEPTH                16
 
@@ -73,18 +66,18 @@ static rdx_mvp0_state_t rdx_mvp0_state;
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len);
 
 typedef enum {
-    RDX_RECORD_STATE_IDLE = 0,
-    RDX_RECORD_STATE_STARTING,
-    RDX_RECORD_STATE_ACTIVE,
-    RDX_RECORD_STATE_STOPPING,
-} rdx_record_state_t;
+    RDX_ONLINE_RECORD_IDLE = 0,
+    RDX_ONLINE_RECORD_START_PENDING,
+    RDX_ONLINE_RECORD_STREAMING,
+    RDX_ONLINE_RECORD_STOP_PENDING,
+} rdx_online_record_state_t;
 
 typedef struct {
     volatile u8 state;
-    u32 frame_count;
+    u32 next_request_id;
+    u32 session_id;
+    u32 capture_generation;
     u32 sent_count;
-    u32 warmup_count;
-    u32 invalid_count;
     u32 send_fail_count;
     u32 queued_count;
     u32 queue_drop_count;
@@ -92,13 +85,11 @@ typedef struct {
     u8 tx_tail;
     u8 tx_count;
     u8 tx_peak;
-    u8 opus_format_checked;
-    u8 opus_channels;
     u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
-} rdx_record_runtime_t;
+} rdx_online_record_runtime_t;
 
-static rdx_record_runtime_t rdx_record_runtime;
+static rdx_online_record_runtime_t rdx_online_record;
 
 static void rdx_mvp0_log_rx(const char *command, const u8 *data, u16 len)
 {
@@ -162,19 +153,13 @@ static int rdx_mvp0_record_send_state(u8 active)
     return ret;
 }
 
-static u8 rdx_mvp0_record_usb_audio_busy(void)
+static u32 rdx_mvp0_record_next_request_id(void)
 {
-#if TCFG_APP_PC_EN && TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
-    if (uac_get_mic_stream_status()) {
-        return 1;
+    rdx_online_record.next_request_id++;
+    if (!rdx_online_record.next_request_id) {
+        rdx_online_record.next_request_id = 1;
     }
-#endif
-#if TCFG_APP_PC_EN && TCFG_USB_SLAVE_AUDIO_SPK_ENABLE
-    if (uac_speaker_stream_status()) {
-        return 1;
-    }
-#endif
-    return 0;
+    return rdx_online_record.next_request_id;
 }
 
 static int rdx_mvp0_record_queue_packet(const u8 *packet, u16 len)
@@ -184,19 +169,19 @@ static int rdx_mvp0_record_queue_packet(const u8 *packet, u16 len)
     if (!packet || !len || len > RDX_RECORD_STREAM_PACKET_SIZE) {
         return -1;
     }
-    if (rdx_record_runtime.tx_count >= RDX_RECORD_TX_QUEUE_DEPTH) {
-        rdx_record_runtime.queue_drop_count++;
+    if (rdx_online_record.tx_count >= RDX_RECORD_TX_QUEUE_DEPTH) {
+        rdx_online_record.queue_drop_count++;
         return -1;
     }
 
-    tail = rdx_record_runtime.tx_tail;
-    memcpy(rdx_record_runtime.tx_packet[tail], packet, len);
-    rdx_record_runtime.tx_len[tail] = len;
-    rdx_record_runtime.tx_tail = (tail + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
-    rdx_record_runtime.tx_count++;
-    rdx_record_runtime.queued_count++;
-    if (rdx_record_runtime.tx_count > rdx_record_runtime.tx_peak) {
-        rdx_record_runtime.tx_peak = rdx_record_runtime.tx_count;
+    tail = rdx_online_record.tx_tail;
+    memcpy(rdx_online_record.tx_packet[tail], packet, len);
+    rdx_online_record.tx_len[tail] = len;
+    rdx_online_record.tx_tail = (tail + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
+    rdx_online_record.tx_count++;
+    rdx_online_record.queued_count++;
+    if (rdx_online_record.tx_count > rdx_online_record.tx_peak) {
+        rdx_online_record.tx_peak = rdx_online_record.tx_count;
     }
     return 0;
 }
@@ -205,181 +190,244 @@ static int rdx_mvp0_record_drain_queue(void)
 {
     int ret;
 
-    while (rdx_record_runtime.tx_count) {
-        u8 head = rdx_record_runtime.tx_head;
+    while (rdx_online_record.tx_count) {
+        u8 head = rdx_online_record.tx_head;
 
-        ret = rdx_mvp0_send(rdx_record_runtime.tx_packet[head],
-                            rdx_record_runtime.tx_len[head]);
+        ret = rdx_mvp0_send(rdx_online_record.tx_packet[head],
+                            rdx_online_record.tx_len[head]);
         if (ret) {
-            rdx_record_runtime.send_fail_count++;
+            rdx_online_record.send_fail_count++;
             return ret;
         }
-        rdx_record_runtime.sent_count++;
-        rdx_record_runtime.tx_head =
+        rdx_online_record.sent_count++;
+        rdx_online_record.tx_head =
             (head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
-        rdx_record_runtime.tx_count--;
+        rdx_online_record.tx_count--;
     }
     return 0;
 }
 
-static int rdx_mvp0_record_frame(u8 *data, u32 len)
+static int rdx_mvp0_record_destination_attach(void *priv, u32 session_id,
+                                              u32 capture_generation)
+{
+    (void)priv;
+    memset(&rdx_online_record.tx_len, 0, sizeof(rdx_online_record.tx_len));
+    rdx_online_record.session_id = session_id;
+    rdx_online_record.capture_generation = capture_generation;
+    rdx_online_record.sent_count = 0;
+    rdx_online_record.send_fail_count = 0;
+    rdx_online_record.queued_count = 0;
+    rdx_online_record.queue_drop_count = 0;
+    rdx_online_record.tx_head = 0;
+    rdx_online_record.tx_tail = 0;
+    rdx_online_record.tx_count = 0;
+    rdx_online_record.tx_peak = 0;
+    return 0;
+}
+
+static int rdx_mvp0_record_destination_consume(
+    void *priv, const struct rdx_record_frame *frame)
 {
     u8 packet[RDX_RECORD_STREAM_PACKET_SIZE];
-    u32 frame_index;
     int header_len;
     int ret;
 
-    if (rdx_record_runtime.state != RDX_RECORD_STATE_STARTING
-        && rdx_record_runtime.state != RDX_RECORD_STATE_ACTIVE) {
+    (void)priv;
+    if (!frame || rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING
+        || frame->session_id != rdx_online_record.session_id
+        || frame->capture_generation !=
+        rdx_online_record.capture_generation) {
         return 0;
-    }
-
-    frame_index = ++rdx_record_runtime.frame_count;
-    if (frame_index <= RDX_RECORD_WARMUP_FRAMES) {
-        rdx_record_runtime.warmup_count++;
-        if (frame_index == RDX_RECORD_WARMUP_FRAMES) {
-            printf("[RDX][RECORD] warmup_complete frames=%u\n",
-                   (unsigned int)frame_index);
-        }
-        return 0;
-    }
-
-    /* START state must reach the APP before its first stream packet. */
-    if (rdx_record_runtime.state != RDX_RECORD_STATE_ACTIVE) {
-        return 0;
-    }
-    if (!data || !len || len > RDX_RECORD_MAX_FRAME_SIZE) {
-        rdx_record_runtime.invalid_count++;
-        return 0;
-    }
-    if (len != RDX_RECORD_EXPECTED_FRAME_SIZE) {
-        rdx_record_runtime.invalid_count++;
-    }
-    if (!rdx_record_runtime.opus_format_checked) {
-        rdx_record_runtime.opus_channels = (data[0] & BIT(2)) ? 2 : 1;
-        rdx_record_runtime.opus_format_checked = 1;
-        printf("[RDX][RECORD] opus_toc=0x%02X ch=%u expected_ch=%u %s\n",
-               data[0], rdx_record_runtime.opus_channels,
-               AI_VOICE_FIXED_OPUS_CHANNELS,
-               rdx_record_runtime.opus_channels == AI_VOICE_FIXED_OPUS_CHANNELS
-               ? "ok" : "mismatch");
     }
 
     header_len = snprintf((char *)packet, sizeof(packet),
-                          "*DEV#stream#%u#%u#",
-                          (unsigned int)len, (unsigned int)len);
-    if (header_len <= 0 || (u32)header_len + len > sizeof(packet)) {
-        rdx_record_runtime.invalid_count++;
-        return 0;
+                           "*DEV#stream#%u#%u#",
+                           frame->payload_len, frame->payload_len);
+    if (header_len <= 0
+        || (u32)header_len + frame->payload_len > sizeof(packet)) {
+        return -1;
     }
-    memcpy(packet + header_len, data, len);
+    memcpy(packet + header_len, frame->payload, frame->payload_len);
     rdx_mvp0_record_drain_queue();
-    if (rdx_record_runtime.tx_count) {
-        rdx_mvp0_record_queue_packet(packet, header_len + len);
+    if (rdx_online_record.tx_count) {
+        ret = rdx_mvp0_record_queue_packet(
+            packet, header_len + frame->payload_len);
     } else {
-        ret = rdx_mvp0_send(packet, header_len + len);
+        ret = rdx_mvp0_send(packet, header_len + frame->payload_len);
         if (ret) {
-            rdx_record_runtime.send_fail_count++;
-            rdx_mvp0_record_queue_packet(packet, header_len + len);
+            rdx_online_record.send_fail_count++;
+            ret = rdx_mvp0_record_queue_packet(
+                packet, header_len + frame->payload_len);
         } else {
-            rdx_record_runtime.sent_count++;
+            rdx_online_record.sent_count++;
         }
     }
 
-    if ((frame_index - RDX_RECORD_WARMUP_FRAMES) % 250 == 0) {
-        printf("[RDX][RECORD] frames=%u sent=%u send_fail=%u invalid=%u"
-               " queued=%u pending=%u peak=%u drop=%u"
-               " frame_len=%u packet_len=%u\n",
-               (unsigned int)rdx_record_runtime.frame_count,
-               (unsigned int)rdx_record_runtime.sent_count,
-               (unsigned int)rdx_record_runtime.send_fail_count,
-               (unsigned int)rdx_record_runtime.invalid_count,
-               (unsigned int)rdx_record_runtime.queued_count,
-               (unsigned int)rdx_record_runtime.tx_count,
-               (unsigned int)rdx_record_runtime.tx_peak,
-               (unsigned int)rdx_record_runtime.queue_drop_count,
-               (unsigned int)len, (unsigned int)(header_len + len));
+    if ((frame->session_frame_seq + 1) % 250 == 0) {
+        printf("[RDX][ONLINE] frames=%u sent=%u send_fail=%u queued=%u"
+               " pending=%u peak=%u drop=%u\n",
+               (unsigned int)(frame->session_frame_seq + 1),
+               (unsigned int)rdx_online_record.sent_count,
+               (unsigned int)rdx_online_record.send_fail_count,
+               (unsigned int)rdx_online_record.queued_count,
+               (unsigned int)rdx_online_record.tx_count,
+               (unsigned int)rdx_online_record.tx_peak,
+               (unsigned int)rdx_online_record.queue_drop_count);
     }
-    return 0;
+    return ret;
 }
 
-static void rdx_mvp0_record_close(const char *reason, u8 notify_app)
+static void rdx_mvp0_record_destination_cancel(void *priv, u32 session_id,
+                                               u32 capture_generation)
 {
-    u8 was_running = rdx_record_runtime.state != RDX_RECORD_STATE_IDLE;
-
-    if (was_running) {
-        rdx_record_runtime.state = RDX_RECORD_STATE_STOPPING;
-        ai_voice_recoder_close();
-        rdx_ble_transport_set_record_streaming(0);
-        rdx_record_runtime.state = RDX_RECORD_STATE_IDLE;
-        printf("[RDX][RECORD] stopped reason=%s frames=%u warmup=%u"
-               " sent=%u send_fail=%u invalid=%u queued=%u"
-               " pending=%u peak=%u drop=%u opus_ch=%u\n",
-               reason,
-               (unsigned int)rdx_record_runtime.frame_count,
-               (unsigned int)rdx_record_runtime.warmup_count,
-               (unsigned int)rdx_record_runtime.sent_count,
-               (unsigned int)rdx_record_runtime.send_fail_count,
-               (unsigned int)rdx_record_runtime.invalid_count,
-               (unsigned int)rdx_record_runtime.queued_count,
-               (unsigned int)rdx_record_runtime.tx_count,
-               (unsigned int)rdx_record_runtime.tx_peak,
-               (unsigned int)rdx_record_runtime.queue_drop_count,
-               (unsigned int)rdx_record_runtime.opus_channels);
-        rdx_record_runtime.tx_count = 0;
+    (void)priv;
+    if (session_id == rdx_online_record.session_id
+        && capture_generation == rdx_online_record.capture_generation) {
+        rdx_online_record.tx_count = 0;
     }
-    if (notify_app) {
-        rdx_mvp0_record_send_state(0);
+}
+
+static void rdx_mvp0_record_destination_detach(void *priv, u32 session_id,
+                                               u32 capture_generation)
+{
+    (void)priv;
+    (void)session_id;
+    (void)capture_generation;
+}
+
+static const struct rdx_record_destination_ops rdx_mvp0_record_destination = {
+    .attach = rdx_mvp0_record_destination_attach,
+    .consume = rdx_mvp0_record_destination_consume,
+    .cancel = rdx_mvp0_record_destination_cancel,
+    .detach = rdx_mvp0_record_destination_detach,
+};
+
+static void rdx_mvp0_record_engine_event(
+    void *priv, const struct rdx_record_engine_event *event)
+{
+    int ret;
+
+    (void)priv;
+    if (!event) {
+        return;
+    }
+
+    if (event->type == RDX_RECORD_ENGINE_START_COMPLETE) {
+        if (event->result) {
+            u8 wait_for_stop =
+                event->result == RDX_RECORD_RESULT_CANCELLED
+                && event->cause == RDX_RECORD_CAUSE_USER_REQUEST
+                && rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING;
+            u8 connection_invalid =
+                event->cause == RDX_RECORD_CAUSE_LINK_LOST
+                || event->cause == RDX_RECORD_CAUSE_CCC_OFF
+                || event->cause == RDX_RECORD_CAUSE_SHUTDOWN;
+
+            if (!wait_for_stop) {
+                rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
+            }
+            rdx_ble_transport_set_record_streaming(0);
+            if (!wait_for_stop && !connection_invalid
+                && rdx_mvp0_state.connected
+                && rdx_mvp0_state.ccc_ready) {
+                rdx_mvp0_record_send_state(0);
+            }
+            printf("[RDX][ONLINE] start_failed request=%u result=%u\n",
+                   (unsigned int)event->request_id, event->result);
+            return;
+        }
+        rdx_online_record.session_id = event->session_id;
+        rdx_online_record.capture_generation = event->capture_generation;
+        rdx_ble_transport_set_record_streaming(1);
+        ret = rdx_mvp0_record_send_state(1);
+        if (ret) {
+            rdx_record_engine_submit_system_event(
+                RDX_RECORD_SYSTEM_SOURCE_ENGINE,
+                RDX_RECORD_SYSTEM_ENGINE_FAULT,
+                RDX_RECORD_CAUSE_START_FAILED);
+            return;
+        }
+        rdx_online_record.state = RDX_ONLINE_RECORD_STREAMING;
+        printf("[RDX][ONLINE] streaming session=%u capture=%u\n",
+               (unsigned int)event->session_id,
+               (unsigned int)event->capture_generation);
+        return;
+    }
+
+    if (event->type == RDX_RECORD_ENGINE_SESSION_STOPPED) {
+        u8 notify = event->cause != RDX_RECORD_CAUSE_LINK_LOST
+                    && event->cause != RDX_RECORD_CAUSE_CCC_OFF
+                    && event->cause != RDX_RECORD_CAUSE_SHUTDOWN;
+
+        rdx_ble_transport_set_record_streaming(0);
+        rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
+        rdx_online_record.tx_count = 0;
+        if (notify && rdx_mvp0_state.connected && rdx_mvp0_state.ccc_ready) {
+            rdx_mvp0_record_send_state(0);
+        }
+        printf("[RDX][ONLINE] stopped session=%u mode=%u cause=%u"
+               " result=%u notify=%u\n",
+               (unsigned int)event->session_id,
+               event->termination_mode, event->cause,
+               event->result, notify);
     }
 }
 
 static void rdx_mvp0_record_start(void)
 {
+    struct rdx_record_request request;
     int ret;
 
-    if (rdx_record_runtime.state == RDX_RECORD_STATE_ACTIVE) {
-        rdx_ble_transport_set_record_streaming(1);
+    if (rdx_online_record.state == RDX_ONLINE_RECORD_STREAMING) {
         rdx_mvp0_record_send_state(1);
         return;
     }
-    if (rdx_record_runtime.state != RDX_RECORD_STATE_IDLE) {
-        printf("[RDX][RECORD] start_rejected reason=transition state=%u\n",
-               rdx_record_runtime.state);
-        rdx_mvp0_record_send_state(0);
-        return;
-    }
-    if (rdx_mvp0_record_usb_audio_busy()) {
-        printf("[RDX][RECORD] start_rejected reason=usb_audio_busy\n");
-        rdx_mvp0_record_send_state(0);
+    if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
+        printf("[RDX][ONLINE] duplicate_start state=%u\n",
+               rdx_online_record.state);
         return;
     }
 
-    memset(&rdx_record_runtime, 0, sizeof(rdx_record_runtime));
-    rdx_record_runtime.state = RDX_RECORD_STATE_STARTING;
-    rdx_ble_transport_set_record_streaming(1);
-    ret = ai_voice_recoder_open_with_tx(AUDIO_CODING_OPUS, 0,
-                                         rdx_mvp0_record_frame);
+    memset(&request, 0, sizeof(request));
+    request.request_id = rdx_mvp0_record_next_request_id();
+    request.type = RDX_RECORD_REQUEST_START;
+    request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
+    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    request.destination_ops = &rdx_mvp0_record_destination;
+    rdx_online_record.state = RDX_ONLINE_RECORD_START_PENDING;
+    ret = rdx_record_engine_submit(&request);
     if (ret) {
-        rdx_ble_transport_set_record_streaming(0);
-        rdx_record_runtime.state = RDX_RECORD_STATE_IDLE;
-        printf("[RDX][RECORD] start_failed err=%d\n", ret);
+        rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
+        printf("[RDX][ONLINE] start_submit_failed request=%u ret=%d\n",
+               (unsigned int)request.request_id, ret);
+        rdx_mvp0_record_send_state(0);
+    }
+}
+
+static void rdx_mvp0_record_stop(void)
+{
+    struct rdx_record_request request;
+    int ret;
+
+    if (rdx_online_record.state == RDX_ONLINE_RECORD_IDLE) {
         rdx_mvp0_record_send_state(0);
         return;
     }
-
-    ret = rdx_mvp0_record_send_state(1);
-    if (ret) {
-        printf("[RDX][RECORD] start_failed reason=ack_send ret=%d\n", ret);
-        rdx_mvp0_record_close("start_ack_failed", 0);
+    if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
         return;
     }
-    rdx_record_runtime.state = RDX_RECORD_STATE_ACTIVE;
-    printf("[RDX][RECORD] started scene=meeting sr=%u ch=%u"
-           " bitrate=%u frame_ms=%u format=raw\n",
-           AI_VOICE_FIXED_OPUS_SAMPLE_RATE,
-           AI_VOICE_FIXED_OPUS_CHANNELS,
-           AI_VOICE_FIXED_OPUS_BIT_RATE,
-           AI_VOICE_FIXED_OPUS_FRAME_MS);
+
+    memset(&request, 0, sizeof(request));
+    request.request_id = rdx_mvp0_record_next_request_id();
+    request.type = RDX_RECORD_REQUEST_STOP;
+    request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
+    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
+    ret = rdx_record_engine_submit(&request);
+    if (ret) {
+        printf("[RDX][ONLINE] stop_submit_failed request=%u ret=%d\n",
+               (unsigned int)request.request_id, ret);
+    }
 }
 
 static void rdx_mvp0_handle_record(const u8 *data, u16 len)
@@ -396,7 +444,7 @@ static void rdx_mvp0_handle_record(const u8 *data, u16 len)
     if (rdx_mvp0_data_equals(data, len, stop, sizeof(stop) - 1)
         || rdx_mvp0_data_equals(data, len, stop_meeting_16k,
                                 sizeof(stop_meeting_16k) - 1)) {
-        rdx_mvp0_record_close("app_stop", 1);
+        rdx_mvp0_record_stop();
         return;
     }
     if (rdx_mvp0_data_equals(data, len, start, sizeof(start) - 1)
@@ -905,18 +953,31 @@ send_ack:
            (char *)response, (unsigned int)response_len, ret);
 }
 
-void rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
-                            rdx_mvp0_disconnect_callback_t disconnect_callback)
+int rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
+                           rdx_mvp0_disconnect_callback_t disconnect_callback)
 {
+    int ret;
+
     rdx_mvp0_send_callback = send_callback;
     rdx_mvp0_disconnect_callback = disconnect_callback;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
-    memset(&rdx_record_runtime, 0, sizeof(rdx_record_runtime));
+    memset(&rdx_online_record, 0, sizeof(rdx_online_record));
+    ret = rdx_record_engine_init(rdx_mvp0_record_engine_event, NULL);
+    if (ret) {
+        rdx_mvp0_send_callback = NULL;
+        rdx_mvp0_disconnect_callback = NULL;
+        return ret;
+    }
+    return 0;
 }
 
 void rdx_mvp0_protocol_exit(void)
 {
-    rdx_mvp0_record_close("protocol_exit", 0);
+    if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
+        rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
+        rdx_online_record.tx_count = 0;
+        rdx_ble_transport_set_record_streaming(0);
+    }
     rdx_mvp0_cancel_post_ack_action("protocol_exit");
     rdx_mvp0_send_callback = NULL;
     rdx_mvp0_disconnect_callback = NULL;
@@ -926,7 +987,15 @@ void rdx_mvp0_protocol_exit(void)
 void rdx_mvp0_protocol_set_connected(u8 connected)
 {
     if (!connected) {
-        rdx_mvp0_record_close("link_disconnected", 0);
+        if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
+            rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
+            rdx_online_record.tx_count = 0;
+            rdx_ble_transport_set_record_streaming(0);
+        }
+        rdx_record_engine_submit_system_event(
+            RDX_RECORD_SYSTEM_SOURCE_TRANSPORT,
+            RDX_RECORD_SYSTEM_LINK_LOST,
+            RDX_RECORD_CAUSE_LINK_LOST);
     }
     rdx_mvp0_cancel_post_ack_action(connected ? "new_connection"
                                               : "link_disconnected");
@@ -947,7 +1016,15 @@ void rdx_mvp0_protocol_set_identity_read(void)
 void rdx_mvp0_protocol_set_ccc(u8 enabled)
 {
     if (!enabled) {
-        rdx_mvp0_record_close("ccc_disabled", 0);
+        if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
+            rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
+            rdx_online_record.tx_count = 0;
+            rdx_ble_transport_set_record_streaming(0);
+        }
+        rdx_record_engine_submit_system_event(
+            RDX_RECORD_SYSTEM_SOURCE_TRANSPORT,
+            RDX_RECORD_SYSTEM_CCC_OFF,
+            RDX_RECORD_CAUSE_CCC_OFF);
     }
     rdx_mvp0_state.ccc_ready = !!enabled;
     if (!rdx_mvp0_state.ccc_ready) {

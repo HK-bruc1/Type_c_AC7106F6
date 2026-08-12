@@ -8,13 +8,11 @@
 #include "rdx_device_state.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_protocol.h"
+#include "rdx_record_engine.h"
 #include "system/init.h"
 #include "rdx_rtc.h"
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
 #include "rdx_resource_monitor.h"
-#endif
-#if TCFG_RDX_RECORD_SPIKE_ENABLE
-#include "rdx_record_spike.h"
 #endif
 
 static u8 rdx_protocol_started;
@@ -41,10 +39,16 @@ int rdx_protocol_start(void)
         rdx_device_state_exit();
         return ret;
     }
-    rdx_mvp0_protocol_init(rdx_ble_transport_send, rdx_ble_transport_disconnect);
+    ret = rdx_mvp0_protocol_init(rdx_ble_transport_send,
+                                 rdx_ble_transport_disconnect);
+    if (ret) {
+        rdx_device_state_exit();
+        return ret;
+    }
     ret = rdx_ble_transport_init();
     if (ret) {
         rdx_mvp0_protocol_exit();
+        rdx_record_engine_shutdown(100);
         rdx_device_state_exit();
         return ret;
     }
@@ -52,9 +56,6 @@ int rdx_protocol_start(void)
     rdx_protocol_started = 1;
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
     rdx_resource_monitor_start();
-#endif
-#if TCFG_RDX_RECORD_SPIKE_ENABLE
-    rdx_record_spike_schedule();
 #endif
     printf("[RDX] MVP0 started\n");
     return 0;
@@ -66,14 +67,15 @@ void rdx_protocol_stop(void)
         return;
     }
 
-#if TCFG_RDX_RECORD_SPIKE_ENABLE
-    rdx_record_spike_cancel();
-#endif
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
     rdx_resource_monitor_stop();
 #endif
     rdx_rtc_store_backup();
     rdx_mvp0_protocol_exit();
+    if (rdx_record_engine_shutdown(100)) {
+        printf("[RDX] record engine shutdown incomplete\n");
+        return;
+    }
     rdx_ble_transport_exit();
     rdx_device_state_exit();
     rdx_protocol_started = 0;
@@ -83,9 +85,6 @@ void rdx_protocol_stop(void)
 static void rdx_protocol_poweroff_backup(void)
 {
     if (rdx_protocol_started) {
-#if TCFG_RDX_RECORD_SPIKE_ENABLE
-        rdx_record_spike_cancel();
-#endif
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
         rdx_resource_monitor_stop();
 #endif
