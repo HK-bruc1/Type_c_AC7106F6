@@ -55,22 +55,24 @@
 #endif
 #endif
 
-/* One-shot firmware-only audio link test; keep disabled in business builds. */
-#ifndef TCFG_RDX_RECORD_SPIKE_ENABLE
-#define TCFG_RDX_RECORD_SPIKE_ENABLE       0
+/* RDX recording consumes tool-generated nodes; never enable them here. */
+#if !TCFG_ADC_NODE_ENABLE
+#error "RDX recording requires TCFG_ADC_NODE_ENABLE"
 #endif
-
-#if TCFG_RDX_RECORD_SPIKE_ENABLE
-#ifndef RDX_RECORD_SPIKE_START_DELAY_MS
-#define RDX_RECORD_SPIKE_START_DELAY_MS    5000
+#if !TCFG_AGC_NODE_ENABLE
+#error "RDX recording requires TCFG_AGC_NODE_ENABLE"
 #endif
-#ifndef RDX_RECORD_SPIKE_DURATION_MS
-#define RDX_RECORD_SPIKE_DURATION_MS       10000
+#if !TCFG_ENCODER_NODE_ENABLE
+#error "RDX recording requires TCFG_ENCODER_NODE_ENABLE"
 #endif
-#if (RDX_RECORD_SPIKE_START_DELAY_MS == 0) || \
-    (RDX_RECORD_SPIKE_DURATION_MS == 0)
-#error "RDX record Spike timing must be greater than zero"
+#if !TCFG_AI_TX_NODE_ENABLE
+#error "RDX recording requires TCFG_AI_TX_NODE_ENABLE"
 #endif
+#if !TCFG_ENC_OPUS_ENABLE
+#error "RDX recording requires TCFG_ENC_OPUS_ENABLE"
+#endif
+#if (TCFG_ENCODER_CHANNEL_NUM != 1)
+#error "RDX MEETING_V1 requires a mono Encoder"
 #endif
 
 #define TCFG_RDX_ENABLE            1

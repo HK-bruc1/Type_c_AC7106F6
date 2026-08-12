@@ -18,11 +18,7 @@
 #define RDX_COMPAT_BOUND_STATE                 0
 #define RDX_COMPAT_DEVICE_ABILITY              \
     (RDX_ABILITY_RTC                          | \
-     RDX_ABILITY_CONFERENCE_RECORDING         | \
-     RDX_ABILITY_LOCAL_STORAGE                | \
-     RDX_ABILITY_RECORD_PAUSE_RESUME          | \
-     RDX_ABILITY_RECORD_MARK                  | \
-     RDX_ABILITY_FLASHNOTE)
+     RDX_ABILITY_CONFERENCE_RECORDING)
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
 #define RDX_COMPAT_PROTOCOL_VERSION            0x17
 #define RDX_MVP0_FIXED_BATTERY_LEVEL           100
