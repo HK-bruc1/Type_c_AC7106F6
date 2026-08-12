@@ -163,8 +163,12 @@ static void rdx_record_spike_start(void *priv)
     }
 
     rdx_record_spike_snapshot("record_opened");
-    printf("[RDX][SPIKE] started sr=16000 ch=2 bitrate=32000"
-           " frame_ms=20 format=raw duration_ms=%u\n",
+    printf("[RDX][SPIKE] started sr=%u ch=%u bitrate=%u"
+           " frame_ms=%u format=raw duration_ms=%u\n",
+           AI_VOICE_FIXED_OPUS_SAMPLE_RATE,
+           AI_VOICE_FIXED_OPUS_CHANNELS,
+           AI_VOICE_FIXED_OPUS_BIT_RATE,
+           AI_VOICE_FIXED_OPUS_FRAME_MS,
            (unsigned int)RDX_RECORD_SPIKE_DURATION_MS);
 
     rdx_record_spike_stop_timer = sys_timeout_add(NULL,

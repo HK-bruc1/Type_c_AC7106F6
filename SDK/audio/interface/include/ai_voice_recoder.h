@@ -1,6 +1,11 @@
 #ifndef AI_VOICE_RECODER_H
 #define AI_VOICE_RECODER_H
 
+#define AI_VOICE_FIXED_OPUS_SAMPLE_RATE     16000
+#define AI_VOICE_FIXED_OPUS_CHANNELS        1
+#define AI_VOICE_FIXED_OPUS_BIT_RATE        32000
+#define AI_VOICE_FIXED_OPUS_FRAME_MS        20
+
 
 
 int ai_voice_recoder_open(u32 code_type, u8 ai_type);

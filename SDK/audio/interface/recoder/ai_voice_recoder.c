@@ -102,27 +102,28 @@ static int ai_voice_recoder_open_internal(u32 code_type, u8 ai_type,
         //   不起效的参数：
         //   bit_rate, sample_rate, ch_num, bit_width
         //   不起效参数只用作阅读，需要修改请到音频流程图的”编码器“节点修改
-        enc_fmt.bit_rate = use_fixed_opus_fmt ? 32000 : 16000;
+        enc_fmt.bit_rate = use_fixed_opus_fmt
+                           ? AI_VOICE_FIXED_OPUS_BIT_RATE : 16000;
         enc_fmt.complexity = 0;
-        enc_fmt.sample_rate = 16000;
+        enc_fmt.sample_rate = AI_VOICE_FIXED_OPUS_SAMPLE_RATE;
         enc_fmt.format = use_fixed_opus_fmt ? 0 : (ai_type >> 6);
         if (use_fixed_opus_fmt) {
-            enc_fmt.ch_num = 1;
+            enc_fmt.ch_num = AI_VOICE_FIXED_OPUS_CHANNELS;
             enc_fmt.bit_width = DATA_BIT_WIDE_16BIT;
-            enc_fmt.frame_dms = 20 * 10;
+            enc_fmt.frame_dms = AI_VOICE_FIXED_OPUS_FRAME_MS * 10;
 
-            stream_enc_fmt.channel = 1;
+            stream_enc_fmt.channel = AI_VOICE_FIXED_OPUS_CHANNELS;
             stream_enc_fmt.bit_width = DATA_BIT_WIDE_16BIT;
-            stream_enc_fmt.frame_dms = 20 * 10;
-            stream_enc_fmt.sample_rate = 16000;
-            stream_enc_fmt.bit_rate = 32000;
+            stream_enc_fmt.frame_dms = AI_VOICE_FIXED_OPUS_FRAME_MS * 10;
+            stream_enc_fmt.sample_rate = AI_VOICE_FIXED_OPUS_SAMPLE_RATE;
+            stream_enc_fmt.bit_rate = AI_VOICE_FIXED_OPUS_BIT_RATE;
             stream_enc_fmt.coding_type = AUDIO_CODING_OPUS;
             stream_enc_fmt_valid = 1;
 
-            fmt.sample_rate = 16000;
-            fmt.frame_dms = 20 * 10;
+            fmt.sample_rate = AI_VOICE_FIXED_OPUS_SAMPLE_RATE;
+            fmt.frame_dms = AI_VOICE_FIXED_OPUS_FRAME_MS * 10;
             fmt.channel_mode = AUDIO_CH_MIX;
-            fmt.bit_rate = 32000;
+            fmt.bit_rate = AI_VOICE_FIXED_OPUS_BIT_RATE;
         }
         fmt.coding_type = AUDIO_CODING_OPUS;
         break;

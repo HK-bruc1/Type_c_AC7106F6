@@ -42,9 +42,9 @@ static const u8 rdx_cmd_unbound[] = RDX_CMD_DL_UNBOUND;
 static const u8 rdx_cmd_set_default[] = RDX_CMD_DL_SET_DEFAULT;
 static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
 static const u8 rdx_rsp_record_active[] =
-    "*DEV#record#1#0#1#1#1#0#";
+    "*DEV#record#1#0#1#0#1#0#";
 static const u8 rdx_rsp_record_stop[] =
-    "*DEV#record#0#0#1#1#1#0#";
+    "*DEV#record#0#0#1#0#1#0#";
 static const char *const rdx_mvp0_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
 };
@@ -92,6 +92,8 @@ typedef struct {
     u8 tx_tail;
     u8 tx_count;
     u8 tx_peak;
+    u8 opus_format_checked;
+    u8 opus_channels;
     u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_record_runtime_t;
@@ -253,6 +255,15 @@ static int rdx_mvp0_record_frame(u8 *data, u32 len)
     if (len != RDX_RECORD_EXPECTED_FRAME_SIZE) {
         rdx_record_runtime.invalid_count++;
     }
+    if (!rdx_record_runtime.opus_format_checked) {
+        rdx_record_runtime.opus_channels = (data[0] & BIT(2)) ? 2 : 1;
+        rdx_record_runtime.opus_format_checked = 1;
+        printf("[RDX][RECORD] opus_toc=0x%02X ch=%u expected_ch=%u %s\n",
+               data[0], rdx_record_runtime.opus_channels,
+               AI_VOICE_FIXED_OPUS_CHANNELS,
+               rdx_record_runtime.opus_channels == AI_VOICE_FIXED_OPUS_CHANNELS
+               ? "ok" : "mismatch");
+    }
 
     header_len = snprintf((char *)packet, sizeof(packet),
                           "*DEV#stream#%u#%u#",
@@ -303,7 +314,7 @@ static void rdx_mvp0_record_close(const char *reason, u8 notify_app)
         rdx_record_runtime.state = RDX_RECORD_STATE_IDLE;
         printf("[RDX][RECORD] stopped reason=%s frames=%u warmup=%u"
                " sent=%u send_fail=%u invalid=%u queued=%u"
-               " pending=%u peak=%u drop=%u\n",
+               " pending=%u peak=%u drop=%u opus_ch=%u\n",
                reason,
                (unsigned int)rdx_record_runtime.frame_count,
                (unsigned int)rdx_record_runtime.warmup_count,
@@ -313,7 +324,8 @@ static void rdx_mvp0_record_close(const char *reason, u8 notify_app)
                (unsigned int)rdx_record_runtime.queued_count,
                (unsigned int)rdx_record_runtime.tx_count,
                (unsigned int)rdx_record_runtime.tx_peak,
-               (unsigned int)rdx_record_runtime.queue_drop_count);
+               (unsigned int)rdx_record_runtime.queue_drop_count,
+               (unsigned int)rdx_record_runtime.opus_channels);
         rdx_record_runtime.tx_count = 0;
     }
     if (notify_app) {
@@ -362,8 +374,12 @@ static void rdx_mvp0_record_start(void)
         return;
     }
     rdx_record_runtime.state = RDX_RECORD_STATE_ACTIVE;
-    printf("[RDX][RECORD] started scene=meeting sr=16000 ch=2"
-           " bitrate=32000 frame_ms=20 format=raw opus_format=1093142528\n");
+    printf("[RDX][RECORD] started scene=meeting sr=%u ch=%u"
+           " bitrate=%u frame_ms=%u format=raw\n",
+           AI_VOICE_FIXED_OPUS_SAMPLE_RATE,
+           AI_VOICE_FIXED_OPUS_CHANNELS,
+           AI_VOICE_FIXED_OPUS_BIT_RATE,
+           AI_VOICE_FIXED_OPUS_FRAME_MS);
 }
 
 static void rdx_mvp0_handle_record(const u8 *data, u16 len)
