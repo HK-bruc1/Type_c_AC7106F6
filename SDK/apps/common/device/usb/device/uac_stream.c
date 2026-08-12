@@ -21,6 +21,7 @@
 #include "pc_spk_file.h"
 #include "pc_mic_recoder.h"
 #include "app_msg.h"
+#include "audio_capture_lease.h"
 
 
 #define LOG_TAG_CONST       USB
@@ -38,6 +39,13 @@
 
 static volatile u8 speaker_stream_is_open = 0;
 static volatile u8 mic_stream_is_open = 0;
+static struct audio_capture_lease uac_mic_capture_lease;
+static const struct audio_capture_lease_client uac_capture_lease_client = {
+    .name = "usb_audio",
+    .priority = 0xff,
+};
+
+#define UAC_MIC_CAPTURE_PREEMPT_TIMEOUT_TICKS   30
 
 struct uac_speaker_handle {
     cbuffer_t cbuf;
@@ -449,6 +457,7 @@ u8 uac_get_mic_stream_status(void)
 u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
 {
     u32 last_sr = 0;
+    int lease_ret;
 
 #if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
     last_sr = pc_mic_get_fmt_sample_rate();
@@ -479,6 +488,15 @@ u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
         }
         mic_timestamp = jiffies;
         return 0;
+    }
+
+    lease_ret = audio_capture_lease_acquire(&uac_capture_lease_client,
+                                            &uac_mic_capture_lease,
+                                            1,
+                                            UAC_MIC_CAPTURE_PREEMPT_TIMEOUT_TICKS);
+    if (lease_ret) {
+        log_error("mic lease failed=%d", lease_ret);
+        return lease_ret;
     }
 
     mic_tx_handler = NULL;	//这里需要赋值为NULL
@@ -519,6 +537,7 @@ static void uac_mic_stream_close_delay(void *priv)
     }
     app_send_message(APP_MSG_PC_AUDIO_MIC_CLOSE, 0);
 #endif
+    audio_capture_lease_release(&uac_mic_capture_lease);
 }
 
 void uac_mic_stream_close(int release)
@@ -544,4 +563,3 @@ void uac_mic_stream_close(int release)
         }
     }
 }
-

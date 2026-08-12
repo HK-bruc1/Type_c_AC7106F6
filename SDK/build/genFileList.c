@@ -1924,6 +1924,11 @@ c_SRC_FILES += \
 
 #endif
 
+#if TCFG_RDX_ENABLE || TCFG_USB_SLAVE_AUDIO_SPK_ENABLE || TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
+c_SRC_FILES += \
+	audio/common/audio_capture_lease.c
+#endif
+
 #if TCFG_USB_SLAVE_CDC_ENABLE
 c_SRC_FILES += \
     apps/common/device/usb/device/cdc.c \
