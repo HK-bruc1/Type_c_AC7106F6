@@ -147,6 +147,9 @@ const struct task_info task_info_table[] = {
 #if (THIRD_PARTY_PROTOCOLS_SEL & (GFPS_EN | REALME_EN | TME_EN | DMA_EN | GMA_EN | MMA_EN | FMNA_EN))
     {"app_proto",           2,     0,   768,   64  },
 #endif
+#if TCFG_RDX_ENABLE
+    {"rdx_record",          4,     0,   512,   128 },
+#endif
     //{"ui",                  3,     0,   384 - 64,  128  },
 #if (TCFG_DEV_MANAGER_ENABLE)
     {"dev_mg",           	3,     0,   512,   512 },
