@@ -4,35 +4,37 @@
 #include "rdx_protocol/rdx_protocol_defs.h"
 
 /*
- * MVP0 temporarily mirrors the selected 701 reference product so the BLE
- * transport can be validated with the same APP. Replace these values only
- * after a Golden Trace and the target product identity have been frozen.
+ * MVP0 阶段暂时沿用选定的 701 参考产品身份，以便使用同一个 APP
+ * 验证 BLE 通信链路。只有在 Golden Trace 和目标产品身份均已冻结后，
+ * 才允许替换以下配置值。
  */
 #define RDX_COMPAT_LOCAL_NAME                  "Zenchord Case 0000"
 #define RDX_COMPAT_PRODUCT_CODE                "603"
 #define RDX_COMPAT_FACTORY_CODE                "ZENCHD"
 #define RDX_COMPAT_PRODUCT_TYPE                "E1"
 /*
- * Fixed 2-byte identity suffix carried at the end of Manufacturer Data.
- * The device does not interpret it, but the APP may use it for discovery or
- * compatibility matching, so it is not an unused placeholder and must not be
- * removed or changed without a confirmed APP/protocol contract.
- * It is neither a color code, a Device Ability switch, nor Record Mark.
+ * Manufacturer Data 末尾携带的固定 2 字节身份尾标。
+ * 设备端不解析该字段，但 APP 可能使用它进行设备发现或兼容性匹配，
+ * 因此它不是无效的占位字段。未确认 APP/协议约定前，不得删除或修改。
+ * 该字段不是颜色码、Device Ability 功能开关，也不是录音标记。
  */
 #define RDX_COMPAT_SELF_MARK                   "NV"
 
 /*
- * Selects the RDX Identity characteristic wire layout, not a hardware or
- * feature switch. 1 uses the charge-case-compatible 95-byte "C,..." layout;
- * 0 uses the non-case layout that currently returns only the 24-byte AuthKey.
- * It does not enable charging, storage, recording, or any Device Ability.
+ * RDX Identity 特征值的线上数据格式。
+ * 这些配置仅选择 APP 读取的认证/身份数据编码方式，不用于声明产品类型，
+ * 也不会启用充电、存储、录音或任何 Device Ability 功能。
  */
-#define RDX_COMPAT_PRODUCT_IS_CHARGE_CASE      1
+#define RDX_IDENTITY_FORMAT_AUTH_KEY_ONLY      1
+#define RDX_IDENTITY_FORMAT_CASE_COMPOSITE     2
+
+/* 当前产品使用 95 字节的 "C,..." 仓聚合身份格式。 */
+#define RDX_COMPAT_IDENTITY_FORMAT             RDX_IDENTITY_FORMAT_CASE_COMPOSITE
 
 /*
- * Product feature selection has one source of truth: Device Ability.
- * rdx_integration_config.h derives all internal module gates from this mask;
- * do not add parallel product switches for individual RDX abilities.
+ * 产品功能只允许通过 Device Ability 统一配置。
+ * rdx_integration_config.h 会根据该掩码派生所有内部模块的编译门控；
+ * 不要再为单项 RDX 能力增加平行的产品功能开关。
  */
 #define RDX_COMPAT_DEVICE_ABILITY              \
     (RDX_ABILITY_RTC                          | \
@@ -47,7 +49,7 @@
 #define RDX_COMPAT_FIRMWARE_VERSION            "1.0.0"
 #define RDX_COMPAT_HARDWARE_VERSION            "0.0.1"
 
-/* Official Zenchord compatibility set; the MAC-limited test key is excluded. */
+/* Zenchord 官方兼容密钥集合，不包含限制 MAC 地址的测试密钥。 */
 #define RDX_COMPAT_APP_KEY_PRIMARY             "14F6F7A1508E4155"
 #define RDX_COMPAT_APP_KEY_1                   "385FA36EC106DE3D"
 #define RDX_COMPAT_APP_KEY_2                   "7C0BAF778B727175"
@@ -56,7 +58,7 @@
     RDX_COMPAT_APP_KEY_1,                      \
     RDX_COMPAT_APP_KEY_2
 
-/* Development-only identity placeholders. Never put production keys here. */
+/* 仅供开发阶段使用的身份占位值，严禁在此填写量产密钥。 */
 #define RDX_COMPAT_AUTH_KEY                    "000000000000000000000000"
 #define RDX_COMPAT_WIFI_MAC                    "000000000000"
 #define RDX_COMPAT_LABEL_SN                    "0000000000000000"

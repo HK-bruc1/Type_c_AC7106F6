@@ -26,7 +26,7 @@ typedef char rdx_label_sn_size_check[
 
 static void rdx_identity_build_read_value(void)
 {
-#if RDX_COMPAT_PRODUCT_IS_CHARGE_CASE
+#if RDX_COMPAT_IDENTITY_FORMAT == RDX_IDENTITY_FORMAT_CASE_COMPOSITE
     int len;
 
     len = snprintf((char *)rdx_read_value, sizeof(rdx_read_value),
@@ -41,9 +41,11 @@ static void rdx_identity_build_read_value(void)
     } else {
         rdx_read_value_len = len;
     }
-#else
+#elif RDX_COMPAT_IDENTITY_FORMAT == RDX_IDENTITY_FORMAT_AUTH_KEY_ONLY
     rdx_read_value_len = sizeof(RDX_COMPAT_AUTH_KEY) - 1;
     memcpy(rdx_read_value, RDX_COMPAT_AUTH_KEY, rdx_read_value_len);
+#else
+#error "Unsupported RDX_COMPAT_IDENTITY_FORMAT"
 #endif
 }
 
