@@ -1058,10 +1058,23 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_identity.c \
     apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c \
     apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
+
+#if RDX_CFG_RTC_ENABLE
+c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
+#endif
+
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+#endif
+
+#if RDX_CFG_RECORD_MARK_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_session_metadata_service.c
+#endif
 
 #if TCFG_RDX_RESOURCE_MONITOR_ENABLE
 c_SRC_FILES += \

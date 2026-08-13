@@ -1,6 +1,6 @@
 #include "app_config.h"
 
-#if TCFG_RDX_ENABLE
+#if TCFG_RDX_ENABLE && RDX_CFG_CONFERENCE_RECORDING_ENABLE
 
 #include "system/includes.h"
 #include "spinlock.h"
@@ -77,6 +77,9 @@ struct rdx_record_engine_runtime {
     u32 stale_count;
     u32 stop_discarded;
     u32 format_mismatch_count;
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+    u8 first_frame_after_resume;
+#endif
 };
 
 static struct rdx_record_engine_runtime rdx_record_engine;
@@ -110,12 +113,39 @@ static void rdx_record_engine_emit(
         .result = result,
         .termination_mode = termination_mode,
         .cause = cause,
+        .active_pts = 0,
+        .source = 0,
     };
 
     if (rdx_record_engine.event_callback) {
         rdx_record_engine.event_callback(rdx_record_engine.event_priv, &event);
     }
 }
+
+#if RDX_CFG_RECORD_MARK_ENABLE
+static void rdx_record_engine_emit_mark(
+    const struct rdx_record_request *request,
+    enum rdx_record_result result)
+{
+    struct rdx_record_engine_event event = {
+        .type = RDX_RECORD_ENGINE_MARK_COMPLETE,
+        .request_id = request->request_id,
+        .session_id = rdx_record_engine.session_id,
+        .capture_generation = rdx_record_engine.capture_generation,
+        .controller_id = request->controller_id,
+        .result = result,
+        .termination_mode = RDX_RECORD_TERMINATION_NONE,
+        .cause = RDX_RECORD_CAUSE_NONE,
+        .active_pts = (u64)rdx_record_engine.session_frame_seq
+                      * RDX_RECORD_MEETING_V1_FRAME_MS,
+        .source = request->source,
+    };
+
+    if (rdx_record_engine.event_callback) {
+        rdx_record_engine.event_callback(rdx_record_engine.event_priv, &event);
+    }
+}
+#endif
 
 static void rdx_record_engine_clear_queues(void)
 {
@@ -338,6 +368,9 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
     rdx_record_engine.stale_count = 0;
     rdx_record_engine.stop_discarded = 0;
     rdx_record_engine.format_mismatch_count = 0;
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+    rdx_record_engine.first_frame_after_resume = 0;
+#endif
     rdx_record_engine_clear_queues();
 
     if (rdx_record_engine.destination_ops
@@ -502,11 +535,31 @@ static void rdx_record_engine_cancel_requests(
     struct rdx_record_request request;
 
     while (rdx_record_engine_take_request(&request)) {
-        rdx_record_engine_emit(RDX_RECORD_ENGINE_START_COMPLETE,
-                               request.request_id,
+        enum rdx_record_engine_event_type type;
+
+        switch (request.type) {
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+        case RDX_RECORD_REQUEST_PAUSE:
+            type = RDX_RECORD_ENGINE_PAUSE_COMPLETE;
+            break;
+        case RDX_RECORD_REQUEST_RESUME:
+            type = RDX_RECORD_ENGINE_RESUME_COMPLETE;
+            break;
+#endif
+#if RDX_CFG_RECORD_MARK_ENABLE
+        case RDX_RECORD_REQUEST_MARK:
+            rdx_record_engine_emit_mark(&request,
+                                        RDX_RECORD_RESULT_CANCELLED);
+            continue;
+#endif
+        case RDX_RECORD_REQUEST_START:
+        default:
+            type = RDX_RECORD_ENGINE_START_COMPLETE;
+            break;
+        }
+        rdx_record_engine_emit(type, request.request_id,
                                RDX_RECORD_RESULT_CANCELLED,
-                               termination_mode,
-                               cause);
+                               termination_mode, cause);
     }
 }
 
@@ -539,7 +592,12 @@ static void rdx_record_engine_process_candidate(
         || candidate->session_id != rdx_record_engine.session_id
         || candidate->capture_generation !=
         rdx_record_engine.capture_generation
-        || rdx_record_engine.state != RDX_RECORD_STATE_ACTIVE) {
+        || (rdx_record_engine.state != RDX_RECORD_STATE_ACTIVE
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+            && rdx_record_engine.state
+            != RDX_RECORD_STATE_PAUSING_BY_USER
+#endif
+            )) {
         rdx_record_engine.stale_count++;
         return;
     }
@@ -565,6 +623,12 @@ static void rdx_record_engine_process_candidate(
     frame.active_pts =
         (u64)frame.session_frame_seq * RDX_RECORD_MEETING_V1_FRAME_MS;
     frame.duration = RDX_RECORD_MEETING_V1_FRAME_MS;
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+    if (rdx_record_engine.first_frame_after_resume) {
+        frame.flags |= RDX_RECORD_FRAME_FIRST_AFTER_RESUME;
+        rdx_record_engine.first_frame_after_resume = 0;
+    }
+#endif
     frame.payload = candidate->payload;
     frame.payload_len = candidate->len;
     if (!rdx_record_engine.destination_ops
@@ -579,6 +643,155 @@ static void rdx_record_engine_process_candidate(
                                RDX_RECORD_RESULT_QUEUE_FULL);
     }
 }
+
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+static void rdx_record_engine_pause(const struct rdx_record_request *request)
+{
+    struct rdx_record_candidate candidate;
+
+    if (rdx_record_engine.state != RDX_RECORD_STATE_ACTIVE
+        || request->controller_id != rdx_record_engine.controller_id
+        || request->session_id != rdx_record_engine.session_id) {
+        rdx_record_engine_emit(RDX_RECORD_ENGINE_PAUSE_COMPLETE,
+                               request->request_id,
+                               request->controller_id
+                               != rdx_record_engine.controller_id
+                               ? RDX_RECORD_RESULT_NOT_CONTROLLER
+                               : RDX_RECORD_RESULT_BAD_STATE,
+                               RDX_RECORD_TERMINATION_NONE,
+                               RDX_RECORD_CAUSE_NONE);
+        return;
+    }
+
+    spin_lock(&rdx_record_engine.lock);
+    rdx_record_engine.frame_gate = 0;
+    rdx_record_engine.state = RDX_RECORD_STATE_PAUSING_BY_USER;
+    spin_unlock(&rdx_record_engine.lock);
+
+    rdx_record_audio_br56_close();
+    while (rdx_record_engine_take_candidate(&candidate)) {
+        rdx_record_engine_process_candidate(&candidate);
+        if (rdx_record_engine.state == RDX_RECORD_STATE_IDLE) {
+            return;
+        }
+    }
+    audio_capture_lease_release(&rdx_record_engine.capture_lease);
+    rdx_record_engine.state = RDX_RECORD_STATE_PAUSED_BY_USER;
+    printf("[RDX][ENGINE] paused request=%u session=%u capture=%u"
+           " active_pts=%u\n",
+           (unsigned int)request->request_id,
+           (unsigned int)rdx_record_engine.session_id,
+           (unsigned int)rdx_record_engine.capture_generation,
+           (unsigned int)(rdx_record_engine.session_frame_seq
+                          * RDX_RECORD_MEETING_V1_FRAME_MS));
+    rdx_record_engine_emit(RDX_RECORD_ENGINE_PAUSE_COMPLETE,
+                           request->request_id, RDX_RECORD_RESULT_OK,
+                           RDX_RECORD_TERMINATION_NONE,
+                           RDX_RECORD_CAUSE_NONE);
+}
+
+static void rdx_record_engine_resume(const struct rdx_record_request *request)
+{
+    struct rdx_record_audio_open_params audio_params;
+    int ret;
+
+    if (rdx_record_engine.state != RDX_RECORD_STATE_PAUSED_BY_USER
+        || request->controller_id != rdx_record_engine.controller_id
+        || request->session_id != rdx_record_engine.session_id) {
+        rdx_record_engine_emit(RDX_RECORD_ENGINE_RESUME_COMPLETE,
+                               request->request_id,
+                               request->controller_id
+                               != rdx_record_engine.controller_id
+                               ? RDX_RECORD_RESULT_NOT_CONTROLLER
+                               : RDX_RECORD_RESULT_BAD_STATE,
+                               RDX_RECORD_TERMINATION_NONE,
+                               RDX_RECORD_CAUSE_NONE);
+        return;
+    }
+
+    rdx_record_engine.state = RDX_RECORD_STATE_RESUMING;
+    rdx_record_engine.capture_generation = rdx_record_next_token(
+        rdx_record_engine.next_capture_generation);
+    rdx_record_engine.next_capture_generation =
+        rdx_record_engine.capture_generation;
+    rdx_record_engine.capture_frame_seq = 0;
+    rdx_record_engine.warmup_count = 0;
+    rdx_record_engine_clear_queues();
+
+    ret = audio_capture_lease_acquire(&rdx_record_capture_client,
+                                      &rdx_record_engine.capture_lease,
+                                      0, 0);
+    if (ret) {
+        goto resume_failed;
+    }
+
+    spin_lock(&rdx_record_engine.lock);
+    if (rdx_record_engine.stop_latch.pending
+        || rdx_record_engine.system_latch.pending) {
+        spin_unlock(&rdx_record_engine.lock);
+        ret = -1;
+        goto release_lease;
+    }
+    rdx_record_engine.frame_gate = 1;
+    spin_unlock(&rdx_record_engine.lock);
+
+    audio_params.format_id = rdx_record_engine.format_id;
+    audio_params.engine_generation = rdx_record_engine.engine_generation;
+    audio_params.session_id = rdx_record_engine.session_id;
+    audio_params.capture_generation = rdx_record_engine.capture_generation;
+    audio_params.frame_callback = rdx_record_engine_audio_frame;
+    audio_params.frame_priv = &rdx_record_engine;
+    ret = rdx_record_audio_br56_open(&audio_params);
+    if (ret) {
+        rdx_record_engine.frame_gate = 0;
+        goto release_lease;
+    }
+
+    rdx_record_engine.first_frame_after_resume = 1;
+    rdx_record_engine.state = RDX_RECORD_STATE_ACTIVE;
+    printf("[RDX][ENGINE] resumed request=%u session=%u capture=%u\n",
+           (unsigned int)request->request_id,
+           (unsigned int)rdx_record_engine.session_id,
+           (unsigned int)rdx_record_engine.capture_generation);
+    rdx_record_engine_emit(RDX_RECORD_ENGINE_RESUME_COMPLETE,
+                           request->request_id, RDX_RECORD_RESULT_OK,
+                           RDX_RECORD_TERMINATION_NONE,
+                           RDX_RECORD_CAUSE_NONE);
+    return;
+
+release_lease:
+    rdx_record_audio_br56_close();
+    audio_capture_lease_release(&rdx_record_engine.capture_lease);
+resume_failed:
+    rdx_record_engine.frame_gate = 0;
+    rdx_record_engine_clear_queues();
+    rdx_record_engine.state = RDX_RECORD_STATE_PAUSED_BY_USER;
+    printf("[RDX][ENGINE] resume_failed request=%u session=%u ret=%d\n",
+           (unsigned int)request->request_id,
+           (unsigned int)rdx_record_engine.session_id, ret);
+    rdx_record_engine_emit(RDX_RECORD_ENGINE_RESUME_COMPLETE,
+                           request->request_id,
+                           ret == -EBUSY ? RDX_RECORD_RESULT_BUSY
+                                         : RDX_RECORD_RESULT_START_FAILED,
+                           RDX_RECORD_TERMINATION_NONE,
+                           RDX_RECORD_CAUSE_START_FAILED);
+}
+#endif
+
+#if RDX_CFG_RECORD_MARK_ENABLE
+static void rdx_record_engine_mark(const struct rdx_record_request *request)
+{
+    enum rdx_record_result result = RDX_RECORD_RESULT_OK;
+
+    if (request->controller_id != rdx_record_engine.controller_id) {
+        result = RDX_RECORD_RESULT_NOT_CONTROLLER;
+    } else if (rdx_record_engine.state != RDX_RECORD_STATE_ACTIVE
+               || request->session_id != rdx_record_engine.session_id) {
+        result = RDX_RECORD_RESULT_BAD_STATE;
+    }
+    rdx_record_engine_emit_mark(request, result);
+}
+#endif
 
 static u8 rdx_record_engine_process_one(void)
 {
@@ -641,6 +854,16 @@ static u8 rdx_record_engine_process_one(void)
     if (rdx_record_engine_take_request(&request)) {
         if (request.type == RDX_RECORD_REQUEST_START) {
             rdx_record_engine_start(&request);
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+        } else if (request.type == RDX_RECORD_REQUEST_PAUSE) {
+            rdx_record_engine_pause(&request);
+        } else if (request.type == RDX_RECORD_REQUEST_RESUME) {
+            rdx_record_engine_resume(&request);
+#endif
+#if RDX_CFG_RECORD_MARK_ENABLE
+        } else if (request.type == RDX_RECORD_REQUEST_MARK) {
+            rdx_record_engine_mark(&request);
+#endif
         }
         return 1;
     }
@@ -727,7 +950,16 @@ int rdx_record_engine_submit(const struct rdx_record_request *request)
         rdx_record_engine_wake();
         return RDX_RECORD_RESULT_OK;
     }
-    if (request->type != RDX_RECORD_REQUEST_START) {
+    if (request->type != RDX_RECORD_REQUEST_START
+#if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
+        && request->type != RDX_RECORD_REQUEST_PAUSE
+        && request->type != RDX_RECORD_REQUEST_RESUME
+#endif
+#if RDX_CFG_RECORD_MARK_ENABLE
+        && request->type != RDX_RECORD_REQUEST_MARK) {
+#else
+        ) {
+#endif
         spin_unlock(&rdx_record_engine.lock);
         return RDX_RECORD_RESULT_BAD_STATE;
     }
@@ -811,4 +1043,4 @@ enum rdx_record_state rdx_record_engine_get_state(void)
     return rdx_record_engine.state;
 }
 
-#endif
+#endif /* TCFG_RDX_ENABLE && RDX_CFG_CONFERENCE_RECORDING_ENABLE */

@@ -16,9 +16,17 @@
 
 #define RDX_COMPAT_PRODUCT_IS_CHARGE_CASE      1
 #define RDX_COMPAT_BOUND_STATE                 0
+
+/*
+ * Product feature selection has one source of truth: Device Ability.
+ * rdx_integration_config.h derives all internal module gates from this mask;
+ * do not add parallel product switches for individual RDX abilities.
+ */
 #define RDX_COMPAT_DEVICE_ABILITY              \
     (RDX_ABILITY_RTC                          | \
-     RDX_ABILITY_CONFERENCE_RECORDING)
+     RDX_ABILITY_CONFERENCE_RECORDING         | \
+     RDX_ABILITY_RECORD_PAUSE_RESUME           | \
+     RDX_ABILITY_RECORD_MARK)
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
 #define RDX_COMPAT_PROTOCOL_VERSION            0x17
 #define RDX_MVP0_FIXED_BATTERY_LEVEL           100

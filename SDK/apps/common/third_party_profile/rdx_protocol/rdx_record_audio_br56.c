@@ -1,6 +1,6 @@
 #include "app_config.h"
 
-#if TCFG_RDX_ENABLE
+#if TCFG_RDX_ENABLE && RDX_CFG_CONFERENCE_RECORDING_ENABLE
 
 #include "system/includes.h"
 #include "spinlock.h"
@@ -199,4 +199,4 @@ void rdx_record_audio_br56_close(void)
     spin_unlock(&rdx_record_audio.lock);
 }
 
-#endif
+#endif /* TCFG_RDX_ENABLE && RDX_CFG_CONFERENCE_RECORDING_ENABLE */

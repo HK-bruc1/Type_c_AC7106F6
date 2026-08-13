@@ -13,6 +13,8 @@
 #define RDX_RECORD_CANDIDATE_QUEUE_DEPTH        16
 #define RDX_RECORD_CONTROL_QUEUE_DEPTH          4
 
+#define RDX_RECORD_FRAME_FIRST_AFTER_RESUME     BIT(0)
+
 enum rdx_record_format_id {
     RDX_RECORD_FORMAT_NONE = 0,
     RDX_RECORD_FORMAT_MEETING_V1 = 1,
@@ -26,6 +28,9 @@ enum rdx_record_controller_id {
 enum rdx_record_request_type {
     RDX_RECORD_REQUEST_START = 1,
     RDX_RECORD_REQUEST_STOP = 2,
+    RDX_RECORD_REQUEST_PAUSE = 3,
+    RDX_RECORD_REQUEST_RESUME = 4,
+    RDX_RECORD_REQUEST_MARK = 5,
 };
 
 enum rdx_record_state {
@@ -93,6 +98,14 @@ enum rdx_record_system_event_type {
 enum rdx_record_engine_event_type {
     RDX_RECORD_ENGINE_START_COMPLETE = 1,
     RDX_RECORD_ENGINE_SESSION_STOPPED = 2,
+    RDX_RECORD_ENGINE_PAUSE_COMPLETE = 3,
+    RDX_RECORD_ENGINE_RESUME_COMPLETE = 4,
+    RDX_RECORD_ENGINE_MARK_COMPLETE = 5,
+};
+
+enum rdx_record_mark_source {
+    RDX_RECORD_MARK_SOURCE_KEY = 0,
+    RDX_RECORD_MARK_SOURCE_APP = 1,
 };
 
 struct rdx_record_frame {
@@ -116,9 +129,11 @@ struct rdx_record_destination_ops {
 
 struct rdx_record_request {
     u32 request_id;
+    u32 session_id;
     enum rdx_record_request_type type;
     enum rdx_record_controller_id controller_id;
     enum rdx_record_format_id format_id;
+    u8 source;
     const struct rdx_record_destination_ops *destination_ops;
     void *destination_priv;
 };
@@ -132,6 +147,8 @@ struct rdx_record_engine_event {
     enum rdx_record_result result;
     enum rdx_record_termination_mode termination_mode;
     enum rdx_record_cause cause;
+    u64 active_pts;
+    u8 source;
 };
 
 typedef void (*rdx_record_engine_event_callback_t)(

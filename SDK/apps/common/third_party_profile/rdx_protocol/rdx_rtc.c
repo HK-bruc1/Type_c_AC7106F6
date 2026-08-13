@@ -1,6 +1,6 @@
 #include "app_config.h"
 
-#if TCFG_RDX_ENABLE
+#if TCFG_RDX_ENABLE && RDX_CFG_RTC_ENABLE
 
 #include "system/includes.h"
 #include "user_cfg_id.h"
@@ -193,4 +193,4 @@ int rdx_rtc_store_backup(void)
     return 0;
 }
 
-#endif /* TCFG_RDX_ENABLE */
+#endif /* TCFG_RDX_ENABLE && RDX_CFG_RTC_ENABLE */
