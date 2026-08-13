@@ -4,9 +4,8 @@
 
 #include "system/includes.h"
 #include "spinlock.h"
-#include "media/audio_base.h"
-#include "ai_voice_recoder.h"
 #include "audio_capture_lease.h"
+#include "rdx_record_audio_br56.h"
 #include "rdx_record_engine.h"
 
 #define RDX_RECORD_TASK_NAME                    "rdx_record"
@@ -127,13 +126,28 @@ static void rdx_record_engine_clear_queues(void)
     spin_unlock(&rdx_record_engine.lock);
 }
 
-static int rdx_record_engine_ai_tx(u8 *data, u32 len)
+static int rdx_record_engine_audio_frame(void *priv,
+                                         u32 engine_generation,
+                                         u32 session_id,
+                                         u32 capture_generation,
+                                         const u8 *data,
+                                         u32 len)
 {
     struct rdx_record_candidate *candidate;
     u8 tail;
 
+    if (priv != &rdx_record_engine) {
+        return 0;
+    }
     rdx_record_engine.produced_count++;
     spin_lock(&rdx_record_engine.lock);
+    if (engine_generation != rdx_record_engine.engine_generation
+        || session_id != rdx_record_engine.session_id
+        || capture_generation != rdx_record_engine.capture_generation) {
+        rdx_record_engine.stale_count++;
+        spin_unlock(&rdx_record_engine.lock);
+        return 0;
+    }
     if (!rdx_record_engine.frame_gate
         || (rdx_record_engine.state != RDX_RECORD_STATE_STARTING
             && rdx_record_engine.state != RDX_RECORD_STATE_ACTIVE)) {
@@ -166,9 +180,9 @@ static int rdx_record_engine_ai_tx(u8 *data, u32 len)
 
     tail = rdx_record_engine.candidate_tail;
     candidate = &rdx_record_engine.candidates[tail];
-    candidate->engine_generation = rdx_record_engine.engine_generation;
-    candidate->session_id = rdx_record_engine.session_id;
-    candidate->capture_generation = rdx_record_engine.capture_generation;
+    candidate->engine_generation = engine_generation;
+    candidate->session_id = session_id;
+    candidate->capture_generation = capture_generation;
     candidate->len = len;
     memcpy(candidate->payload, data, len);
     rdx_record_engine.candidate_tail =
@@ -203,7 +217,7 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
 
     rdx_record_engine.frame_gate = 0;
     rdx_record_engine.state = RDX_RECORD_STATE_STOPPING;
-    ai_voice_recoder_close();
+    rdx_record_audio_br56_close();
     rdx_record_engine_clear_queues();
     if (rdx_record_engine.destination_ops
         && rdx_record_engine.destination_ops->cancel) {
@@ -275,6 +289,7 @@ static const struct audio_capture_lease_client rdx_record_capture_client = {
 
 static void rdx_record_engine_start(const struct rdx_record_request *request)
 {
+    struct rdx_record_audio_open_params audio_params;
     enum rdx_record_result failure_result = RDX_RECORD_RESULT_START_FAILED;
     enum rdx_record_termination_mode failure_mode =
         RDX_RECORD_TERMINATION_FORCED;
@@ -364,9 +379,15 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
         goto rollback;
     }
 
+    audio_params.format_id = rdx_record_engine.format_id;
+    audio_params.engine_generation = rdx_record_engine.engine_generation;
+    audio_params.session_id = rdx_record_engine.session_id;
+    audio_params.capture_generation =
+        rdx_record_engine.capture_generation;
+    audio_params.frame_callback = rdx_record_engine_audio_frame;
+    audio_params.frame_priv = &rdx_record_engine;
     recorder_open_attempted = 1;
-    ret = ai_voice_recoder_open_with_tx(AUDIO_CODING_OPUS, 0,
-                                        rdx_record_engine_ai_tx);
+    ret = rdx_record_audio_br56_open(&audio_params);
     if (ret) {
         rdx_record_engine.frame_gate = 0;
         goto start_failed;
@@ -403,8 +424,9 @@ start_failed:
 rollback:
     rdx_record_engine.frame_gate = 0;
     if (recorder_open_attempted) {
-        ai_voice_recoder_close();
+        rdx_record_audio_br56_close();
     }
+    rdx_record_engine_clear_queues();
     audio_capture_lease_release(&rdx_record_engine.capture_lease);
     if (destination_attached && rdx_record_engine.destination_ops
         && rdx_record_engine.destination_ops->detach) {
