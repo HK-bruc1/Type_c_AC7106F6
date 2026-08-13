@@ -12,10 +12,22 @@
 #define RDX_COMPAT_PRODUCT_CODE                "603"
 #define RDX_COMPAT_FACTORY_CODE                "ZENCHD"
 #define RDX_COMPAT_PRODUCT_TYPE                "E1"
+/*
+ * Fixed 2-byte identity suffix carried at the end of Manufacturer Data.
+ * The device does not interpret it, but the APP may use it for discovery or
+ * compatibility matching, so it is not an unused placeholder and must not be
+ * removed or changed without a confirmed APP/protocol contract.
+ * It is neither a color code, a Device Ability switch, nor Record Mark.
+ */
 #define RDX_COMPAT_SELF_MARK                   "NV"
 
+/*
+ * Selects the RDX Identity characteristic wire layout, not a hardware or
+ * feature switch. 1 uses the charge-case-compatible 95-byte "C,..." layout;
+ * 0 uses the non-case layout that currently returns only the 24-byte AuthKey.
+ * It does not enable charging, storage, recording, or any Device Ability.
+ */
 #define RDX_COMPAT_PRODUCT_IS_CHARGE_CASE      1
-#define RDX_COMPAT_BOUND_STATE                 0
 
 /*
  * Product feature selection has one source of truth: Device Ability.

@@ -8,12 +8,12 @@
 
 int rdx_device_management_bind(void)
 {
-    return rdx_device_state_set_bound(1);
+    return rdx_device_state_set_bound(RDX_BOUND_STATE_BOUND);
 }
 
 int rdx_device_management_unbind(void)
 {
-    return rdx_device_state_set_bound(0);
+    return rdx_device_state_set_bound(RDX_BOUND_STATE_UNBOUND);
 }
 
 int rdx_device_management_restore_defaults(void)
