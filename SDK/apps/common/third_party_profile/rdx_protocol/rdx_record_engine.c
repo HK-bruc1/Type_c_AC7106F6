@@ -5,6 +5,7 @@
 #include "system/includes.h"
 #include "spinlock.h"
 #include "audio_capture_lease.h"
+#include "rdx_mic_gain_service.h"
 #include "rdx_record_audio_br56.h"
 #include "rdx_record_engine.h"
 
@@ -57,6 +58,8 @@ struct rdx_record_engine_runtime {
     u8 candidate_head;
     u8 candidate_tail;
     u8 candidate_count;
+    u8 session_mic_gain_override_valid;
+    u8 session_mic_gain;
     enum rdx_record_state state;
     enum rdx_record_controller_id controller_id;
     enum rdx_record_format_id format_id;
@@ -268,12 +271,13 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     rdx_record_engine.termination_cause = cause;
     rdx_record_engine.state = RDX_RECORD_STATE_IDLE;
 
-    printf("[RDX][ENGINE] stopped session=%u capture=%u mode=%u cause=%u"
+    printf("[RDX][ENGINE] stopped session=%u capture=%u gain_override=%u mic_gain=%u mode=%u cause=%u"
            " produced=%u enqueued=%u overflow=%u mismatch=%u stale=%u"
            " stop_discarded=%u\n",
            (unsigned int)rdx_record_engine.session_id,
            (unsigned int)rdx_record_engine.capture_generation,
-           mode, cause,
+           rdx_record_engine.session_mic_gain_override_valid,
+           rdx_record_engine.session_mic_gain, mode, cause,
            (unsigned int)rdx_record_engine.produced_count,
            (unsigned int)rdx_record_engine.enqueued_count,
            (unsigned int)rdx_record_engine.overflow_count,
@@ -288,6 +292,8 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     rdx_record_engine.controller_id = RDX_RECORD_CONTROLLER_NONE;
     rdx_record_engine.format_id = RDX_RECORD_FORMAT_NONE;
     rdx_record_engine.start_request_id = 0;
+    rdx_record_engine.session_mic_gain_override_valid = 0;
+    rdx_record_engine.session_mic_gain = 0;
 }
 
 static void rdx_record_engine_revoke(void *priv, u32 preempt_token,
@@ -373,6 +379,21 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
 #endif
     rdx_record_engine_clear_queues();
 
+    ret = rdx_mic_gain_get_override(
+        RDX_MIC_GAIN_MODE_CONFERENCE,
+        &rdx_record_engine.session_mic_gain_override_valid,
+        &rdx_record_engine.session_mic_gain);
+    if (ret) {
+        printf("[RDX][ENGINE] start_failed request=%u reason=mic_gain_resolve ret=%d\n",
+               (unsigned int)request->request_id, ret);
+        goto start_failed;
+    }
+    printf("[RDX][ENGINE] session_gain_snapshot request=%u session=%u override=%u gain=%u\n",
+           (unsigned int)request->request_id,
+           (unsigned int)rdx_record_engine.session_id,
+           rdx_record_engine.session_mic_gain_override_valid,
+           rdx_record_engine.session_mic_gain);
+
     if (rdx_record_engine.destination_ops
         && rdx_record_engine.destination_ops->attach) {
         ret = rdx_record_engine.destination_ops->attach(
@@ -413,6 +434,9 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
     }
 
     audio_params.format_id = rdx_record_engine.format_id;
+    audio_params.mic_gain_override_valid =
+        rdx_record_engine.session_mic_gain_override_valid;
+    audio_params.mic_gain = rdx_record_engine.session_mic_gain;
     audio_params.engine_generation = rdx_record_engine.engine_generation;
     audio_params.session_id = rdx_record_engine.session_id;
     audio_params.capture_generation =
@@ -443,10 +467,12 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
         goto rollback;
     }
     printf("[RDX][ENGINE] started request=%u session=%u capture=%u"
-           " format=meeting_v1\n",
+           " format=meeting_v1 gain_override=%u mic_gain=%u\n",
            (unsigned int)request->request_id,
            (unsigned int)rdx_record_engine.session_id,
-           (unsigned int)rdx_record_engine.capture_generation);
+           (unsigned int)rdx_record_engine.capture_generation,
+           rdx_record_engine.session_mic_gain_override_valid,
+           rdx_record_engine.session_mic_gain);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_START_COMPLETE,
                            request->request_id, RDX_RECORD_RESULT_OK,
                            RDX_RECORD_TERMINATION_NONE,
@@ -478,6 +504,8 @@ rollback:
     rdx_record_engine.destination_priv = NULL;
     rdx_record_engine.controller_id = RDX_RECORD_CONTROLLER_NONE;
     rdx_record_engine.format_id = RDX_RECORD_FORMAT_NONE;
+    rdx_record_engine.session_mic_gain_override_valid = 0;
+    rdx_record_engine.session_mic_gain = 0;
 }
 
 static u8 rdx_record_engine_take_system(
@@ -736,6 +764,9 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     spin_unlock(&rdx_record_engine.lock);
 
     audio_params.format_id = rdx_record_engine.format_id;
+    audio_params.mic_gain_override_valid =
+        rdx_record_engine.session_mic_gain_override_valid;
+    audio_params.mic_gain = rdx_record_engine.session_mic_gain;
     audio_params.engine_generation = rdx_record_engine.engine_generation;
     audio_params.session_id = rdx_record_engine.session_id;
     audio_params.capture_generation = rdx_record_engine.capture_generation;
@@ -749,10 +780,12 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
 
     rdx_record_engine.first_frame_after_resume = 1;
     rdx_record_engine.state = RDX_RECORD_STATE_ACTIVE;
-    printf("[RDX][ENGINE] resumed request=%u session=%u capture=%u\n",
+    printf("[RDX][ENGINE] resumed request=%u session=%u capture=%u gain_override=%u mic_gain=%u\n",
            (unsigned int)request->request_id,
            (unsigned int)rdx_record_engine.session_id,
-           (unsigned int)rdx_record_engine.capture_generation);
+           (unsigned int)rdx_record_engine.capture_generation,
+           rdx_record_engine.session_mic_gain_override_valid,
+           rdx_record_engine.session_mic_gain);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_RESUME_COMPLETE,
                            request->request_id, RDX_RECORD_RESULT_OK,
                            RDX_RECORD_TERMINATION_NONE,

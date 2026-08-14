@@ -68,6 +68,8 @@ struct adc_file_hdl {
     u8 dump_cnt;
     u8 ch_num;
     u8 multi_ch_adc_en;
+    u8 pending_cfg_valid;
+    struct adc_file_cfg pending_cfg;
 #if ADC_MIC_RAW_DATA_DEBUG_ENABLE
     u32 debug_sample_count;
     int debug_sample_min;
@@ -844,6 +846,17 @@ static void adc_ioc_get_fmt(struct adc_file_hdl *hdl, struct stream_fmt *fmt)
         }
     }
 
+    if (hdl->pending_cfg_valid) {
+        for (int i = 0; i < AUDIO_ADC_MAX_NUM; i++) {
+            if (hdl->adc_f->cfg.mic_en_map & BIT(i)) {
+                hdl->adc_f->cfg.param[i].mic_gain =
+                    hdl->pending_cfg.param[i].mic_gain;
+                hdl->adc_f->cfg.param[i].mic_pre_gain =
+                    hdl->pending_cfg.param[i].mic_pre_gain;
+            }
+        }
+    }
+
     switch (hdl->scene) {
     case STREAM_SCENE_ESCO:
     case STREAM_SCENE_LEA_CALL:
@@ -1138,12 +1151,24 @@ static int adc_file_ioc_update_parm(struct adc_file_hdl *hdl, int parm)
     int i;
     int ret = false;
     struct adc_file_cfg *cfg = (struct adc_file_cfg *)parm;
-    if (hdl) {
+    if (hdl && cfg) {
+        memcpy(&hdl->pending_cfg, cfg, sizeof(hdl->pending_cfg));
+        hdl->pending_cfg_valid = 1;
+        if (!hdl->adc_f) {
+            return true;
+        }
         for (i = 0; i < AUDIO_ADC_MAX_NUM; i++) {
             if (hdl->adc_f->cfg.mic_en_map & BIT(i)) {
+                hdl->adc_f->cfg.param[i].mic_gain = cfg->param[i].mic_gain;
+                hdl->adc_f->cfg.param[i].mic_pre_gain =
+                    cfg->param[i].mic_pre_gain;
                 //目前仅支持更新增益
-                audio_adc_mic_set_gain(&hdl->mic_ch, BIT(i), cfg->param[i].mic_gain);
-                audio_adc_mic_gain_boost(BIT(i), cfg->param[i].mic_pre_gain);
+                if (hdl->start) {
+                    audio_adc_mic_set_gain(&hdl->mic_ch, BIT(i),
+                                           cfg->param[i].mic_gain);
+                    audio_adc_mic_gain_boost(BIT(i),
+                                             cfg->param[i].mic_pre_gain);
+                }
             }
         }
         ret = true;

@@ -7,10 +7,15 @@
 #include "jlstream.h"
 #include "media/audio_base.h"
 #include "encoder_node.h"
+#include "adc_file.h"
+#include "effects/effects_adj.h"
+#include "rdx_protocol_defs.h"
 #include "rdx_record_audio_br56.h"
 
 #define RDX_RECORD_PIPELINE_UUID              0x5475
 #define RDX_RECORD_ADC_IRQ_POINTS             320
+#define RDX_RECORD_ADC_NODE_SUBID              1
+#define RDX_RECORD_ADC_INDEX                   0
 
 struct rdx_record_audio_br56_runtime {
     spinlock_t lock;
@@ -26,6 +31,64 @@ struct rdx_record_audio_br56_runtime {
 };
 
 static struct rdx_record_audio_br56_runtime rdx_record_audio;
+
+static int rdx_record_audio_br56_read_adc_cfg(
+    struct adc_file_cfg *adc_cfg, char *node_name)
+{
+    int ret;
+
+    if (!adc_cfg) {
+        return -EINVAL;
+    }
+
+    memset(adc_cfg, 0, sizeof(*adc_cfg));
+    ret = jlstream_read_node_data_new(NODE_UUID_ADC,
+                                      RDX_RECORD_ADC_NODE_SUBID,
+                                      adc_cfg, node_name);
+    if (ret != sizeof(*adc_cfg)) {
+        printf("[RDX][AUDIO] adc_config_read result=failed subid=%u ret=%d expected=%u\n",
+               RDX_RECORD_ADC_NODE_SUBID, ret,
+               (unsigned int)sizeof(*adc_cfg));
+        return -EFAULT;
+    }
+    if (adc_cfg->mic_en_map != BIT(RDX_RECORD_ADC_INDEX)) {
+        printf("[RDX][AUDIO] adc_config_read result=failed reason=topology subid=%u mic_en_map=0x%x expected=0x%x\n",
+               RDX_RECORD_ADC_NODE_SUBID,
+               (unsigned int)adc_cfg->mic_en_map,
+               (unsigned int)BIT(RDX_RECORD_ADC_INDEX));
+        return -EINVAL;
+    }
+    if (adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain
+        > RDX_MIC_GAIN_LEVEL_MAX) {
+        printf("[RDX][AUDIO] adc_config_read result=failed reason=gain_range subid=%u gain=%u\n",
+               RDX_RECORD_ADC_NODE_SUBID,
+               adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain);
+        return -ERANGE;
+    }
+    return 0;
+}
+
+int rdx_record_audio_br56_get_factory_gain(u8 *gain)
+{
+    struct adc_file_cfg adc_cfg;
+    char node_name[16] = {0};
+    int ret;
+
+    if (!gain) {
+        return -EINVAL;
+    }
+
+    ret = rdx_record_audio_br56_read_adc_cfg(&adc_cfg, node_name);
+    if (ret) {
+        return ret;
+    }
+    *gain = adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain;
+    printf("[RDX][AUDIO] factory_gain result=ok subid=%u node=%s adc=%u gain=%u pre_gain=%u\n",
+           RDX_RECORD_ADC_NODE_SUBID, node_name,
+           RDX_RECORD_ADC_INDEX, *gain,
+           adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_pre_gain);
+    return 0;
+}
 
 static void rdx_record_audio_br56_init(void)
 {
@@ -45,6 +108,31 @@ static void rdx_record_audio_br56_clear_locked(void)
     rdx_record_audio.capture_generation = 0;
     rdx_record_audio.frame_callback = NULL;
     rdx_record_audio.frame_priv = NULL;
+}
+
+static int rdx_record_audio_br56_prepare_mic_gain(
+    struct jlstream *stream,
+    const struct adc_file_cfg *adc_cfg,
+    const struct rdx_record_audio_open_params *params,
+    const char *node_name)
+{
+    int ret = jlstream_node_ioctl(stream, NODE_UUID_SOURCE,
+                                  NODE_IOC_SET_PARAM, (int)adc_cfg);
+    if (ret == true) {
+        printf("[RDX][AUDIO] adc_gain_prepare result=ok session=%u capture=%u subid=%u node=%s adc=%u gain=%u timing=before_start\n",
+               (unsigned int)params->session_id,
+               (unsigned int)params->capture_generation,
+               RDX_RECORD_ADC_NODE_SUBID, node_name,
+               RDX_RECORD_ADC_INDEX, params->mic_gain);
+        return 0;
+    }
+
+    printf("[RDX][AUDIO] adc_gain_prepare result=failed session=%u capture=%u subid=%u adc=%u gain=%u ret=%d\n",
+           (unsigned int)params->session_id,
+           (unsigned int)params->capture_generation,
+           RDX_RECORD_ADC_NODE_SUBID, RDX_RECORD_ADC_INDEX,
+           params->mic_gain, ret);
+    return -EFAULT;
 }
 
 static int rdx_record_audio_br56_ai_tx(u8 *data, u32 len)
@@ -74,6 +162,8 @@ static int rdx_record_audio_br56_ai_tx(u8 *data, u32 len)
 int rdx_record_audio_br56_open(
     const struct rdx_record_audio_open_params *params)
 {
+    struct adc_file_cfg adc_cfg;
+    char adc_node_name[16] = {0};
     struct stream_enc_fmt stream_fmt = {
         .channel = RDX_RECORD_MEETING_V1_CHANNELS,
         .bit_width = DATA_BIT_WIDE_16BIT,
@@ -104,9 +194,20 @@ int rdx_record_audio_br56_open(
 
     if (!params || !params->frame_callback
         || params->format_id != RDX_RECORD_FORMAT_MEETING_V1
+        || params->mic_gain_override_valid > 1
+        || (params->mic_gain_override_valid
+            && params->mic_gain > RDX_MIC_GAIN_LEVEL_MAX)
         || !params->engine_generation || !params->session_id
         || !params->capture_generation) {
         return -EINVAL;
+    }
+
+    if (params->mic_gain_override_valid) {
+        ret = rdx_record_audio_br56_read_adc_cfg(&adc_cfg, adc_node_name);
+        if (ret) {
+            return ret;
+        }
+        adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain = params->mic_gain;
     }
 
     rdx_record_audio_br56_init();
@@ -115,7 +216,7 @@ int rdx_record_audio_br56_open(
         spin_unlock(&rdx_record_audio.lock);
         return -EBUSY;
     }
-    rdx_record_audio.accepting = 1;
+    rdx_record_audio.recorder_open = 1;
     rdx_record_audio.engine_generation = params->engine_generation;
     rdx_record_audio.session_id = params->session_id;
     rdx_record_audio.capture_generation = params->capture_generation;
@@ -128,6 +229,18 @@ int rdx_record_audio_br56_open(
     if (!stream) {
         ret = -EFAULT;
         goto open_failed;
+    }
+
+    if (params->mic_gain_override_valid) {
+        ret = rdx_record_audio_br56_prepare_mic_gain(
+            stream, &adc_cfg, params, adc_node_name);
+        if (ret) {
+            goto release_stream;
+        }
+    } else {
+        printf("[RDX][AUDIO] adc_gain_prepare result=skip session=%u capture=%u source=factory\n",
+               (unsigned int)params->session_id,
+               (unsigned int)params->capture_generation);
     }
 
     ret = jlstream_ioctl(stream, NODE_IOC_SET_ENC_FMT, (int)&stream_fmt);
@@ -165,7 +278,7 @@ int rdx_record_audio_br56_open(
 
     spin_lock(&rdx_record_audio.lock);
     rdx_record_audio.stream = stream;
-    rdx_record_audio.recorder_open = 1;
+    rdx_record_audio.accepting = 1;
     spin_unlock(&rdx_record_audio.lock);
     return 0;
 

@@ -9,6 +9,8 @@
 #define RDX_CMD_DL_SET_DEFAULT                  "*APP#default#"
 #define RDX_CMD_DL_BLE_NAME_QUERY                "*APP#cblename#"
 #define RDX_CMD_DL_BLE_NAME_SET                  "*APP#blename#"
+#define RDX_CMD_DL_MIC_GAIN_QUERY                "*APP#cmicgain#"
+#define RDX_CMD_DL_MIC_GAIN_SET                  "*APP#micgain#"
 
 /* Device -> APP management responses. */
 #define RDX_CMD_UP_AUTH_SN                      "*DEV#authsn#"
@@ -18,9 +20,14 @@
 #define RDX_CMD_UP_SET_DEFAULT                  "*DEV#default#"
 #define RDX_CMD_UP_BLE_NAME_QUERY                "*DEV#cblename#"
 #define RDX_CMD_UP_BLE_NAME_SET                  "*DEV#blename#"
+#define RDX_CMD_UP_MIC_GAIN_QUERY                "*DEV#cmicgain#"
+#define RDX_CMD_UP_MIC_GAIN_SET                  "*DEV#micgain#"
 
 /* BLE name wire/storage contract: printable ASCII, excluding '#'. */
 #define RDX_BLE_NAME_MAX_LEN                    24
+
+/* APP and BR56 audio ADC use the same SDK Mic Gain Level range. */
+#define RDX_MIC_GAIN_LEVEL_MAX                  19
 
 /* Fixed-width text fields used by the auth/SN response. */
 #define RDX_AUTH_KEY_STRING_SIZE                24

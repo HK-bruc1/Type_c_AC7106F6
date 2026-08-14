@@ -14,6 +14,8 @@ typedef int (*rdx_record_audio_frame_callback_t)(
 
 struct rdx_record_audio_open_params {
     enum rdx_record_format_id format_id;
+    u8 mic_gain_override_valid;
+    u8 mic_gain;
     u32 engine_generation;
     u32 session_id;
     u32 capture_generation;
@@ -21,6 +23,7 @@ struct rdx_record_audio_open_params {
     void *frame_priv;
 };
 
+int rdx_record_audio_br56_get_factory_gain(u8 *gain);
 int rdx_record_audio_br56_open(
     const struct rdx_record_audio_open_params *params);
 void rdx_record_audio_br56_close(void);

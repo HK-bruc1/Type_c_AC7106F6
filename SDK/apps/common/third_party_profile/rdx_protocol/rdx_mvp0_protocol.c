@@ -13,6 +13,7 @@
 #include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#include "rdx_mic_gain_service.h"
 #include "rdx_record_engine.h"
 #endif
 #if RDX_CFG_RTC_ENABLE
@@ -50,6 +51,10 @@ static const u8 rdx_cmd_unbound[] = RDX_CMD_DL_UNBOUND;
 static const u8 rdx_cmd_set_default[] = RDX_CMD_DL_SET_DEFAULT;
 static const u8 rdx_cmd_ble_name_query[] = RDX_CMD_DL_BLE_NAME_QUERY;
 static const u8 rdx_cmd_ble_name_set[] = RDX_CMD_DL_BLE_NAME_SET;
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+static const u8 rdx_cmd_mic_gain_query[] = RDX_CMD_DL_MIC_GAIN_QUERY;
+static const u8 rdx_cmd_mic_gain_set[] = RDX_CMD_DL_MIC_GAIN_SET;
+#endif
 static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
 static const char *const rdx_mvp0_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
@@ -963,6 +968,149 @@ static int rdx_mvp0_parse_nonnegative_s32(const u8 *data, u16 len,
     return 0;
 }
 
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+static int rdx_mvp0_parse_decimal_fields(const u8 *data, u16 len,
+                                          s32 *values, u8 field_count)
+{
+    u16 field_start = 0;
+    u16 i;
+    u8 field = 0;
+
+    if (!data || !len || !values || !field_count
+        || data[len - 1] != '#') {
+        return -1;
+    }
+
+    for (i = 0; i < len; i++) {
+        if (data[i] != '#') {
+            continue;
+        }
+        if (i == field_start || field >= field_count
+            || rdx_mvp0_parse_nonnegative_s32(
+                   data + field_start, i - field_start,
+                   &values[field])) {
+            return -1;
+        }
+        field++;
+        field_start = i + 1;
+    }
+
+    return field == field_count && field_start == len ? 0 : -1;
+}
+
+static int rdx_mvp0_send_mic_gain_result(u8 query, u8 result,
+                                         s32 mode, u8 gain)
+{
+    u8 response[64];
+    const char *prefix = query ? RDX_CMD_UP_MIC_GAIN_QUERY
+                               : RDX_CMD_UP_MIC_GAIN_SET;
+    const char *command = query ? "cmicgain" : "micgain";
+    int len;
+    int ret;
+
+    len = snprintf((char *)response, sizeof(response),
+                   "%s%u#%d#%u#%u#", prefix, result,
+                   (int)mode, gain, gain);
+    if (len <= 0 || len >= sizeof(response)) {
+        printf("[RDX][TX] cmd=%s reason=encode_failed len=%d\n",
+               command, len);
+        return -1;
+    }
+
+    ret = rdx_mvp0_send(response, len);
+    printf("[RDX][TX] cmd=%s wire=%s result=%u mode=%d gain=%u len=%d ret=%d\n",
+           command, (char *)response, result, (int)mode, gain, len, ret);
+    return ret;
+}
+
+static void rdx_mvp0_handle_mic_gain_query(const u8 *data, u16 len)
+{
+    const u16 prefix_len = sizeof(rdx_cmd_mic_gain_query) - 1;
+    s32 fields[1];
+    u8 gain = 0;
+    int ret;
+
+    if (len <= prefix_len
+        || rdx_mvp0_parse_decimal_fields(data + prefix_len,
+                                          len - prefix_len,
+                                          fields, 1)) {
+        printf("[RDX][DROP] cmd=cmicgain reason=malformed len=%u\n", len);
+        return;
+    }
+    if (!rdx_mvp0_management_query_ready("cmicgain", len)) {
+        return;
+    }
+
+    if (fields[0] > 0xff) {
+        printf("[RDX][MIC_GAIN] cmd=cmicgain result=failed reason=unsupported_mode mode=%d\n",
+               (int)fields[0]);
+        rdx_mvp0_send_mic_gain_result(1, 1, fields[0], 0);
+        return;
+    }
+
+    ret = rdx_mic_gain_get_configured((u8)fields[0], &gain);
+    rdx_mvp0_send_mic_gain_result(1, ret ? 1 : 0,
+                                  fields[0], ret ? 0 : gain);
+}
+
+static void rdx_mvp0_handle_mic_gain_set(const u8 *data, u16 len)
+{
+    const u16 prefix_len = sizeof(rdx_cmd_mic_gain_set) - 1;
+    s32 fields[3];
+    u8 effective = 0;
+    int ret;
+
+    if (len <= prefix_len
+        || rdx_mvp0_parse_decimal_fields(data + prefix_len,
+                                          len - prefix_len,
+                                          fields, 3)) {
+        printf("[RDX][DROP] cmd=micgain reason=malformed len=%u\n", len);
+        return;
+    }
+    if (!rdx_mvp0_management_query_ready("micgain", len)) {
+        return;
+    }
+
+    if (fields[0] > 0xff
+        || fields[0] != RDX_MIC_GAIN_MODE_CONFERENCE) {
+        printf("[RDX][MIC_GAIN] cmd=micgain result=failed reason=unsupported_mode mode=%d wire_gain1=%d wire_gain2=%d\n",
+               (int)fields[0], (int)fields[1], (int)fields[2]);
+        rdx_mvp0_send_mic_gain_result(0, 1, fields[0], 0);
+        return;
+    }
+    if (fields[1] > RDX_MIC_GAIN_LEVEL_MAX
+        || fields[2] > RDX_MIC_GAIN_LEVEL_MAX) {
+        printf("[RDX][MIC_GAIN] cmd=micgain result=failed reason=range mode=%d wire_gain1=%d wire_gain2=%d\n",
+               (int)fields[0], (int)fields[1], (int)fields[2]);
+        rdx_mvp0_send_mic_gain_result(0, 1, fields[0], 0);
+        return;
+    }
+    if (fields[1] != fields[2]) {
+        printf("[RDX][MIC_GAIN] cmd=micgain result=failed reason=mirror mode=%d wire_gain1=%d wire_gain2=%d\n",
+               (int)fields[0], (int)fields[1], (int)fields[2]);
+        rdx_mvp0_send_mic_gain_result(0, 1, fields[0], 0);
+        return;
+    }
+    if (rdx_mvp0_state.state_transition_pending) {
+        rdx_mic_gain_get_configured((u8)fields[0], &effective);
+        printf("[RDX][MIC_GAIN] cmd=micgain result=failed reason=transition_pending action=%s mode=%d wire_gain1=%d wire_gain2=%d effective=%u\n",
+               rdx_mvp0_post_ack_action_name(
+                   rdx_mvp0_state.post_ack_action),
+               (int)fields[0], (int)fields[1], (int)fields[2], effective);
+        rdx_mvp0_send_mic_gain_result(0, 1, fields[0], effective);
+        return;
+    }
+
+    ret = rdx_mic_gain_set_configured((u8)fields[0],
+                                      (u8)fields[1], &effective);
+    printf("[RDX][MIC_GAIN] cmd=micgain result=%s mode=%d wire_gain1=%d wire_gain2=%d configured_gain=%u apply=next_session ret=%d\n",
+           ret ? "failed" : "ok", (int)fields[0],
+           (int)fields[1], (int)fields[2], effective, ret);
+    rdx_mvp0_send_mic_gain_result(0, ret ? 1 : 0,
+                                  fields[0], effective);
+}
+#endif
+
 static int rdx_mvp0_send_bound_result(u8 result)
 {
     u8 response[32];
@@ -1445,6 +1593,18 @@ void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
                                          sizeof(rdx_cmd_ble_name_set) - 1)) {
         rdx_mvp0_log_rx("blename", data, len);
         rdx_mvp0_handle_ble_name_set(data, len);
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+    } else if (rdx_mvp0_data_starts_with(data, len,
+                                         rdx_cmd_mic_gain_query,
+                                         sizeof(rdx_cmd_mic_gain_query) - 1)) {
+        rdx_mvp0_log_rx("cmicgain", data, len);
+        rdx_mvp0_handle_mic_gain_query(data, len);
+    } else if (rdx_mvp0_data_starts_with(data, len,
+                                         rdx_cmd_mic_gain_set,
+                                         sizeof(rdx_cmd_mic_gain_set) - 1)) {
+        rdx_mvp0_log_rx("micgain", data, len);
+        rdx_mvp0_handle_mic_gain_set(data, len);
+#endif
     } else {
         printf("[RDX][DROP] cmd=unknown wire=%.*s len=%u type=%02X%02X\n",
                (int)len, (char *)data, len,
