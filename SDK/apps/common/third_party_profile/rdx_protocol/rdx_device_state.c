@@ -7,10 +7,20 @@
 #include "rdx_device_state.h"
 
 typedef char rdx_device_state_size_check[
-    (sizeof(rdx_device_state_t) == 4) ? 1 : -1];
+    (sizeof(rdx_device_state_t) == 32) ? 1 : -1];
+
+typedef struct {
+    u8 version;
+    u8 bound;
+    u8 reserved[2];
+} rdx_device_state_v1_t;
+
+typedef char rdx_device_state_v1_size_check[
+    (sizeof(rdx_device_state_v1_t) == 4) ? 1 : -1];
 
 static rdx_device_state_t rdx_device_state;
 static u8 rdx_device_state_initialized;
+static u8 rdx_device_state_persisted_v2;
 
 static void rdx_device_state_fill_defaults(rdx_device_state_t *state)
 {
@@ -19,16 +29,72 @@ static void rdx_device_state_fill_defaults(rdx_device_state_t *state)
     state->bound = RDX_BOUND_STATE_UNBOUND;
 }
 
+static u8 rdx_device_state_name_bytes_valid(const u8 *name, u16 len)
+{
+    u8 has_non_space = 0;
+    u16 i;
+
+    if (!name || !len || len > RDX_BLE_NAME_MAX_LEN) {
+        return 0;
+    }
+
+    for (i = 0; i < len; i++) {
+        if (name[i] < 0x20 || name[i] > 0x7e || name[i] == '#') {
+            return 0;
+        }
+        if (name[i] != ' ') {
+            has_non_space = 1;
+        }
+    }
+    return has_non_space;
+}
+
+static u8 rdx_device_state_override_valid(
+    const rdx_device_state_t *state)
+{
+    u16 i;
+
+    if (!state->ble_name_len) {
+        for (i = 0; i < sizeof(state->ble_name); i++) {
+            if (state->ble_name[i]) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    if (!rdx_device_state_name_bytes_valid(
+            (const u8 *)state->ble_name, state->ble_name_len)
+        || state->ble_name[state->ble_name_len] != '\0') {
+        return 0;
+    }
+    for (i = state->ble_name_len + 1; i < sizeof(state->ble_name); i++) {
+        if (state->ble_name[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int rdx_device_state_init(void)
 {
     rdx_device_state_t stored_state;
+    rdx_device_state_v1_t stored_v1;
     int ret;
 
     rdx_device_state_fill_defaults(&rdx_device_state);
+    rdx_device_state_persisted_v2 = 0;
     memset(&stored_state, 0, sizeof(stored_state));
     ret = syscfg_read(CFG_RDX_DEVICE_STATE, &stored_state,
                       sizeof(stored_state));
-    if (ret != sizeof(stored_state)) {
+    memcpy(&stored_v1, &stored_state, sizeof(stored_v1));
+    if (ret == sizeof(stored_v1)
+        && stored_v1.version == 1
+        && stored_v1.bound <= RDX_BOUND_STATE_BOUND) {
+        rdx_device_state.bound = stored_v1.bound;
+        printf("[RDX][STATE] state_load=v1 vm_id=%u version=%u bound=%u name_len=0 migration_write=deferred\n",
+               CFG_RDX_DEVICE_STATE, stored_v1.version,
+               rdx_device_state.bound);
+    } else if (ret != sizeof(stored_state)) {
         printf("[RDX][SESSION] state_load=default reason=read_failed vm_id=%u vm_ret=%d bound=%u\n",
                CFG_RDX_DEVICE_STATE, ret, rdx_device_state.bound);
     } else if (stored_state.version != RDX_DEVICE_STATE_VERSION) {
@@ -39,11 +105,20 @@ int rdx_device_state_init(void)
         printf("[RDX][SESSION] state_load=default reason=bound vm_id=%u stored=%u bound=%u\n",
                CFG_RDX_DEVICE_STATE, stored_state.bound,
                rdx_device_state.bound);
+    } else if (!rdx_device_state_override_valid(&stored_state)) {
+        rdx_device_state.bound = stored_state.bound;
+        printf("[RDX][STATE] state_load=v2 reason=name_sanitized vm_id=%u version=%u bound=%u stored_name_len=%u effective_name=default repair_write=deferred\n",
+               CFG_RDX_DEVICE_STATE, stored_state.version,
+               rdx_device_state.bound, stored_state.ble_name_len);
     } else {
-        rdx_device_state = stored_state;
-        printf("[RDX][SESSION] state_load=vm vm_id=%u version=%u bound=%u\n",
+        rdx_device_state.bound = stored_state.bound;
+        rdx_device_state.ble_name_len = stored_state.ble_name_len;
+        memcpy(rdx_device_state.ble_name, stored_state.ble_name,
+               sizeof(rdx_device_state.ble_name));
+        rdx_device_state_persisted_v2 = 1;
+        printf("[RDX][STATE] state_load=v2 vm_id=%u version=%u bound=%u name_len=%u\n",
                CFG_RDX_DEVICE_STATE, rdx_device_state.version,
-               rdx_device_state.bound);
+               rdx_device_state.bound, rdx_device_state.ble_name_len);
     }
 
     rdx_device_state_initialized = 1;
@@ -53,6 +128,7 @@ int rdx_device_state_init(void)
 void rdx_device_state_exit(void)
 {
     rdx_device_state_initialized = 0;
+    rdx_device_state_persisted_v2 = 0;
     rdx_device_state_fill_defaults(&rdx_device_state);
 }
 
@@ -102,8 +178,62 @@ int rdx_device_state_set_bound(rdx_bound_state_t bound)
     }
 
     rdx_device_state = next_state;
+    rdx_device_state_persisted_v2 = 1;
     printf("[RDX][SESSION] state_transition old_bound=%u target_bound=%u vm_id=%u vm_ret=%d result=ok\n",
            old_bound, target_bound, CFG_RDX_DEVICE_STATE, ret);
+    return 0;
+}
+
+u8 rdx_device_state_get_ble_name_override(const char **name)
+{
+    if (name) {
+        *name = rdx_device_state.ble_name_len
+                ? rdx_device_state.ble_name : NULL;
+    }
+    return rdx_device_state.ble_name_len;
+}
+
+int rdx_device_state_set_ble_name_override(const u8 *name, u16 len)
+{
+    rdx_device_state_t next_state;
+    u8 old_len;
+    int ret;
+
+    if (!rdx_device_state_initialized
+        || (len && !rdx_device_state_name_bytes_valid(name, len))
+        || len > RDX_BLE_NAME_MAX_LEN) {
+        printf("[RDX][DROP] cmd=state_name reason=invalid initialized=%u target_len=%u\n",
+               rdx_device_state_initialized, len);
+        return -1;
+    }
+
+    next_state = rdx_device_state;
+    old_len = next_state.ble_name_len;
+    next_state.ble_name_len = 0;
+    memset(next_state.ble_name, 0, sizeof(next_state.ble_name));
+    if (len) {
+        next_state.ble_name_len = len;
+        memcpy(next_state.ble_name, name, len);
+    }
+
+    if (!memcmp(&rdx_device_state, &next_state, sizeof(next_state))) {
+        printf("[RDX][STATE] name_transition old_len=%u target_len=%u vm=skip changed=0\n",
+               old_len, (unsigned int)len);
+        return 0;
+    }
+
+    ret = syscfg_write(CFG_RDX_DEVICE_STATE, &next_state,
+                       sizeof(next_state));
+    if (ret != sizeof(next_state)) {
+        printf("[RDX][STATE] name_transition old_len=%u target_len=%u vm_id=%u vm_ret=%d changed=0 result=failed\n",
+               old_len, (unsigned int)len, CFG_RDX_DEVICE_STATE, ret);
+        return -2;
+    }
+
+    rdx_device_state = next_state;
+    rdx_device_state_persisted_v2 = 1;
+    printf("[RDX][STATE] name_transition old_len=%u target_len=%u vm_id=%u vm_ret=%d changed=1 result=ok\n",
+           old_len, (unsigned int)len, CFG_RDX_DEVICE_STATE, ret);
     return 0;
 }
 
@@ -120,7 +250,9 @@ int rdx_device_state_restore_defaults(void)
 
     rdx_device_state_fill_defaults(&default_state);
     old_bound = rdx_device_state.bound;
-    if (!memcmp(&rdx_device_state, &default_state, sizeof(default_state))) {
+    if (rdx_device_state_persisted_v2
+        && !memcmp(&rdx_device_state, &default_state,
+                   sizeof(default_state))) {
         printf("[RDX][SESSION] state_restore old_bound=%u target_bound=%u vm=skip\n",
                old_bound, default_state.bound);
         return 0;
@@ -135,6 +267,7 @@ int rdx_device_state_restore_defaults(void)
     }
 
     rdx_device_state = default_state;
+    rdx_device_state_persisted_v2 = 1;
     printf("[RDX][SESSION] state_restore old_bound=%u target_bound=%u vm_id=%u vm_ret=%d result=ok\n",
            old_bound, default_state.bound, CFG_RDX_DEVICE_STATE, ret);
     return 0;

@@ -8,6 +8,7 @@
  * 验证 BLE 通信链路。只有在 Golden Trace 和目标产品身份均已冻结后，
  * 才允许替换以下配置值。
  */
+/* Sole factory/default BLE name; VM stores only an optional user override. */
 #define RDX_COMPAT_LOCAL_NAME                  "Zenchord Case 0000"
 #define RDX_COMPAT_PRODUCT_CODE                "603"
 #define RDX_COMPAT_FACTORY_CODE                "ZENCHD"

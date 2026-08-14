@@ -1052,6 +1052,7 @@ c_SRC_FILES += \
 #if TCFG_RDX_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_ble_name.c \
     apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c \
     apps/common/third_party_profile/rdx_protocol/rdx_device_management.c \
     apps/common/third_party_profile/rdx_protocol/rdx_device_state.c \

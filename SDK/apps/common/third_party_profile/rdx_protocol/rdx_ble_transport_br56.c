@@ -6,6 +6,7 @@
 #include "app_ble_spp_api.h"
 #include "btstack/btstack_event.h"
 #include "btstack/le/att.h"
+#include "rdx_ble_name.h"
 #include "rdx_ble_transport_br56.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
@@ -146,7 +147,7 @@ static u8 rdx_ble_fill_adv_data(u8 *adv_data)
 {
     u8 offset = 0;
     u8 name_len;
-    const char *name = rdx_identity_get_local_name();
+    const char *name = rdx_ble_name_get();
 
     name_len = strlen(name);
     if (name_len > ADV_RSP_PACKET_MAX - 5) {
@@ -312,7 +313,7 @@ static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_h
 
     switch (att_handle) {
     case RDX_HANDLE_GAP_NAME:
-        name = rdx_identity_get_local_name();
+        name = rdx_ble_name_get();
         data = (const u8 *)name;
         data_len = strlen(name);
         break;
@@ -458,6 +459,35 @@ int rdx_ble_transport_set_record_streaming(u8 enabled)
     }
     rdx_ble_request_high_throughput("record_start");
     return rdx_ble_request_record_conn_param("record_start");
+}
+
+int rdx_ble_transport_refresh_local_name(void)
+{
+    int adv_enabled;
+    int ret;
+
+    if (!rdx_ble.hdl || !rdx_ble.initialized) {
+        printf("[RDX][BLE] name_refresh state=inactive ret=-1\n");
+        return -1;
+    }
+    if (rdx_ble.con_handle) {
+        printf("[RDX][BLE] name_refresh state=connected action=defer_until_disconnect ret=0\n");
+        return 0;
+    }
+
+    adv_enabled = app_ble_adv_state_get(rdx_ble.hdl);
+    if (adv_enabled <= 0) {
+        printf("[RDX][BLE] name_refresh state=off action=defer_until_enable ret=0\n");
+        return 0;
+    }
+
+    ret = rdx_ble_adv_enable(0);
+    if (!ret) {
+        ret = rdx_ble_adv_enable(1);
+    }
+    printf("[RDX][BLE] name_refresh state=advertising action=restart ret=%d\n",
+           ret);
+    return ret;
 }
 
 void rdx_ble_transport_disconnect(void)

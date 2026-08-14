@@ -4,6 +4,7 @@
 
 #include "system/includes.h"
 #include "rdx_protocol_entry.h"
+#include "rdx_ble_name.h"
 #include "rdx_ble_transport_br56.h"
 #include "rdx_device_state.h"
 #include "rdx_identity.h"
@@ -31,6 +32,11 @@ int rdx_protocol_start(void)
 
     ret = rdx_device_state_init();
     if (ret) {
+        return ret;
+    }
+    ret = rdx_ble_name_init();
+    if (ret) {
+        rdx_device_state_exit();
         return ret;
     }
     ret = rdx_identity_init();

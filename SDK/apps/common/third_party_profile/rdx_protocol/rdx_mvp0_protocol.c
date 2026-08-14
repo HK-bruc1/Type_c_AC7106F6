@@ -4,6 +4,7 @@
 
 #include "system/includes.h"
 #include "rdx_appkey_verifier.h"
+#include "rdx_ble_name.h"
 #include "rdx_ble_transport_br56.h"
 #include "rdx_device_management.h"
 #include "rdx_identity.h"
@@ -47,6 +48,8 @@ static const u8 rdx_cmd_offtime_check[] = RDX_CMD_DL_OFFTIME_CHECK;
 static const u8 rdx_cmd_bound[] = RDX_CMD_DL_BOUND;
 static const u8 rdx_cmd_unbound[] = RDX_CMD_DL_UNBOUND;
 static const u8 rdx_cmd_set_default[] = RDX_CMD_DL_SET_DEFAULT;
+static const u8 rdx_cmd_ble_name_query[] = RDX_CMD_DL_BLE_NAME_QUERY;
+static const u8 rdx_cmd_ble_name_set[] = RDX_CMD_DL_BLE_NAME_SET;
 static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
 static const char *const rdx_mvp0_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
@@ -74,6 +77,7 @@ typedef struct {
 static rdx_mvp0_state_t rdx_mvp0_state;
 
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len);
+static const char *rdx_mvp0_post_ack_action_name(u8 action);
 
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 typedef enum {
@@ -762,6 +766,31 @@ static void rdx_mvp0_send_offtime_check(void)
            (unsigned int)minutes, len, ret);
 }
 
+static int rdx_mvp0_send_ble_name_result(u8 query, u8 result)
+{
+    u8 response[48];
+    const char *name = rdx_ble_name_get();
+    const char *prefix = query ? RDX_CMD_UP_BLE_NAME_QUERY
+                               : RDX_CMD_UP_BLE_NAME_SET;
+    const char *command = query ? "cblename" : "blename";
+    int len;
+    int ret;
+
+    len = snprintf((char *)response, sizeof(response), "%s%u#%s#",
+                   prefix, result, name);
+    if (len <= 0 || len >= sizeof(response)) {
+        printf("[RDX][TX] cmd=%s reason=encode_failed len=%d\n",
+               command, len);
+        return -1;
+    }
+
+    ret = rdx_mvp0_send(response, len);
+    printf("[RDX][TX] cmd=%s result=%u name_len=%u wire=%s len=%d ret=%d\n",
+           command, result, (unsigned int)strlen(name),
+           (char *)response, len, ret);
+    return ret;
+}
+
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len)
 {
     if (rdx_mvp0_state.app_ready) {
@@ -770,6 +799,65 @@ static u8 rdx_mvp0_management_query_ready(const char *command, u16 len)
 
     printf("[RDX][DROP] cmd=%s reason=app_not_ready len=%u\n", command, len);
     return 0;
+}
+
+static void rdx_mvp0_handle_ble_name_query(const u8 *data, u16 len)
+{
+    if (!rdx_mvp0_data_equals(data, len, rdx_cmd_ble_name_query,
+                              sizeof(rdx_cmd_ble_name_query) - 1)) {
+        printf("[RDX][DROP] cmd=cblename reason=malformed len=%u\n", len);
+        return;
+    }
+    if (!rdx_mvp0_management_query_ready("cblename", len)) {
+        return;
+    }
+
+    rdx_mvp0_send_ble_name_result(1, 0);
+}
+
+static void rdx_mvp0_handle_ble_name_set(const u8 *data, u16 len)
+{
+    const u16 prefix_len = sizeof(rdx_cmd_ble_name_set) - 1;
+    u16 name_len;
+    u16 i;
+    u8 changed = 0;
+    int ret;
+    int refresh_ret = 0;
+
+    if (len < prefix_len + 1 || data[len - 1] != '#') {
+        printf("[RDX][DROP] cmd=blename reason=malformed len=%u\n", len);
+        return;
+    }
+    name_len = len - prefix_len - 1;
+    for (i = 0; i < name_len; i++) {
+        if (data[prefix_len + i] == '#') {
+            printf("[RDX][DROP] cmd=blename reason=malformed_fields len=%u\n",
+                   len);
+            return;
+        }
+    }
+    if (!rdx_mvp0_management_query_ready("blename", len)) {
+        return;
+    }
+    if (rdx_mvp0_state.state_transition_pending) {
+        printf("[RDX][DROP] cmd=blename reason=transition_pending action=%s len=%u\n",
+               rdx_mvp0_post_ack_action_name(
+                   rdx_mvp0_state.post_ack_action), len);
+        rdx_mvp0_send_ble_name_result(0, 1);
+        return;
+    }
+
+    ret = rdx_ble_name_set(data + prefix_len, name_len, &changed);
+    if (!ret && changed) {
+        refresh_ret = rdx_ble_transport_refresh_local_name();
+        if (refresh_ret) {
+            printf("[RDX][BLE] name_refresh result=degraded ret=%d\n",
+                   refresh_ret);
+        }
+    }
+    printf("[RDX][STATE] cmd=blename result=%s candidate_len=%u changed=%u refresh_ret=%d\n",
+           ret ? "failed" : "ok", name_len, changed, refresh_ret);
+    rdx_mvp0_send_ble_name_result(0, ret ? 1 : 0);
 }
 
 static const char *rdx_mvp0_post_ack_action_name(u8 action)
@@ -1347,6 +1435,16 @@ void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
                                          sizeof(rdx_cmd_set_default) - 1)) {
         rdx_mvp0_log_rx("default", data, len);
         rdx_mvp0_handle_set_default(data, len);
+    } else if (rdx_mvp0_data_starts_with(data, len,
+                                         rdx_cmd_ble_name_query,
+                                         sizeof(rdx_cmd_ble_name_query) - 1)) {
+        rdx_mvp0_log_rx("cblename", data, len);
+        rdx_mvp0_handle_ble_name_query(data, len);
+    } else if (rdx_mvp0_data_starts_with(data, len,
+                                         rdx_cmd_ble_name_set,
+                                         sizeof(rdx_cmd_ble_name_set) - 1)) {
+        rdx_mvp0_log_rx("blename", data, len);
+        rdx_mvp0_handle_ble_name_set(data, len);
     } else {
         printf("[RDX][DROP] cmd=unknown wire=%.*s len=%u type=%02X%02X\n",
                (int)len, (char *)data, len,

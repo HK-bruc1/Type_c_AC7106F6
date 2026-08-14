@@ -4,7 +4,6 @@
 #include "system/includes.h"
 
 int rdx_identity_init(void);
-const char *rdx_identity_get_local_name(void);
 const u8 *rdx_identity_get_ble_mac(void);
 const char *rdx_identity_get_auth_key(void);
 const char *rdx_identity_get_ble_mac_string(void);

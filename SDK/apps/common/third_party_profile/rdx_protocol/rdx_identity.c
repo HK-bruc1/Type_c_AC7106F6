@@ -68,11 +68,6 @@ int rdx_identity_init(void)
     return 0;
 }
 
-const char *rdx_identity_get_local_name(void)
-{
-    return RDX_COMPAT_LOCAL_NAME;
-}
-
 const u8 *rdx_identity_get_ble_mac(void)
 {
     return rdx_ble_mac;
