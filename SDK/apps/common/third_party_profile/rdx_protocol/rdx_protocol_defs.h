@@ -26,7 +26,7 @@
 /* BLE name wire/storage contract: printable ASCII, excluding '#'. */
 #define RDX_BLE_NAME_MAX_LEN                    24
 
-/* APP and BR56 audio ADC use the same SDK Mic Gain Level range. */
+/* RDX wire/VM range; the BR56 ADC 0..7 conversion stays in its adapter. */
 #define RDX_MIC_GAIN_LEVEL_MAX                  19
 
 /* Fixed-width text fields used by the auth/SN response. */

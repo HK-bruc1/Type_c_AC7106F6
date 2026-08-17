@@ -16,6 +16,11 @@
 #define RDX_RECORD_ADC_IRQ_POINTS             320
 #define RDX_RECORD_ADC_NODE_SUBID              1
 #define RDX_RECORD_ADC_INDEX                   0
+#define RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX      7
+
+#if RDX_MIC_GAIN_LEVEL_MAX != 19
+#error "Review the RDX-to-BR56 ADC gain mapping for the new wire range"
+#endif
 
 struct rdx_record_audio_br56_runtime {
     spinlock_t lock;
@@ -31,6 +36,25 @@ struct rdx_record_audio_br56_runtime {
 };
 
 static struct rdx_record_audio_br56_runtime rdx_record_audio;
+
+/*
+ * RDX keeps the BR28-compatible 0..19 wire range while BR56 exposes the
+ * eight ADC presets 0..7.  Map the complete ranges with nearest rounding so
+ * both endpoints remain stable: RDX 0/19 <-> BR56 0/7.
+ */
+static u8 rdx_record_audio_br56_gain_to_adc(u8 gain)
+{
+    return ((u16)gain * RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX
+            + RDX_MIC_GAIN_LEVEL_MAX / 2)
+           / RDX_MIC_GAIN_LEVEL_MAX;
+}
+
+static u8 rdx_record_audio_br56_gain_from_adc(u8 adc_gain)
+{
+    return ((u16)adc_gain * RDX_MIC_GAIN_LEVEL_MAX
+            + RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX / 2)
+           / RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX;
+}
 
 static int rdx_record_audio_br56_read_adc_cfg(
     struct adc_file_cfg *adc_cfg, char *node_name)
@@ -59,10 +83,11 @@ static int rdx_record_audio_br56_read_adc_cfg(
         return -EINVAL;
     }
     if (adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain
-        > RDX_MIC_GAIN_LEVEL_MAX) {
-        printf("[RDX][AUDIO] adc_config_read result=failed reason=gain_range subid=%u gain=%u\n",
+        > RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX) {
+        printf("[RDX][AUDIO] adc_config_read result=failed reason=gain_range subid=%u adc_gain=%u max=%u\n",
                RDX_RECORD_ADC_NODE_SUBID,
-               adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain);
+               adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain,
+               RDX_RECORD_BR56_ADC_GAIN_LEVEL_MAX);
         return -ERANGE;
     }
     return 0;
@@ -82,10 +107,12 @@ int rdx_record_audio_br56_get_factory_gain(u8 *gain)
     if (ret) {
         return ret;
     }
-    *gain = adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain;
-    printf("[RDX][AUDIO] factory_gain result=ok subid=%u node=%s adc=%u gain=%u pre_gain=%u\n",
+    *gain = rdx_record_audio_br56_gain_from_adc(
+        adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain);
+    printf("[RDX][AUDIO] factory_gain result=ok subid=%u node=%s adc=%u adc_gain=%u rdx_gain=%u pre_gain=%u\n",
            RDX_RECORD_ADC_NODE_SUBID, node_name,
-           RDX_RECORD_ADC_INDEX, *gain,
+           RDX_RECORD_ADC_INDEX,
+           adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain, *gain,
            adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_pre_gain);
     return 0;
 }
@@ -119,19 +146,21 @@ static int rdx_record_audio_br56_prepare_mic_gain(
     int ret = jlstream_node_ioctl(stream, NODE_UUID_SOURCE,
                                   NODE_IOC_SET_PARAM, (int)adc_cfg);
     if (ret == true) {
-        printf("[RDX][AUDIO] adc_gain_prepare result=ok session=%u capture=%u subid=%u node=%s adc=%u gain=%u timing=before_start\n",
+        printf("[RDX][AUDIO] adc_gain_prepare result=ok session=%u capture=%u subid=%u node=%s adc=%u rdx_gain=%u adc_gain=%u timing=before_start\n",
                (unsigned int)params->session_id,
                (unsigned int)params->capture_generation,
                RDX_RECORD_ADC_NODE_SUBID, node_name,
-               RDX_RECORD_ADC_INDEX, params->mic_gain);
+               RDX_RECORD_ADC_INDEX, params->mic_gain,
+               adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain);
         return 0;
     }
 
-    printf("[RDX][AUDIO] adc_gain_prepare result=failed session=%u capture=%u subid=%u adc=%u gain=%u ret=%d\n",
+    printf("[RDX][AUDIO] adc_gain_prepare result=failed session=%u capture=%u subid=%u adc=%u rdx_gain=%u adc_gain=%u ret=%d\n",
            (unsigned int)params->session_id,
            (unsigned int)params->capture_generation,
            RDX_RECORD_ADC_NODE_SUBID, RDX_RECORD_ADC_INDEX,
-           params->mic_gain, ret);
+           params->mic_gain,
+           adc_cfg->param[RDX_RECORD_ADC_INDEX].mic_gain, ret);
     return -EFAULT;
 }
 
@@ -207,7 +236,8 @@ int rdx_record_audio_br56_open(
         if (ret) {
             return ret;
         }
-        adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain = params->mic_gain;
+        adc_cfg.param[RDX_RECORD_ADC_INDEX].mic_gain =
+            rdx_record_audio_br56_gain_to_adc(params->mic_gain);
     }
 
     rdx_record_audio_br56_init();
