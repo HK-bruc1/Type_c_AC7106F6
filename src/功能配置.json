@@ -237,7 +237,7 @@
        "layout": "colFormItem",
        "span": 11,
        "required": false,
-       "defaultValue": 0,
+       "defaultValue": 2,
        "regList": [],
        "changeTag": true,
        "status": "",

@@ -137,7 +137,7 @@ const struct touch_key_cfg lp_touch_key_table [] =  {
 
 #if TCFG_MICKEY_ENABLE
 const struct mickey_res_value mickey_res_table =  {
-    .mickey_pin = IO_PORTB_04,
+    .mickey_pin = IO_PORTA_04,
     .extern_bias_res = 1500,
     .pp_res_value = 0,
     .up_res_value = 200,

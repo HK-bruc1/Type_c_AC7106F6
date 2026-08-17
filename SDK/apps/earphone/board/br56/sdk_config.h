@@ -165,7 +165,7 @@
 
 #define TCFG_ADKEY_ENABLE                         0                // AD按键配置
 
-#define TCFG_MICKEY_ENABLE                        0                // MIC按键配置
+#define TCFG_MICKEY_ENABLE                        1                // MIC按键配置
 
 #define TCFG_LP_TOUCH_KEY_BT_TOOL_ENABLE          0                // 内置触摸在线调试
 
@@ -281,7 +281,7 @@
 #define TCFG_APP_MUSIC_EN                         0                // 音乐模式
 #define TCFG_APP_LINEIN_EN                        0                // LINEIN模式
 #define TCFG_APP_PC_EN                            1                // PC模式
-#define TCFG_EARPHONE_TYPE                        0                // 耳机类型选择
+#define TCFG_EARPHONE_TYPE                        2                // 耳机类型选择
 #define TCFG_MIC_EFFECT_ENABLE                    0                // 混响使能
 #define TCFG_DEC_ID3_V2_ENABLE                    0                // ID3_V2
 #define TCFG_DEC_ID3_V1_ENABLE                    0                // ID3_V1
@@ -314,7 +314,7 @@
 
 // ------------音频配置.json------------
 #define TCFG_AUDIO_DAC_CONNECT_MODE               DAC_OUTPUT_LR    // 声道配置
-#define TCFG_AUDIO_DAC_MODE                       DAC_MODE_VCMO    // 输出方式
+#define TCFG_AUDIO_DAC_MODE                       DAC_MODE_DIFF    // 输出方式
 #define TCFG_AUDIO_DAC_LIGHT_CLOSE_ENABLE         0X0              // 轻量关闭
 #define TCFG_AUDIO_DAC_BUFFER_TIME_MS             20               // DMA长度(ms)
 #define TCFG_DAC_PERFORMANCE_MODE                 DAC_MODE_HIGH_PERFORMANCE // 性能模式

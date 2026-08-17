@@ -126,7 +126,7 @@
        "formId": 160,
        "renderKey": "1601646374701189",
        "saveWay": "macro",
-       "defaultValue": "DAC_MODE_VCMO",
+       "defaultValue": "DAC_MODE_DIFF",
        "uuid": "TCFG_AUDIO_DAC_MODE",
        "eventField": [],
        "originValue": "DAC_MODE_DIFF"
