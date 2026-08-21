@@ -8,11 +8,10 @@
  * 验证 BLE 通信链路。只有在 Golden Trace 和目标产品身份均已冻结后，
  * 才允许替换以下配置值。
  */
-/* Sole factory/default BLE name; VM stores only an optional user override. */
-#define RDX_COMPAT_LOCAL_NAME                  "Zenchord Case 0000"
-#define RDX_COMPAT_PRODUCT_CODE                "603"
-#define RDX_COMPAT_FACTORY_CODE                "ZENCHD"
-#define RDX_COMPAT_PRODUCT_TYPE                "E1"
+#define RDX_COMPAT_LOCAL_NAME                  "IKKO"
+#define RDX_COMPAT_PRODUCT_CODE                "604"
+#define RDX_COMPAT_FACTORY_CODE                "IKKOAI"
+#define RDX_COMPAT_PRODUCT_TYPE                "K1"
 /*
  * Manufacturer Data 末尾携带的固定 2 字节身份尾标。
  * 设备端不解析该字段，但 APP 可能使用它进行设备发现或兼容性匹配，
@@ -50,13 +49,67 @@
 #define RDX_COMPAT_FIRMWARE_VERSION            "1.0.0"
 #define RDX_COMPAT_HARDWARE_VERSION            "0.0.1"
 
-/* Zenchord 官方兼容密钥集合，不包含限制 MAC 地址的测试密钥。 */
+/*
+ * librdxApp.a 中按 app_select 选择的具名 AppKey 字典。
+ * 字典项只用于记录兼容关系；只有 RDX_COMPAT_APP_KEY_LIST 中列出的项
+ * 才会进入当前产品的运行时认证白名单。
+ */
+#define RDX_COMPAT_APP_KEY_NINGQU              "1664D1BBBD60B680"
+#define RDX_COMPAT_APP_KEY_NOTTA               "385FA36EC106DE3D"
+#define RDX_COMPAT_APP_KEY_TINGNAO             "BF73A44128EAF415"
+#define RDX_COMPAT_APP_KEY_JMEASY              "2C1DF90FAA0EEC7F"
+#define RDX_COMPAT_APP_KEY_SHENGLANG           "AABD6D05ACE276AA"
+#define RDX_COMPAT_APP_KEY_AITIR               "31DD62DF76C3FFF5"
+#define RDX_COMPAT_APP_KEY_YYS                 "8FF13D95400BD06D"
+#define RDX_COMPAT_APP_KEY_LYNSE               "E414D702EE29ED28"
+#define RDX_COMPAT_APP_KEY_TURING              "7202267367A07955"
+#define RDX_COMPAT_APP_KEY_RAYCON              "945C69D689217345"
+#define RDX_COMPAT_APP_KEY_CDJY                "F4C062DAEA418E89"
+#define RDX_COMPAT_APP_KEY_BRANDWORKS          "DEAF5A76F7D60500"
+#define RDX_COMPAT_APP_KEY_FINDAI              "25BE1A26D3FD78C8"
+#define RDX_COMPAT_APP_KEY_BEANSTALK           "524A6C121EF8075C"
+#define RDX_COMPAT_APP_KEY_DEEPMINER           "BC0C3E9E5C687B53"
+#define RDX_COMPAT_APP_KEY_TTEASY              "B07BEF6D8A6A64CE"
+#define RDX_COMPAT_APP_KEY_AISPEECH            "2F50F0235583C3C8"
+#define RDX_COMPAT_APP_KEY_SHUGUO              "45CC3F511B91597F"
+#define RDX_COMPAT_APP_KEY_VASCO               "CFF59857ADCF92C3"
+#define RDX_COMPAT_APP_KEY_ABC                 "5D4E3FB857EACF2B"
+#define RDX_COMPAT_APP_KEY_MLAMPWXB            "0E01F4429B589B74"
+#define RDX_COMPAT_APP_KEY_CUSTOM_TEST         "93C0C31635436482"
+#define RDX_COMPAT_APP_KEY_SAI                 "A8D901B704A93F1A"
+#define RDX_COMPAT_APP_KEY_IKKO                "72231C5642E6E60B"
+
+/* 旧测试 AppKey；另一个旧配置项对应的 APP 名称尚未确认。 */
 #define RDX_COMPAT_APP_KEY_PRIMARY             "14F6F7A1508E4155"
-#define RDX_COMPAT_APP_KEY_1                   "385FA36EC106DE3D"
 #define RDX_COMPAT_APP_KEY_2                   "7C0BAF778B727175"
+
+/* 运行时认证白名单；所有需要启用的 AppKey 均在此独立列出。 */
 #define RDX_COMPAT_APP_KEY_LIST                \
+    RDX_COMPAT_APP_KEY_NINGQU,                 \
+    RDX_COMPAT_APP_KEY_NOTTA,                  \
+    RDX_COMPAT_APP_KEY_TINGNAO,                \
+    RDX_COMPAT_APP_KEY_JMEASY,                 \
+    RDX_COMPAT_APP_KEY_SHENGLANG,              \
+    RDX_COMPAT_APP_KEY_AITIR,                  \
+    RDX_COMPAT_APP_KEY_YYS,                    \
+    RDX_COMPAT_APP_KEY_LYNSE,                  \
+    RDX_COMPAT_APP_KEY_TURING,                 \
+    RDX_COMPAT_APP_KEY_RAYCON,                 \
+    RDX_COMPAT_APP_KEY_CDJY,                   \
+    RDX_COMPAT_APP_KEY_BRANDWORKS,             \
+    RDX_COMPAT_APP_KEY_FINDAI,                 \
+    RDX_COMPAT_APP_KEY_BEANSTALK,              \
+    RDX_COMPAT_APP_KEY_DEEPMINER,              \
+    RDX_COMPAT_APP_KEY_TTEASY,                 \
+    RDX_COMPAT_APP_KEY_AISPEECH,               \
+    RDX_COMPAT_APP_KEY_SHUGUO,                 \
+    RDX_COMPAT_APP_KEY_VASCO,                  \
+    RDX_COMPAT_APP_KEY_ABC,                    \
+    RDX_COMPAT_APP_KEY_MLAMPWXB,               \
+    RDX_COMPAT_APP_KEY_CUSTOM_TEST,            \
+    RDX_COMPAT_APP_KEY_SAI,                    \
+    RDX_COMPAT_APP_KEY_IKKO,                   \
     RDX_COMPAT_APP_KEY_PRIMARY,                \
-    RDX_COMPAT_APP_KEY_1,                      \
     RDX_COMPAT_APP_KEY_2
 
 /* 仅供开发阶段使用的身份占位值，严禁在此填写量产密钥。 */
