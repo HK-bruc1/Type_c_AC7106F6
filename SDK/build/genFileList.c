@@ -825,6 +825,11 @@ c_SRC_FILES += \
 c_SRC_FILES += \
     apps/common/debug/memory_debug.c
 
+#if TCFG_RESOURCE_MONITOR_ENABLE
+c_SRC_FILES += \
+    apps/common/debug/resource_monitor.c
+#endif
+
 #if TCFG_DEBUG_DLOG_ENABLE
 c_SRC_FILES += \
 	apps/common/debug/dlog_config.c \
@@ -1076,11 +1081,6 @@ c_SRC_FILES += \
 #if RDX_CFG_RECORD_MARK_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_session_metadata_service.c
-#endif
-
-#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
-c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_resource_monitor.c
 #endif
 
 THIRD_PARTY_LIBS += \

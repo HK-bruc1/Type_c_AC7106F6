@@ -16,9 +16,6 @@
 #if RDX_CFG_RTC_ENABLE
 #include "rdx_rtc.h"
 #endif
-#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
-#include "rdx_resource_monitor.h"
-#endif
 
 static u8 rdx_protocol_started;
 
@@ -68,9 +65,6 @@ int rdx_protocol_start(void)
     }
 
     rdx_protocol_started = 1;
-#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
-    rdx_resource_monitor_start();
-#endif
     printf("[RDX] MVP0 started\n");
     return 0;
 }
@@ -81,9 +75,6 @@ void rdx_protocol_stop(void)
         return;
     }
 
-#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
-    rdx_resource_monitor_stop();
-#endif
 #if RDX_CFG_RTC_ENABLE
     rdx_rtc_store_backup();
 #endif
@@ -103,9 +94,6 @@ void rdx_protocol_stop(void)
 static void rdx_protocol_poweroff_backup(void)
 {
     if (rdx_protocol_started) {
-#if TCFG_RDX_RESOURCE_MONITOR_ENABLE
-        rdx_resource_monitor_stop();
-#endif
 #if RDX_CFG_RTC_ENABLE
         rdx_rtc_store_backup();
 #endif
