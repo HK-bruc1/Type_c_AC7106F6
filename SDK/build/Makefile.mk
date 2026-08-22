@@ -13,6 +13,7 @@ c_SRC_FILES := \
 	apps/earphone/audio/tone_table.c \
 	apps/earphone/audio/usb_call_audio_bridge.c \
 	apps/earphone/audio/usb_call_audio_bridge_diag.c \
+	apps/earphone/audio/usb_call_audio_encoder_diag.c \
 	apps/earphone/audio/usb_call_audio_tap.c \
 	apps/earphone/audio/usb_call_audio_tap_diag.c \
 	apps/earphone/audio/vol_sync.c \

@@ -42,7 +42,7 @@
 #define TCFG_AUDIO_CVP_DMS_FLEXIBLE_ANS_MODE      0                // 话务双MIC通话
 #define TCFG_AUDIO_CVP_DMS_FLEXIBLE_DNS_MODE      0                // 话务双MIC+DNS
 #define TCFG_AUDIO_CVP_DMS_HYBRID_DNS_MODE        0                // HYBRID双MIC+DNS
-#define TCFG_AUDIO_CVP_SMS_ANS_MODE               1                // 单MIC通话
+#define TCFG_AUDIO_CVP_SMS_ANS_MODE               0                // 单MIC通话
 #define TCFG_AUDIO_CVP_SMS_DNS_MODE               0                // 单MIC+DNS
 #define TCFG_AUDIO_CVP_SMS_VF_MODE                0                // 单麦AEC
 #define TCFG_AUDIO_CVP_V3_MODE                    0                // CVP_V3
@@ -55,7 +55,7 @@
 #define TCFG_BASS_TREBLE_NODE_ENABLE              0                // Bass Treble
 #define TCFG_BT_AUDIO_SYNC_NODE_ENABLE            1                // 蓝牙音频同步
 #define TCFG_CHANNEL_EXPANDER_NODE_ENABLE         1                // Channel Expander
-#define TCFG_CHANNEL_MERGE_NODE_ENABLE            1                // Channel Merge
+#define TCFG_CHANNEL_MERGE_NODE_ENABLE            0                // Channel Merge
 #define TCFG_CHANNEL_SWAP_NODE_ENABLE             0                // 声道交换器
 #define TCFG_CHORUS_NODE_ENABLE                   0                // Chorus
 #define TCFG_CLK_SYNC_NODE_ENABLE                 1                // 播放同步
@@ -92,7 +92,7 @@
 #define TCFG_LIMITER_NODE_ENABLE                  0                // Limiter
 #define TCFG_LLNS_DNS_NODE_ENABLE                 0                // LLNS_DNS
 #define TCFG_LLNS_NODE_ENABLE                     0                // LLNS
-#define TCFG_MIXER_NODE_ENABLE                    1                // MIXER
+#define TCFG_MIXER_NODE_ENABLE                    0                // MIXER
 #define TCFG_MULTI_BAND_DRC_NODE_ENABLE           0                // MDRC
 #define TCFG_MULTI_BAND_LIMITER_NODE_ENABLE       0                // MB Limiter
 #define TCFG_MULTI_CH_IIS_NODE_ENABLE             0                // MULTI CH IIS0 TX
@@ -115,12 +115,12 @@
 #define TCFG_SIGNAL_GENERATOR_NODE_ENABLE         0                // SignalGen
 #define TCFG_SINK_DEV0_NODE_ENABLE                1                // Sink_Dev0
 #define TCFG_SINK_DEV1_NODE_ENABLE                1                // Sink_Dev1
-#define TCFG_SINK_DEV2_NODE_ENABLE                1                // Sink_Dev2
+#define TCFG_SINK_DEV2_NODE_ENABLE                0                // Sink_Dev2
 #define TCFG_SINK_DEV3_NODE_ENABLE                0                // Sink_Dev3
 #define TCFG_SINK_DEV4_NODE_ENABLE                0                // Sink_Dev4
 #define TCFG_SOUND_SPLITTER_NODE_ENABLE           1                // 音频分流器
 #define TCFG_SOURCE_DEV0_NODE_ENABLE              0                // Source_Dev0
-#define TCFG_SOURCE_DEV1_NODE_ENABLE              0                // Source_Dev1
+#define TCFG_SOURCE_DEV1_NODE_ENABLE              1                // Source_Dev1
 #define TCFG_SOURCE_DEV2_NODE_ENABLE              0                // Source_Dev2
 #define TCFG_SOURCE_DEV3_NODE_ENABLE              0                // Source_Dev3
 #define TCFG_SOURCE_DEV4_NODE_ENABLE              0                // Source_Dev4
@@ -196,7 +196,7 @@
 #define TCFG_AUDIO_EFX_1AA6_RUN_MODE              EFx_BW_UNUSED    // Convert
 #define TCFG_AUDIO_EFX_6DD9_RUN_MODE              EFx_BW_UNUSED    // Chorus
 #define TCFG_AUDIO_EFX_DA15_RUN_MODE              EFx_BW_16t16     // Channel Expander
-#define TCFG_AUDIO_EFX_BF8E_RUN_MODE              EFx_BW_16t16     // Channel Merge
+#define TCFG_AUDIO_EFX_BF8E_RUN_MODE              EFx_BW_UNUSED    // Channel Merge
 #define TCFG_AUDIO_EFX_5FF6_RUN_MODE              EFx_BW_16t16     // CVP_V3
 #define TCFG_AUDIO_EFX_DEFE_RUN_MODE              EFx_BW_UNUSED    // DRC
 #define TCFG_AUDIO_EFX_DCCD_RUN_MODE              EFx_BW_32t32     // DAC
@@ -235,7 +235,7 @@
 #define TCFG_AUDIO_EFX_4E5B_RUN_MODE              EFx_BW_UNUSED    // Limiter
 #define TCFG_AUDIO_EFX_65C5_RUN_MODE              EFx_BW_UNUSED    // LHDC-X
 #define TCFG_AUDIO_EFX_1CA2_RUN_MODE              EFx_BW_UNUSED    // LLNS_DNS
-#define TCFG_AUDIO_EFX_E62A_RUN_MODE              EFx_BW_16t16     // MIXER
+#define TCFG_AUDIO_EFX_E62A_RUN_MODE              EFx_BW_UNUSED    // MIXER
 #define TCFG_AUDIO_EFX_D5E0_RUN_MODE              EFx_BW_UNUSED    // mute
 #define TCFG_AUDIO_EFX_74CB_RUN_MODE              EFx_BW_UNUSED    // MDRC
 #define TCFG_AUDIO_EFX_F58A_RUN_MODE              EFx_BW_UNUSED    // MB Limiter
@@ -255,23 +255,23 @@
 #define TCFG_AUDIO_EFX_D186_RUN_MODE              EFx_BW_32t32     // PCSPK
 #define TCFG_AUDIO_EFX_B711_RUN_MODE              EFx_BW_16t16     // PCMIC
 #define TCFG_AUDIO_EFX_B5E1_RUN_MODE              EFx_BW_UNUSED    // Replace
-#define TCFG_AUDIO_EFX_1ECD_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // SRC
+#define TCFG_AUDIO_EFX_1ECD_RUN_MODE              EFx_BW_32t32     // SRC
 #define TCFG_AUDIO_EFX_3BE6_RUN_MODE              EFx_BW_UNUSED    // SpeakerEQ
 #define TCFG_AUDIO_EFX_FB00_RUN_MODE              EFx_BW_UNUSED    // SteroMix
-#define TCFG_AUDIO_EFX_603A_RUN_MODE              EFx_BW_16t16     // Sink
+#define TCFG_AUDIO_EFX_603A_RUN_MODE              EFx_BW_UNUSED    // Sink
 #define TCFG_AUDIO_EFX_EB56_RUN_MODE              EFx_BW_UNUSED    // Source
 #define TCFG_AUDIO_EFX_2357_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // Switch
 #define TCFG_AUDIO_EFX_8934_RUN_MODE              EFx_BW_UNUSED    // Surround Effect
 #define TCFG_AUDIO_EFX_C90C_RUN_MODE              EFx_BW_UNUSED    // Surround Demo
 #define TCFG_AUDIO_EFX_88E5_RUN_MODE              EFx_BW_UNUSED    // Stereo Widener
 #define TCFG_AUDIO_EFX_8FC4_RUN_MODE              EFx_BW_UNUSED    // Source_Dev0
-#define TCFG_AUDIO_EFX_8FC5_RUN_MODE              EFx_BW_UNUSED    // Source_Dev1
+#define TCFG_AUDIO_EFX_8FC5_RUN_MODE              EFx_BW_16t16     // Source_Dev1
 #define TCFG_AUDIO_EFX_8FC7_RUN_MODE              EFx_BW_UNUSED    // Source_Dev3
 #define TCFG_AUDIO_EFX_8FC8_RUN_MODE              EFx_BW_UNUSED    // Source_Dev4
 #define TCFG_AUDIO_EFX_8FC6_RUN_MODE              EFx_BW_UNUSED    // Source_Dev2
 #define TCFG_AUDIO_EFX_B328_RUN_MODE              EFx_BW_16t16     // Sink_Dev0
 #define TCFG_AUDIO_EFX_B329_RUN_MODE              EFx_BW_32t32     // Sink_Dev1
-#define TCFG_AUDIO_EFX_B32A_RUN_MODE              EFx_BW_16t16     // Sink_Dev2
+#define TCFG_AUDIO_EFX_B32A_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev2
 #define TCFG_AUDIO_EFX_B32B_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev3
 #define TCFG_AUDIO_EFX_B32C_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev4
 #define TCFG_AUDIO_EFX_225D_RUN_MODE              EFx_BW_UNUSED    // SignalGen

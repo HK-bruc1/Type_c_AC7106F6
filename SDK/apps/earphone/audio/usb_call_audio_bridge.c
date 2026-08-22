@@ -12,10 +12,8 @@
      * USB_CALL_AUDIO_BRIDGE_PRELOAD_MS / 1000)
 #define USB_CALL_AUDIO_BRIDGE_DRIFT_WINDOW_SAMPLES \
     (USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES / 2)
-#define USB_CALL_AUDIO_BRIDGE_SOURCE_LOST_FRAMES \
-    (USB_CALL_AUDIO_BRIDGE_SOURCE_LOST_MS \
-     / USB_CALL_AUDIO_BRIDGE_FRAME_MS)
 #define USB_CALL_AUDIO_BRIDGE_NORMALIZE_CHUNK_SAMPLES    256
+#define USB_CALL_AUDIO_BRIDGE_MAX_DRIFT_DUP_SAMPLES        4
 
 struct usb_call_audio_bridge_ring {
     s16 sample[USB_CALL_AUDIO_BRIDGE_BUFFER_SAMPLES];
@@ -35,7 +33,6 @@ struct usb_call_audio_bridge_source {
     u16 resample_count;
     u16 peak_buffer_samples;
     u8 format_valid;
-    u8 consecutive_underflows;
     s16 normalize_chunk[USB_CALL_AUDIO_BRIDGE_NORMALIZE_CHUNK_SAMPLES];
 };
 
@@ -188,7 +185,6 @@ static void usb_call_audio_bridge_invalidate_locked(void)
     for (tap_id = 0; tap_id < USB_CALL_AUDIO_TAP_COUNT; tap_id++) {
         usb_call_audio_bridge_ring_clear(
             &usb_call_audio_bridge.source[tap_id].ring);
-        usb_call_audio_bridge.source[tap_id].consecutive_underflows = 0;
     }
     usb_call_audio_bridge.mix_interval.generation_resets++;
 }
@@ -403,6 +399,7 @@ static u16 usb_call_audio_bridge_read_source_locked(
     u16 requested = USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES;
     u16 read_count;
     u16 missing;
+    u16 duplicate = 0;
 
     if (adjust_drift) {
         if (source->ring.count
@@ -413,29 +410,30 @@ static u16 usb_call_audio_bridge_read_source_locked(
         } else if (source->ring.count
                    < USB_CALL_AUDIO_BRIDGE_PRELOAD_SAMPLES
                      - USB_CALL_AUDIO_BRIDGE_DRIFT_WINDOW_SAMPLES
-                   && source->ring.count >= requested - 1) {
-            requested--;
-            source->interval.drift_duplicate_samples++;
+                   && source->ring.count < requested
+                   && source->ring.count
+                      >= requested
+                         - USB_CALL_AUDIO_BRIDGE_MAX_DRIFT_DUP_SAMPLES) {
+            duplicate = requested - source->ring.count;
+            requested -= duplicate;
+            source->interval.drift_duplicate_samples += duplicate;
         }
     }
 
     read_count = usb_call_audio_bridge_ring_read(
         &source->ring, frame, requested);
-    if (read_count == requested
-        && requested < USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES) {
-        frame[read_count] = read_count ? frame[read_count - 1] : 0;
-        read_count++;
+    if (read_count == requested && duplicate) {
+        s16 last = read_count ? frame[read_count - 1] : 0;
+
+        while (read_count < USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES) {
+            frame[read_count++] = last;
+        }
     }
     missing = USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES - read_count;
     if (missing) {
         memset(frame + read_count, 0, missing * sizeof(s16));
         source->interval.underflow_samples += missing;
         source->interval.underflow_events++;
-        if (source->consecutive_underflows != 0xff) {
-            source->consecutive_underflows++;
-        }
-    } else {
-        source->consecutive_underflows = 0;
     }
     source->interval.consumed_samples +=
         USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES;
@@ -524,7 +522,6 @@ static void usb_call_audio_bridge_drain_from_near(void)
     usb_call_audio_bridge_consumer_t consumer;
     void *consumer_priv;
     u32 capture_generation;
-    u8 source_lost;
     u16 index;
 
     spin_lock(&usb_call_audio_bridge_lock);
@@ -536,7 +533,6 @@ static void usb_call_audio_bridge_drain_from_near(void)
     spin_unlock(&usb_call_audio_bridge_lock);
 
     while (1) {
-        source_lost = 0;
         consumer = NULL;
         consumer_priv = NULL;
         capture_generation = 0;
@@ -574,14 +570,10 @@ static void usb_call_audio_bridge_drain_from_near(void)
         usb_call_audio_bridge_read_source_locked(
             USB_CALL_AUDIO_TAP_NEAR,
             usb_call_audio_bridge.near_frame, 0);
+        /* Near owns the timeline; a short Far shortage is padded in-place. */
         usb_call_audio_bridge_read_source_locked(
             USB_CALL_AUDIO_TAP_FAR,
             usb_call_audio_bridge.far_frame, 1);
-        if (usb_call_audio_bridge.source[USB_CALL_AUDIO_TAP_FAR]
-                .consecutive_underflows
-            >= USB_CALL_AUDIO_BRIDGE_SOURCE_LOST_FRAMES) {
-            source_lost = 1;
-        }
         capture_generation = usb_call_audio_bridge.capture_generation;
         consumer = usb_call_audio_bridge.consumer;
         consumer_priv = usb_call_audio_bridge.consumer_priv;
@@ -616,11 +608,6 @@ static void usb_call_audio_bridge_drain_from_near(void)
         usb_call_audio_bridge.mix_interval.frames++;
         usb_call_audio_bridge.mix_interval.samples +=
             USB_CALL_AUDIO_BRIDGE_FRAME_SAMPLES;
-        if (source_lost) {
-            usb_call_audio_bridge.mix_interval.source_lost_events++;
-            usb_call_audio_bridge_invalidate_locked();
-            consumer = NULL;
-        }
         spin_unlock(&usb_call_audio_bridge_lock);
 
         if (consumer) {

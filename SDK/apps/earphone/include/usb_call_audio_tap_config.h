@@ -18,7 +18,8 @@
  * normalizes Near/Far to 16 kHz mono Q15, and produces 20 ms mixed PCM frames.
  * The diagnostic build does not attach Encoder, AI_TX, RDX Protocol, or BLE.
  */
-#define TCFG_USB_CALL_AUDIO_BRIDGE_DIAG_ENABLE       1
+#define TCFG_USB_CALL_AUDIO_BRIDGE_DIAG_ENABLE       0
+#define TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE      1
 #define USB_CALL_AUDIO_BRIDGE_OUTPUT_SAMPLE_RATE     16000
 #define USB_CALL_AUDIO_BRIDGE_FRAME_MS                  20
 #define USB_CALL_AUDIO_BRIDGE_BUFFER_MS                 80
@@ -41,6 +42,20 @@
 #if TCFG_USB_CALL_AUDIO_TAP_DIAG_ENABLE \
     && TCFG_USB_CALL_AUDIO_BRIDGE_DIAG_ENABLE
 #error "USB call Tap and Bridge diagnostics cannot own the Tap together"
+#endif
+
+#if TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE \
+    && (TCFG_USB_CALL_AUDIO_TAP_DIAG_ENABLE \
+        || TCFG_USB_CALL_AUDIO_BRIDGE_DIAG_ENABLE)
+#error "USB call Encoder diagnostic must exclusively own the Bridge"
+#endif
+
+#if TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE \
+    && (!TCFG_SOURCE_DEV1_NODE_ENABLE \
+        || !TCFG_ENCODER_NODE_ENABLE \
+        || !TCFG_AI_TX_NODE_ENABLE \
+        || !TCFG_ENC_OPUS_ENABLE)
+#error "USB call Encoder diagnostic requires SourceDev1, Encoder, AI_TX and Opus"
 #endif
 
 #if (USB_CALL_AUDIO_BRIDGE_FRAME_MS != 20)

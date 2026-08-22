@@ -3502,266 +3502,13 @@
       "distance": 40
      }
     },
-    "id": "d909cd43-9cec-4046-9c2d-34d3b8338c7a",
-    "data": {
-     "itemId": "id_1778548900656_2"
-    },
+    "id": "6e6ca596-433f-44c4-a773-c351049bc61d",
     "source": {
      "cell": "20684478-ed38-48c3-87e2-23705bde3c3a",
      "port": "5114f0b1-23ea-4659-844f-a8bd9b1e634d"
     },
-    "target": {
-     "cell": "36ff4794-7b80-4953-8d1f-f32c8733a6b7",
-     "port": "453f641d-239f-4318-a64a-ebcc61263a75"
-    }
-   },
-   {
-    "position": {
-     "x": -520,
-     "y": -40
-    },
-    "size": {
-     "width": 120,
-     "height": 80
-    },
-    "view": "vue-shape-view",
-    "shape": "vue-shape",
-    "id": "36ff4794-7b80-4953-8d1f-f32c8733a6b7",
-    "component": "node-cust",
-    "group": "hardware",
-    "data": {
-     "name": "单MIC通话",
-     "group": "清晰语音",
-     "uuid": "0XD0BC",
-     "type": 1,
-     "fun": 1,
-     "formFile": "../../.cvp_sms_ans配置.json",
-     "marco": "TCFG_AUDIO_CVP_SMS_ANS_MODE",
-     "pic": "单麦ANS.png",
-     "nodeDoc": "\\docs\\html\\SDK\\audio_cvp\\cvp_1mic_manual.html",
-     "subId": 3,
-     "itemId": "id_1778548900656_2",
-     "configs": {
-      "name": "MICD0BC3",
-      "list": [
-       {
-        "modeId": "id_1724923077161_3",
-        "name": "MICD0BC3",
-        "current": "",
-        "bypass": false,
-        "list": [
-         {
-          "name": "arg0",
-          "data": [
-           {
-            "id": "id_1691745707267_4",
-            "list": [
-             {
-              "id": "id_1691745735576_5",
-              "value": 0
-             },
-             {
-              "id": "id_1719404851819_0",
-              "value": [
-               2
-              ]
-             }
-            ]
-           },
-           {
-            "id": "id_1676960064886_0",
-            "list": [
-             {
-              "id": "id_1676960064886_1",
-              "value": 0
-             },
-             {
-              "id": "id_1676960064886_2",
-              "value": 0
-             }
-            ]
-           },
-           {
-            "id": "id_1675824280474_165",
-            "list": [
-             {
-              "id": "id_1675824280479_239",
-              "value": 0
-             },
-             {
-              "id": "id_1675824280474_159",
-              "value": 1
-             },
-             {
-              "id": "id_1675824280479_241",
-              "value": -70
-             }
-            ]
-           },
-           {
-            "id": "id_1675824280480_249",
-            "list": [
-             {
-              "id": "id_1675824280479_243",
-              "value": 1
-             },
-             {
-              "id": "id_1675824280480_245",
-              "value": -3
-             },
-             {
-              "id": "id_1675824280480_247",
-              "value": 4
-             }
-            ]
-           },
-           {
-            "id": "id_1675241880004_4",
-            "list": [
-             {
-              "id": "id_1675241880004_5",
-              "value": 1
-             },
-             {
-              "id": "id_1675241880004_6",
-              "value": 1.25
-             },
-             {
-              "id": "id_1675241880004_7",
-              "value": 0.09
-             },
-             {
-              "id": "id_1713859708953_0",
-              "value": -75
-             }
-            ]
-           },
-           {
-            "id": "id_1675824280481_275",
-            "list": [
-             {
-              "id": "id_1675824280480_251",
-              "value": 1
-             },
-             {
-              "id": "id_1675824280480_253",
-              "value": 1.3
-             },
-             {
-              "id": "id_1675824280480_255",
-              "value": 1.3
-             },
-             {
-              "id": "id_1675824280480_257",
-              "value": 1.3
-             },
-             {
-              "id": "id_1675824280480_259",
-              "value": 1.3
-             },
-             {
-              "id": "id_1675824280480_261",
-              "value": 8
-             },
-             {
-              "id": "id_1675824280480_263",
-              "value": 0
-             },
-             {
-              "id": "id_1675824280480_265",
-              "value": -50
-             },
-             {
-              "id": "id_1675824280480_267",
-              "value": 12
-             },
-             {
-              "id": "id_1675824280481_269",
-              "value": 0
-             },
-             {
-              "id": "id_1675824280481_271",
-              "value": -40
-             },
-             {
-              "id": "id_1675824280481_273",
-              "value": -70
-             }
-            ]
-           }
-          ],
-          "enable": true
-         }
-        ]
-       }
-      ]
-     }
-    },
-    "ports": {
-     "groups": {
-      "in": {
-       "position": "left"
-      },
-      "out": {
-       "position": "right",
-       "attrs": {
-        "text": {
-         "fill": "#2b3f57",
-         "font-size": "12",
-         "visibility": "visible",
-         "text": ""
-        },
-        "circle": {
-         "r": 6,
-         "magnet": true,
-         "stroke": "#7DC06E",
-         "strokeWidth": 2,
-         "fill": "#f2f2f2",
-         "event": "port:click",
-         "style": {
-          "visibility": "visible"
-         }
-        }
-       }
-      }
-     },
-     "items": [
-      {
-       "group": "in",
-       "index": 0,
-       "id": "453f641d-239f-4318-a64a-ebcc61263a75"
-      },
-      {
-       "group": "out",
-       "index": 0,
-       "id": "356d55bf-8e45-4ed8-a447-29d2f78f05c7"
-      }
-     ]
-    }
-   },
-   {
-    "shape": "edge",
-    "attrs": {
-     "line": {
-      "stroke": "#A4A5A9",
-      "strokeWidth": "2px",
-      "targetMarker": {
-       "tagName": "path",
-       "d": "M 12 -5 0 0 12 5 Z",
-       "strokeWidth": 2,
-       "fill": "#A4A5A9",
-       "stroke": "#A4A5A9"
-      },
-      "distance": 40
-     }
-    },
-    "id": "044d7081-b399-4d2e-aad1-b93e7ab30716",
     "data": {
      "itemId": "id_1778548900656_2"
-    },
-    "source": {
-     "cell": "36ff4794-7b80-4953-8d1f-f32c8733a6b7",
-     "port": "356d55bf-8e45-4ed8-a447-29d2f78f05c7"
     },
     "target": {
      "cell": "69cc92f7-67e2-4bc5-8465-0d9191b357fb",
@@ -4983,6 +4730,230 @@
        "group": "in",
        "index": 0,
        "id": "ecc22b3d-602c-4d87-81d6-8f2c71022a39"
+      }
+     ]
+    }
+   },
+   {
+    "position": {
+     "x": -520,
+     "y": 120
+    },
+    "size": {
+     "width": 120,
+     "height": 80
+    },
+    "view": "vue-shape-view",
+    "shape": "vue-shape",
+    "id": "36ff4794-7b80-4953-8d1f-f32c8733a6b7",
+    "component": "node-cust",
+    "group": "hardware",
+    "data": {
+     "name": "单MIC通话",
+     "group": "清晰语音",
+     "uuid": "0XD0BC",
+     "type": 1,
+     "fun": 1,
+     "formFile": "../../.cvp_sms_ans配置.json",
+     "marco": "TCFG_AUDIO_CVP_SMS_ANS_MODE",
+     "pic": "单麦ANS.png",
+     "nodeDoc": "\\docs\\html\\SDK\\audio_cvp\\cvp_1mic_manual.html",
+     "subId": 3,
+     "itemId": "id_1778548900656_2",
+     "configs": {
+      "name": "MICD0BC3",
+      "list": [
+       {
+        "modeId": "id_1724923077161_3",
+        "name": "MICD0BC3",
+        "current": "",
+        "bypass": false,
+        "list": [
+         {
+          "name": "arg0",
+          "data": [
+           {
+            "id": "id_1691745707267_4",
+            "list": [
+             {
+              "id": "id_1691745735576_5",
+              "value": 0
+             },
+             {
+              "id": "id_1719404851819_0",
+              "value": [
+               2
+              ]
+             }
+            ]
+           },
+           {
+            "id": "id_1676960064886_0",
+            "list": [
+             {
+              "id": "id_1676960064886_1",
+              "value": 0
+             },
+             {
+              "id": "id_1676960064886_2",
+              "value": 0
+             }
+            ]
+           },
+           {
+            "id": "id_1675824280474_165",
+            "list": [
+             {
+              "id": "id_1675824280479_239",
+              "value": 0
+             },
+             {
+              "id": "id_1675824280474_159",
+              "value": 1
+             },
+             {
+              "id": "id_1675824280479_241",
+              "value": -70
+             }
+            ]
+           },
+           {
+            "id": "id_1675824280480_249",
+            "list": [
+             {
+              "id": "id_1675824280479_243",
+              "value": 1
+             },
+             {
+              "id": "id_1675824280480_245",
+              "value": -3
+             },
+             {
+              "id": "id_1675824280480_247",
+              "value": 4
+             }
+            ]
+           },
+           {
+            "id": "id_1675241880004_4",
+            "list": [
+             {
+              "id": "id_1675241880004_5",
+              "value": 1
+             },
+             {
+              "id": "id_1675241880004_6",
+              "value": 1.25
+             },
+             {
+              "id": "id_1675241880004_7",
+              "value": 0.09
+             },
+             {
+              "id": "id_1713859708953_0",
+              "value": -75
+             }
+            ]
+           },
+           {
+            "id": "id_1675824280481_275",
+            "list": [
+             {
+              "id": "id_1675824280480_251",
+              "value": 1
+             },
+             {
+              "id": "id_1675824280480_253",
+              "value": 1.3
+             },
+             {
+              "id": "id_1675824280480_255",
+              "value": 1.3
+             },
+             {
+              "id": "id_1675824280480_257",
+              "value": 1.3
+             },
+             {
+              "id": "id_1675824280480_259",
+              "value": 1.3
+             },
+             {
+              "id": "id_1675824280480_261",
+              "value": 8
+             },
+             {
+              "id": "id_1675824280480_263",
+              "value": 0
+             },
+             {
+              "id": "id_1675824280480_265",
+              "value": -50
+             },
+             {
+              "id": "id_1675824280480_267",
+              "value": 12
+             },
+             {
+              "id": "id_1675824280481_269",
+              "value": 0
+             },
+             {
+              "id": "id_1675824280481_271",
+              "value": -40
+             },
+             {
+              "id": "id_1675824280481_273",
+              "value": -70
+             }
+            ]
+           }
+          ],
+          "enable": true
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "ports": {
+     "groups": {
+      "in": {
+       "position": "left"
+      },
+      "out": {
+       "position": "right",
+       "attrs": {
+        "text": {
+         "fill": "#2b3f57",
+         "font-size": "12",
+         "visibility": "visible",
+         "text": ""
+        },
+        "circle": {
+         "r": 6,
+         "magnet": true,
+         "stroke": "#7DC06E",
+         "strokeWidth": 2,
+         "fill": "#f2f2f2",
+         "event": "port:click",
+         "style": {
+          "visibility": "visible"
+         }
+        }
+       }
+      }
+     },
+     "items": [
+      {
+       "group": "in",
+       "index": 0,
+       "id": "453f641d-239f-4318-a64a-ebcc61263a75"
+      },
+      {
+       "group": "out",
+       "index": 0,
+       "id": "356d55bf-8e45-4ed8-a447-29d2f78f05c7"
       }
      ]
     }
