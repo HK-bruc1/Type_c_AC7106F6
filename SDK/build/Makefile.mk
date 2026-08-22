@@ -11,6 +11,7 @@ c_SRC_FILES := \
 	apps/earphone/audio/jlstream_event_handler.c \
 	apps/earphone/audio/scene_switch.c \
 	apps/earphone/audio/tone_table.c \
+	apps/earphone/audio/usb_call_audio_tap.c \
 	apps/earphone/audio/vol_sync.c \
 	apps/earphone/battery/battery_level.c \
 	apps/earphone/battery/charge.c \

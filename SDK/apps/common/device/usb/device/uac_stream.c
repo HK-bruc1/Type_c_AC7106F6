@@ -42,6 +42,7 @@ static volatile u8 mic_capture_requested = 0;
 static volatile u8 mic_capture_start_pending = 0;
 static volatile u8 mic_capture_stop_pending = 0;
 static volatile u8 mic_capture_is_open = 0;
+static volatile u32 speaker_format_generation = 0;
 static struct audio_capture_lease uac_mic_capture_lease;
 static const struct audio_capture_lease_client uac_capture_lease_client = {
     .name = "usb_audio",
@@ -73,6 +74,12 @@ static struct uac_speaker_handle *uac_speaker = NULL;
 #else
 static struct uac_speaker_handle uac_speaker_handle SEC(.usb.data.bss.exchange);
 #endif
+
+static u32 uac_stream_next_generation(u32 generation)
+{
+    generation++;
+    return generation ? generation : 1;
+}
 
 u8 uac_audio_is_24bit_in_4byte()
 {
@@ -188,6 +195,8 @@ void uac_speaker_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
             uac_speaker->samplerate = samplerate;
             uac_speaker->channel = ch;
             uac_speaker->bitwidth = bitwidth;
+            speaker_format_generation =
+                uac_stream_next_generation(speaker_format_generation);
 #if TCFG_USB_SLAVE_AUDIO_SPK_ENABLE
             pc_spk_set_fmt(ch, bitwidth, samplerate);
             //快速切换位宽 or 采样率 or 声道数时，如果数据流运行中
@@ -221,6 +230,8 @@ void uac_speaker_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
     uac_speaker->channel = ch;
     uac_speaker->samplerate = samplerate;
     uac_speaker->bitwidth = bitwidth;
+    speaker_format_generation =
+        uac_stream_next_generation(speaker_format_generation);
 
     speaker_stream_is_open = 1;
 
@@ -246,6 +257,8 @@ void uac_speaker_stream_close_delay(void *priv)
 
     log_info("%s", __func__);
     speaker_stream_is_open = 0;
+    speaker_format_generation =
+        uac_stream_next_generation(speaker_format_generation);
 
     if (uac_speaker) {
         if (uac_speaker->timer_id) {
@@ -353,6 +366,34 @@ static u32 mic_samplerate;
 static u32 mic_bitwidth;
 static u8  mic_channel;
 static u32 mic_timestamp;
+static volatile u32 mic_format_generation;
+
+void uac_audio_get_runtime_info(struct uac_audio_runtime_info *info)
+{
+    if (!info) {
+        return;
+    }
+
+    local_irq_disable();
+    memset(info, 0, sizeof(*info));
+    info->speaker.interface_open = speaker_stream_is_open;
+    info->speaker.format_generation = speaker_format_generation;
+    if (uac_speaker) {
+        info->speaker.stream_active = uac_speaker->stream_state;
+        info->speaker.sample_rate = uac_speaker->samplerate;
+        info->speaker.channel = uac_speaker->channel;
+        info->speaker.bit_width = uac_speaker->bitwidth;
+    }
+    info->mic.interface_open = mic_capture_requested;
+    info->mic.stream_active = mic_capture_is_open;
+    info->mic.format_generation = mic_format_generation;
+    if (mic_capture_requested || mic_capture_is_open) {
+        info->mic.sample_rate = mic_samplerate;
+        info->mic.channel = mic_channel;
+        info->mic.bit_width = mic_bitwidth;
+    }
+    local_irq_enable();
+}
 
 int uac_mic_stream_read(u8 *buf, u32 len)
 {
@@ -539,25 +580,35 @@ u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
 {
     int msg[2];
     int post_ret;
+    u8 format_changed;
+    u8 lifecycle_changed;
 
 #if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
     pc_mic_set_fmt(ch, bitwidth, samplerate);
 #endif
 
+    local_irq_disable();
+    lifecycle_changed = !mic_capture_requested;
+    format_changed = mic_samplerate != samplerate ||
+                     mic_channel != ch ||
+                     mic_bitwidth != bitwidth;
     mic_capture_requested = 1;
+    if (format_changed || lifecycle_changed) {
+        mic_samplerate = samplerate;
+        mic_bitwidth = bitwidth;
+        mic_channel = ch;
+        mic_format_generation =
+            uac_stream_next_generation(mic_format_generation);
+    }
+    local_irq_enable();
 
     if (mic_capture_is_open) {
         if (mic_close_tid) {
             sys_hi_timeout_del(mic_close_tid);
             mic_close_tid = 0;
         }
-        if (mic_samplerate != samplerate ||
-            mic_channel != ch ||
-            mic_bitwidth != bitwidth) {
+        if (format_changed) {
             mic_tx_handler = NULL;	//添加测试
-            mic_samplerate = samplerate;
-            mic_bitwidth = bitwidth;
-            mic_channel = ch;
 #if TCFG_USB_SLAVE_AUDIO_MIC_ENABLE
             //重启mic recorder
             pc_mic_recoder_restart_by_taskq();
@@ -572,10 +623,6 @@ u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
         return 0;
     }
 
-    mic_samplerate = samplerate;
-    mic_bitwidth = bitwidth;
-    mic_channel = ch;
-
     if (mic_capture_start_pending) {
         return 0;
     }
@@ -585,8 +632,12 @@ u32 uac_mic_stream_open(u32 samplerate, u32 ch, u32 bitwidth)
     msg[1] = 0;
     post_ret = os_taskq_post_type("app_core", Q_CALLBACK, 2, msg);
     if (post_ret) {
+        local_irq_disable();
         mic_capture_requested = 0;
         mic_capture_start_pending = 0;
+        mic_format_generation =
+            uac_stream_next_generation(mic_format_generation);
+        local_irq_enable();
         log_error("mic start post failed=%d", post_ret);
     }
     return post_ret;
@@ -641,7 +692,13 @@ static void uac_mic_stream_close_delay(void *priv)
 
 void uac_mic_stream_close(int release)
 {
-    mic_capture_requested = 0;
+    local_irq_disable();
+    if (mic_capture_requested) {
+        mic_capture_requested = 0;
+        mic_format_generation =
+            uac_stream_next_generation(mic_format_generation);
+    }
+    local_irq_enable();
     if (mic_capture_is_open == 0) {
         return ;
     }

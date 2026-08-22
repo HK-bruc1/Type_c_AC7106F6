@@ -23,6 +23,7 @@
 #include "app_main.h"
 #include "local_tws.h"
 #include "bt_tws.h"
+#include "usb_call_audio_tap.h"
 
 #if TCFG_AUDIO_DUT_ENABLE
 #include "test_tools/audio_dut_control.h"
@@ -423,8 +424,25 @@ static int media_switch_get_status()
 }
 #endif
 
+static int usb_call_near_tap_get_status(void)
+{
+    return usb_call_audio_tap_gate_is_open(USB_CALL_AUDIO_TAP_NEAR);
+}
+
+static int usb_call_far_tap_get_status(void)
+{
+    return usb_call_audio_tap_gate_is_open(USB_CALL_AUDIO_TAP_FAR);
+}
+
 static int get_switch_node_callback(const char *arg)
 {
+    if (!strcmp(arg, USB_CALL_AUDIO_NEAR_SWITCH_NAME)) {
+        return (int)usb_call_near_tap_get_status;
+    }
+    if (!strcmp(arg, USB_CALL_AUDIO_FAR_SWITCH_NAME)) {
+        return (int)usb_call_far_tap_get_status;
+    }
+
     if (!strcmp(arg, "TWS_Switch")) {
         return (int)tws_switch_get_status;
     }

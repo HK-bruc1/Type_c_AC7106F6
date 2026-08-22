@@ -8,6 +8,7 @@
 #include "jlstream.h"
 #include "media/audio_base.h"
 #include "app_config.h"
+#include "usb_call_audio_tap.h"
 
 #define SINK_DEV0_MSBC_TEST_ENABLE	0		//MSBC编码输出测试
 
@@ -23,13 +24,14 @@ struct sink_dev0_hdl {
 */
 static int sink_dev0_init(struct sink_dev0_hdl *hdl)
 {
-    u8 ch_num = AUDIO_CH_NUM(hdl->fmt.channel_mode);	//声道数
-    u32 sample_rate = hdl->fmt.sample_rate;				//采样率
-    u32 coding_type = hdl->fmt.coding_type;				//数据格式
+	u8 ch_num = AUDIO_CH_NUM(hdl->fmt.channel_mode);
 
-    printf("sink_dev1_init,ch_num=%x,sr=%d,coding_type=%x\n", ch_num, sample_rate, coding_type);
-
-    //do something
+	usb_call_audio_tap_stream_start(USB_CALL_AUDIO_TAP_NEAR,
+							hdl->fmt.sample_rate,
+							hdl->fmt.coding_type,
+							ch_num,
+							hdl->fmt.bit_wide,
+							hdl->fmt.Qval);
     return 0;
 }
 
@@ -39,7 +41,7 @@ static int sink_dev0_init(struct sink_dev0_hdl *hdl)
 */
 static int sink_dev0_exit(struct sink_dev0_hdl *hdl)
 {
-    //do something
+	usb_call_audio_tap_stream_stop(USB_CALL_AUDIO_TAP_NEAR);
     return 0;
 }
 
@@ -51,8 +53,7 @@ static int sink_dev0_exit(struct sink_dev0_hdl *hdl)
 */
 static void sink_dev0_run(struct sink_dev0_hdl *hdl, void *data, int data_len)
 {
-    //do something
-
+	usb_call_audio_tap_input(USB_CALL_AUDIO_TAP_NEAR, data, data_len);
 }
 
 static void sink_dev0_handle_frame(struct stream_iport *iport, struct stream_note *note)
@@ -74,7 +75,6 @@ static void sink_dev0_handle_frame(struct stream_iport *iport, struct stream_not
 
 static int sink_dev0_bind(struct stream_node *node, u16 uuid)
 {
-    printf("sink_dev0_bind");
     /* struct sink_dev0_hdl *hdl = (struct sink_dev0_hdl *)node->private_data; */
     return 0;
 }
@@ -116,14 +116,12 @@ static int sink_dev0_ioc_fmt_nego(struct stream_iport *iport)
 
 static int sink_dev0_ioc_start(struct sink_dev0_hdl *hdl)
 {
-    printf("sink_dev0_ioc_start");
     sink_dev0_init(hdl);
     return 0;
 }
 
 static int sink_dev0_ioc_stop(struct sink_dev0_hdl *hdl)
 {
-    printf("sink_dev0_ioc_stop");
     sink_dev0_exit(hdl);
     return 0;
 }
@@ -160,7 +158,6 @@ static int sink_dev0_ioctl(struct stream_iport *iport, int cmd, int arg)
 //释放当前节点资源
 static void sink_dev0_release(struct stream_node *node)
 {
-    printf("sink_dev0_release");
 }
 
 REGISTER_STREAM_NODE_ADAPTER(sink_dev0_adapter) = {
@@ -173,4 +170,3 @@ REGISTER_STREAM_NODE_ADAPTER(sink_dev0_adapter) = {
 };
 
 #endif
-

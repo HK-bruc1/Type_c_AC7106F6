@@ -113,12 +113,12 @@
 #define TCFG_REPLACE_NODE_ENABLE                  0                // Replace
 #define TCFG_RING_TONE_NODE_ENABLE                1                // 铃声
 #define TCFG_SIGNAL_GENERATOR_NODE_ENABLE         0                // SignalGen
-#define TCFG_SINK_DEV0_NODE_ENABLE                0                // Sink_Dev0
-#define TCFG_SINK_DEV1_NODE_ENABLE                0                // Sink_Dev1
+#define TCFG_SINK_DEV0_NODE_ENABLE                1                // Sink_Dev0
+#define TCFG_SINK_DEV1_NODE_ENABLE                1                // Sink_Dev1
 #define TCFG_SINK_DEV2_NODE_ENABLE                0                // Sink_Dev2
 #define TCFG_SINK_DEV3_NODE_ENABLE                0                // Sink_Dev3
 #define TCFG_SINK_DEV4_NODE_ENABLE                0                // Sink_Dev4
-#define TCFG_SOUND_SPLITTER_NODE_ENABLE           0                // 音频分流器
+#define TCFG_SOUND_SPLITTER_NODE_ENABLE           1                // 音频分流器
 #define TCFG_SOURCE_DEV0_NODE_ENABLE              0                // Source_Dev0
 #define TCFG_SOURCE_DEV1_NODE_ENABLE              0                // Source_Dev1
 #define TCFG_SOURCE_DEV2_NODE_ENABLE              0                // Source_Dev2
@@ -134,7 +134,7 @@
 #define TCFG_STEROMIX_NODE_ENABLE                 0                // SteroMix
 #define TCFG_SURROUND_DEMO_NODE_ENABLE            0                // 环绕音demo、Surround Demo
 #define TCFG_SURROUND_NODE_ENABLE                 0                // Surround Effect
-#define TCFG_SWITCH_NODE_ENABLE                   0                // Switch
+#define TCFG_SWITCH_NODE_ENABLE                   1                // Switch
 #define TCFG_TDM_RX_NODE_ENABLE                   0                // TDM_RX
 #define TCFG_TDM_TX_NODE_ENABLE                   0                // TDM_TX
 #define TCFG_THREE_D_EFFECT_NODE_ENABLE           0                // ThreeD
@@ -260,7 +260,7 @@
 #define TCFG_AUDIO_EFX_FB00_RUN_MODE              EFx_BW_UNUSED    // SteroMix
 #define TCFG_AUDIO_EFX_603A_RUN_MODE              EFx_BW_UNUSED    // Sink
 #define TCFG_AUDIO_EFX_EB56_RUN_MODE              EFx_BW_UNUSED    // Source
-#define TCFG_AUDIO_EFX_2357_RUN_MODE              EFx_BW_UNUSED    // Switch
+#define TCFG_AUDIO_EFX_2357_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // Switch
 #define TCFG_AUDIO_EFX_8934_RUN_MODE              EFx_BW_UNUSED    // Surround Effect
 #define TCFG_AUDIO_EFX_C90C_RUN_MODE              EFx_BW_UNUSED    // Surround Demo
 #define TCFG_AUDIO_EFX_88E5_RUN_MODE              EFx_BW_UNUSED    // Stereo Widener
@@ -269,8 +269,8 @@
 #define TCFG_AUDIO_EFX_8FC7_RUN_MODE              EFx_BW_UNUSED    // Source_Dev3
 #define TCFG_AUDIO_EFX_8FC8_RUN_MODE              EFx_BW_UNUSED    // Source_Dev4
 #define TCFG_AUDIO_EFX_8FC6_RUN_MODE              EFx_BW_UNUSED    // Source_Dev2
-#define TCFG_AUDIO_EFX_B328_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev0
-#define TCFG_AUDIO_EFX_B329_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev1
+#define TCFG_AUDIO_EFX_B328_RUN_MODE              EFx_BW_16t16     // Sink_Dev0
+#define TCFG_AUDIO_EFX_B329_RUN_MODE              EFx_BW_32t32     // Sink_Dev1
 #define TCFG_AUDIO_EFX_B32A_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev2
 #define TCFG_AUDIO_EFX_B32B_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev3
 #define TCFG_AUDIO_EFX_B32C_RUN_MODE              EFx_BW_UNUSED    // Sink_Dev4
@@ -317,7 +317,7 @@
 #define TCFG_AUDIO_EFX_76EF_RUN_MODE              EFx_BW_UNUSED    // 通话第三方算法
 #define TCFG_AUDIO_EFX_F73C_RUN_MODE              EFx_BW_UNUSED    // 写卡
 #define TCFG_AUDIO_EFX_74E3_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // 音量控制器
-#define TCFG_AUDIO_EFX_D911_RUN_MODE              EFx_BW_UNUSED    // 音频分流器
+#define TCFG_AUDIO_EFX_D911_RUN_MODE              EFx_BW_16t16 | EFx_BW_32t32 // 音频分流器
 // ------------流程图节点位宽定义------------
 
 // ------------流程图EQ节点类型宏定义------------

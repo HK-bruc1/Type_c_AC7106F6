@@ -17,9 +17,27 @@ enum uac_event {
     USB_AUDIO_SET_MIC_VOL,
 };
 
+struct uac_stream_runtime_info {
+    u32 sample_rate;
+    /* Changes when the negotiated format becomes valid, invalid, or changes. */
+    u32 format_generation;
+    u8 channel;
+    u8 bit_width;
+    /* UAC interface is requested/open after the existing debounce policy. */
+    u8 interface_open;
+    /* The corresponding PC audio stream is actually producing/consuming PCM. */
+    u8 stream_active;
+};
+
+struct uac_audio_runtime_info {
+    struct uac_stream_runtime_info speaker;
+    struct uac_stream_runtime_info mic;
+};
+
 
 int uac_get_spk_vol();
 u8 uac_audio_is_24bit_in_4byte();
+void uac_audio_get_runtime_info(struct uac_audio_runtime_info *info);
 void uac_speaker_stream_open(u32 samplerate, u32 ch, u32 bitwidth);
 void uac_speaker_stream_close(int release);
 void uac_speaker_stream_write(const u8 *obuf, u32 len);
