@@ -42,10 +42,10 @@
 #define TCFG_AUDIO_CVP_DMS_FLEXIBLE_ANS_MODE      0                // 话务双MIC通话
 #define TCFG_AUDIO_CVP_DMS_FLEXIBLE_DNS_MODE      0                // 话务双MIC+DNS
 #define TCFG_AUDIO_CVP_DMS_HYBRID_DNS_MODE        0                // HYBRID双MIC+DNS
-#define TCFG_AUDIO_CVP_SMS_ANS_MODE               0                // 单MIC通话
+#define TCFG_AUDIO_CVP_SMS_ANS_MODE               1                // 单MIC通话
 #define TCFG_AUDIO_CVP_SMS_DNS_MODE               0                // 单MIC+DNS
 #define TCFG_AUDIO_CVP_SMS_VF_MODE                0                // 单麦AEC
-#define TCFG_AUDIO_CVP_V3_MODE                    1                // CVP_V3
+#define TCFG_AUDIO_CVP_V3_MODE                    0                // CVP_V3
 #define TCFG_AUDIO_DEBUG_NODE_ENABLE              0                // Audio Debug
 #define TCFG_AUTO_WAH_NODE_ENABLE                 0                // Auto Wah
 #define TCFG_AUTODUCK_NODE_ENABLE                 0                // AutoDuck Trigger、AutoDuck
@@ -296,7 +296,7 @@
 #define TCFG_AUDIO_EFX_E76E_RUN_MODE              EFx_BW_UNUSED    // 串口打印
 #define TCFG_AUDIO_EFX_299E_RUN_MODE              EFx_BW_UNUSED    // 单麦AEC
 #define TCFG_AUDIO_EFX_DBF5_RUN_MODE              EFx_BW_UNUSED    // 单MIC+DNS
-#define TCFG_AUDIO_EFX_D0BC_RUN_MODE              EFx_BW_UNUSED    // 单MIC通话
+#define TCFG_AUDIO_EFX_D0BC_RUN_MODE              EFx_BW_16t16     // 单MIC通话
 #define TCFG_AUDIO_EFX_ED7F_RUN_MODE              EFx_BW_UNUSED    // 丢包修复PLC
 #define TCFG_AUDIO_EFX_2C15_RUN_MODE              EFx_BW_UNUSED    // 多路复用器
 #define TCFG_AUDIO_EFX_8D63_RUN_MODE              EFx_BW_UNUSED    // 分频器 两段

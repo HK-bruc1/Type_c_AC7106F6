@@ -27,10 +27,16 @@
 
 
 
+
+
+
 c_SRC_FILES += audio/framework/plugs/source/a2dp_file.c audio/framework/plugs/source/a2dp_streamctrl.c audio/framework/plugs/source/esco_file.c audio/framework/plugs/source/adc_file.c audio/framework/nodes/esco_tx_node.c audio/framework/nodes/plc_node.c audio/framework/nodes/volume_node.c audio/framework/node_list.c
 c_SRC_FILES += audio/framework/nodes/agc_node.c
+c_SRC_FILES += audio/framework/nodes/cvp_sms_node.c
+
+
+
 c_SRC_FILES += audio/framework/nodes/cvp_dms_node.c
-c_SRC_FILES += audio/framework/nodes/cvp_v3_node.c
 c_SRC_FILES += audio/framework/nodes/ai_tx_node.c
 c_SRC_FILES += audio/common/audio_node_config.c audio/common/audio_dvol.c audio/common/audio_general.c audio/common/audio_build_needed.c audio/common/audio_plc.c audio/common/audio_noise_gate.c audio/common/audio_ns.c audio/common/audio_utils.c audio/common/amplitude_statistic.c audio/common/frame_length_adaptive.c audio/common/bt_audio_energy_detection.c audio/common/audio_event_handler.c audio/common/debug/audio_debug.c audio/common/power/mic_power_manager.c audio/common/audio_volume_mixer.c audio/common/audio_effect_verify.c audio/common/pcm_data/sine_pcm.c
 c_SRC_FILES += audio/common/demo/audio_demo.c
@@ -48,7 +54,6 @@ c_SRC_FILES += audio/interface/recoder/ai_voice_recoder.c
 c_SRC_FILES += audio/interface/user_defined/audio_dsp_low_latency_player.c audio/interface/user_defined/env_noise_recoder.c
 c_SRC_FILES += audio/effect/eq_config.c audio/effect/audio_dc_offset_remove.c audio/effect/effects_adj.c audio/effect/effects_dev.c audio/effect/effects_default_param.c audio/effect/node_param_update.c
 c_SRC_FILES += audio/CVP/audio_aec.c audio/CVP/audio_cvp.c audio/CVP/audio_cvp_dms.c audio/CVP/audio_cvp_online.c audio/CVP/audio_cvp_ref_task.c audio/CVP/audio_cvp_config.c
-c_SRC_FILES += audio/CVP/audio_cvp_v3.c
 c_SRC_FILES += audio/framework/plugs/source/linein_file.c
 
 
@@ -74,12 +79,32 @@ c_SRC_FILES += apps/common/fat_nor/cfg_private.c
 
 
 c_SRC_FILES += apps/common/debug/memory_debug.c
+
+
+
+c_SRC_FILES += apps/common/debug/resource_monitor.c
 c_SRC_FILES += apps/common/third_party_profile/multi_protocol_main.c apps/common/third_party_profile/multi_protocol_common.c apps/common/third_party_profile/multi_protocol_event.c
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c apps/common/third_party_profile/rdx_protocol/rdx_device_management.c apps/common/third_party_profile/rdx_protocol/rdx_device_state.c apps/common/third_party_profile/rdx_protocol/rdx_identity.c apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_resource_monitor.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c apps/common/third_party_profile/rdx_protocol/rdx_ble_name.c apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c apps/common/third_party_profile/rdx_protocol/rdx_device_management.c apps/common/third_party_profile/rdx_protocol/rdx_device_state.c apps/common/third_party_profile/rdx_protocol/rdx_identity.c apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_mic_gain_service.c apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+
+
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_session_metadata_service.c
+
+
+
 THIRD_PARTY_LIBS += apps/common/third_party_profile/rdx_protocol/librdxApp.a
 c_SRC_FILES += apps/common/jldtp/uart_transport.c apps/common/jldtp/jldtp_manager.c
 c_SRC_FILES += apps/common/device/key/key_driver.c
+c_SRC_FILES += apps/common/device/key/mickey.c
 c_SRC_FILES += apps/common/device/usb/usb_config.c apps/common/device/usb/device/descriptor.c apps/common/device/usb/device/usb_device.c apps/common/device/usb/device/user_setup.c apps/common/device/usb/device/task_pc.c
 c_SRC_FILES += apps/common/device/usb/device/usb_pll_trim.c
 c_SRC_FILES += apps/common/device/usb/device/msd_upgrade.c
@@ -89,6 +114,7 @@ c_SRC_FILES += apps/common/device/usb/device/uac_stream.c
 
 
 c_SRC_FILES += apps/common/device/usb/device/uac1.c
+c_SRC_FILES += audio/common/audio_capture_lease.c
 c_SRC_FILES += apps/common/device/usb/usb_epbuf_manager.c apps/common/device/usb/usb_task.c
 c_SRC_FILES += cpu/components/iic_soft.c cpu/components/iic_api.c cpu/components/ir_encoder.c cpu/components/ir_decoder.c cpu/components/led_spi.c cpu/components/rdec_soft.c
 c_SRC_FILES += cpu/config/gpio_file_parse.c cpu/config/lib_power_config.c
