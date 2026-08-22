@@ -38,15 +38,28 @@ typedef void (*usb_call_audio_tap_consumer_t)(
     const void *data,
     u32 len);
 
+typedef void (*usb_call_audio_tap_stream_observer_t)(
+    void *priv,
+    enum usb_call_audio_tap_id tap_id,
+    const struct usb_call_audio_tap_format *format,
+    u8 active);
+
 /*
  * The consumer runs in the JLStream audio context.  It must not block or
- * retain data after returning; a bridge consumer should only copy into a
- * bounded buffer here.
+ * retain data after returning.  A bridge may perform fixed-bound PCM
+ * normalization and bounded-buffer work here, but must not allocate, wait,
+ * or perform I/O.
  */
 int usb_call_audio_tap_register_consumer(
     usb_call_audio_tap_consumer_t consumer, void *priv);
 void usb_call_audio_tap_unregister_consumer(
     usb_call_audio_tap_consumer_t consumer, void *priv);
+int usb_call_audio_tap_register_stream_observer(
+    usb_call_audio_tap_stream_observer_t observer, void *priv);
+void usb_call_audio_tap_unregister_stream_observer(
+    usb_call_audio_tap_stream_observer_t observer, void *priv);
+
+/* The observer runs synchronously in the Tap stream start/stop context. */
 
 void usb_call_audio_tap_set_gate(enum usb_call_audio_tap_id tap_id, u8 open);
 int usb_call_audio_tap_gate_is_open(enum usb_call_audio_tap_id tap_id);

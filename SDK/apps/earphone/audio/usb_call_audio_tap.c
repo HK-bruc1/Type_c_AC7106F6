@@ -10,6 +10,8 @@ struct usb_call_audio_tap_context {
     struct usb_call_audio_tap_state tap[USB_CALL_AUDIO_TAP_COUNT];
     usb_call_audio_tap_consumer_t consumer;
     void *consumer_priv;
+    usb_call_audio_tap_stream_observer_t stream_observer;
+    void *stream_observer_priv;
 };
 
 static struct usb_call_audio_tap_context usb_call_audio_tap;
@@ -61,6 +63,40 @@ void usb_call_audio_tap_unregister_consumer(
     spin_unlock(&usb_call_audio_tap_lock);
 }
 
+int usb_call_audio_tap_register_stream_observer(
+    usb_call_audio_tap_stream_observer_t observer, void *priv)
+{
+    int ret = 0;
+
+    if (!observer) {
+        return -EINVAL;
+    }
+
+    spin_lock(&usb_call_audio_tap_lock);
+    if (usb_call_audio_tap.stream_observer
+        && (usb_call_audio_tap.stream_observer != observer
+            || usb_call_audio_tap.stream_observer_priv != priv)) {
+        ret = -EBUSY;
+    } else {
+        usb_call_audio_tap.stream_observer = observer;
+        usb_call_audio_tap.stream_observer_priv = priv;
+    }
+    spin_unlock(&usb_call_audio_tap_lock);
+    return ret;
+}
+
+void usb_call_audio_tap_unregister_stream_observer(
+    usb_call_audio_tap_stream_observer_t observer, void *priv)
+{
+    spin_lock(&usb_call_audio_tap_lock);
+    if (usb_call_audio_tap.stream_observer == observer
+        && usb_call_audio_tap.stream_observer_priv == priv) {
+        usb_call_audio_tap.stream_observer = NULL;
+        usb_call_audio_tap.stream_observer_priv = NULL;
+    }
+    spin_unlock(&usb_call_audio_tap_lock);
+}
+
 void usb_call_audio_tap_set_gate(enum usb_call_audio_tap_id tap_id, u8 open)
 {
     if (!usb_call_audio_tap_id_is_valid(tap_id)) {
@@ -95,6 +131,9 @@ void usb_call_audio_tap_stream_start(
     u8 qval)
 {
     struct usb_call_audio_tap_runtime_info *info;
+    struct usb_call_audio_tap_format format;
+    usb_call_audio_tap_stream_observer_t observer;
+    void *observer_priv;
     u32 generation;
 
     if (!usb_call_audio_tap_id_is_valid(tap_id)) {
@@ -112,7 +151,14 @@ void usb_call_audio_tap_stream_start(
         usb_call_audio_tap_next_generation(info->format.format_generation);
     generation = info->format.format_generation;
     info->stream_active = 1;
+    format = info->format;
+    observer = usb_call_audio_tap.stream_observer;
+    observer_priv = usb_call_audio_tap.stream_observer_priv;
     spin_unlock(&usb_call_audio_tap_lock);
+
+    if (observer) {
+        observer(observer_priv, tap_id, &format, 1);
+    }
 
     printf("[USB_CALL_TAP] stream=start tap=%s generation=%u sr=%u channels=%u bit_width=%u qval=%u coding=0x%x\n",
            tap_id == USB_CALL_AUDIO_TAP_NEAR ? "near" : "far",
@@ -123,6 +169,9 @@ void usb_call_audio_tap_stream_start(
 
 void usb_call_audio_tap_stream_stop(enum usb_call_audio_tap_id tap_id)
 {
+    struct usb_call_audio_tap_format format;
+    usb_call_audio_tap_stream_observer_t observer;
+    void *observer_priv;
     u32 generation;
 
     if (!usb_call_audio_tap_id_is_valid(tap_id)) {
@@ -136,7 +185,14 @@ void usb_call_audio_tap_stream_stop(enum usb_call_audio_tap_id tap_id)
             usb_call_audio_tap.tap[tap_id].info.format.format_generation);
     generation =
         usb_call_audio_tap.tap[tap_id].info.format.format_generation;
+    format = usb_call_audio_tap.tap[tap_id].info.format;
+    observer = usb_call_audio_tap.stream_observer;
+    observer_priv = usb_call_audio_tap.stream_observer_priv;
     spin_unlock(&usb_call_audio_tap_lock);
+
+    if (observer) {
+        observer(observer_priv, tap_id, &format, 0);
+    }
 
     printf("[USB_CALL_TAP] stream=stop tap=%s generation=%u\n",
            tap_id == USB_CALL_AUDIO_TAP_NEAR ? "near" : "far",

@@ -4159,7 +4159,7 @@
    {
     "position": {
      "x": -40,
-     "y": -40
+     "y": -120
     },
     "size": {
      "width": 80,
@@ -4299,7 +4299,7 @@
    {
     "position": {
      "x": 80,
-     "y": -40
+     "y": -120
     },
     "size": {
      "width": 80,
@@ -4460,7 +4460,7 @@
    {
     "position": {
      "x": 200,
-     "y": -40
+     "y": -120
     },
     "size": {
      "width": 160,
@@ -4595,7 +4595,7 @@
    {
     "position": {
      "x": 400,
-     "y": -40
+     "y": -120
     },
     "size": {
      "width": 80,
@@ -4705,7 +4705,7 @@
    {
     "position": {
      "x": 560,
-     "y": -40
+     "y": -120
     },
     "size": {
      "width": 80,
@@ -4819,7 +4819,7 @@
    {
     "position": {
      "x": -40,
-     "y": 80
+     "y": 40
     },
     "size": {
      "width": 80,
@@ -4906,7 +4906,7 @@
       "distance": 40
      }
     },
-    "id": "a0cc6d0b-bb89-4b12-b84d-3cec48a371b9",
+    "id": "f754e70b-5ede-4475-bd12-6ed0a34c2b2a",
     "data": {
      "itemId": "id_1778548900656_2"
     },
@@ -4915,14 +4915,14 @@
      "port": "ebc2f051-2a93-47f4-b2ae-526982323ebb"
     },
     "target": {
-     "cell": "585d3c0e-1d06-4ae3-883e-7785e89ec33d",
+     "cell": "d284a4f4-1014-4122-a2d5-5cacd023061b",
      "port": "ecc22b3d-602c-4d87-81d6-8f2c71022a39"
     }
    },
    {
     "position": {
-     "x": 120,
-     "y": 80
+     "x": 80,
+     "y": 40
     },
     "size": {
      "width": 120,
@@ -4930,7 +4930,7 @@
     },
     "view": "vue-shape-view",
     "shape": "vue-shape",
-    "id": "585d3c0e-1d06-4ae3-883e-7785e89ec33d",
+    "id": "d284a4f4-1014-4122-a2d5-5cacd023061b",
     "component": "node-cust",
     "group": "hardware",
     "data": {
