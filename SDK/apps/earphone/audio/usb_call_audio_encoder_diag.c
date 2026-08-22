@@ -319,6 +319,7 @@ static int usb_call_audio_encoder_diag_init(void)
     spin_unlock(&usb_call_audio_encoder_lock);
     ret = usb_call_audio_bridge_open(
         usb_call_audio_encoder_bridge_consumer,
+        NULL,
         &usb_call_audio_encoder);
     if (ret) {
         goto cleanup;

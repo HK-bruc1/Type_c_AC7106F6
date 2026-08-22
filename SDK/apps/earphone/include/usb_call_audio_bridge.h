@@ -59,13 +59,23 @@ typedef void (*usb_call_audio_bridge_consumer_t)(
     const s16 *pcm,
     u16 samples);
 
+enum usb_call_audio_bridge_event {
+    USB_CALL_AUDIO_BRIDGE_EVENT_SOURCE_LOST = 1,
+};
+
+typedef void (*usb_call_audio_bridge_event_callback_t)(
+    void *priv, enum usb_call_audio_bridge_event event);
+
 /*
  * The output consumer runs in the Near Tap JLStream audio context.  It must
  * finish within a fixed bound, must not block, and must not retain the PCM
  * pointer after returning.
  */
 int usb_call_audio_bridge_open(
-    usb_call_audio_bridge_consumer_t consumer, void *priv);
+    usb_call_audio_bridge_consumer_t consumer,
+    usb_call_audio_bridge_event_callback_t event_callback,
+    void *priv);
+int usb_call_audio_bridge_probe(void);
 void usb_call_audio_bridge_close(void);
 void usb_call_audio_bridge_take_snapshot(
     struct usb_call_audio_bridge_snapshot *snapshot);

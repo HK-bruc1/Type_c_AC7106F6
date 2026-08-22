@@ -19,7 +19,7 @@
  * The diagnostic build does not attach Encoder, AI_TX, RDX Protocol, or BLE.
  */
 #define TCFG_USB_CALL_AUDIO_BRIDGE_DIAG_ENABLE       0
-#define TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE      1
+#define TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE      0
 #define USB_CALL_AUDIO_BRIDGE_OUTPUT_SAMPLE_RATE     16000
 #define USB_CALL_AUDIO_BRIDGE_FRAME_MS                  20
 #define USB_CALL_AUDIO_BRIDGE_BUFFER_MS                 80

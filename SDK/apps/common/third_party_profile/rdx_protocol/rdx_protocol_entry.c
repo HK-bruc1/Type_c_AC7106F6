@@ -9,7 +9,7 @@
 #include "rdx_device_state.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_protocol.h"
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx_record_engine.h"
 #endif
 #include "system/init.h"
@@ -57,7 +57,7 @@ int rdx_protocol_start(void)
     ret = rdx_ble_transport_init();
     if (ret) {
         rdx_mvp0_protocol_exit();
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
         rdx_record_engine_shutdown(100);
 #endif
         rdx_device_state_exit();
@@ -79,7 +79,7 @@ void rdx_protocol_stop(void)
     rdx_rtc_store_backup();
 #endif
     rdx_mvp0_protocol_exit();
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_record_engine_shutdown(100)) {
         printf("[RDX] record engine shutdown incomplete\n");
         return;

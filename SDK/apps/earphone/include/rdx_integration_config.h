@@ -24,6 +24,12 @@
 #define RDX_CFG_CONFERENCE_RECORDING_ENABLE    \
     ((RDX_COMPAT_DEVICE_ABILITY &              \
       RDX_ABILITY_CONFERENCE_RECORDING) != 0)
+#define RDX_CFG_CALL_RECORDING_ENABLE          \
+    ((RDX_COMPAT_DEVICE_ABILITY &              \
+      RDX_ABILITY_CALL_RECORDING) != 0)
+#define RDX_CFG_ONLINE_RECORDING_ENABLE        \
+    (RDX_CFG_CONFERENCE_RECORDING_ENABLE       \
+     || RDX_CFG_CALL_RECORDING_ENABLE)
 #define RDX_CFG_RECORD_PAUSE_RESUME_ENABLE     \
     ((RDX_COMPAT_DEVICE_ABILITY &              \
       RDX_ABILITY_RECORD_PAUSE_RESUME) != 0)
@@ -34,6 +40,7 @@
 #define RDX_CFG_IMPLEMENTED_ABILITY            \
     (RDX_ABILITY_RTC                          | \
      RDX_ABILITY_CONFERENCE_RECORDING         | \
+     RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
      RDX_ABILITY_RECORD_MARK)
 
@@ -58,12 +65,12 @@
 #endif
 
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE && \
-    !RDX_CFG_CONFERENCE_RECORDING_ENABLE
-#error "RDX pause/resume ability requires conference recording ability"
+    !RDX_CFG_ONLINE_RECORDING_ENABLE
+#error "RDX pause/resume ability requires an online recording ability"
 #endif
 
-#if RDX_CFG_RECORD_MARK_ENABLE && !RDX_CFG_CONFERENCE_RECORDING_ENABLE
-#error "RDX record mark ability requires conference recording ability"
+#if RDX_CFG_RECORD_MARK_ENABLE && !RDX_CFG_ONLINE_RECORDING_ENABLE
+#error "RDX record mark ability requires an online recording ability"
 #endif
 
 /* RDX RTC calendar policy; products may override these before this include. */
@@ -87,6 +94,8 @@
 #if !TCFG_AGC_NODE_ENABLE
 #error "RDX recording requires TCFG_AGC_NODE_ENABLE"
 #endif
+#endif
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
 #if !TCFG_ENCODER_NODE_ENABLE
 #error "RDX recording requires TCFG_ENCODER_NODE_ENABLE"
 #endif
@@ -101,11 +110,22 @@
 #endif
 #endif
 
+#if RDX_CFG_CALL_RECORDING_ENABLE
+#if !TCFG_SOURCE_DEV1_NODE_ENABLE
+#error "RDX call recording requires TCFG_SOURCE_DEV1_NODE_ENABLE"
+#endif
+#if TCFG_USB_CALL_AUDIO_ENCODER_DIAG_ENABLE
+#error "RDX call recording and the Encoder diagnostic cannot share SourceDev1"
+#endif
+#endif
+
 #define TCFG_RDX_ENABLE            1
 #else
 #define TCFG_RDX_ENABLE            0
 #define RDX_CFG_RTC_ENABLE                     0
 #define RDX_CFG_CONFERENCE_RECORDING_ENABLE    0
+#define RDX_CFG_CALL_RECORDING_ENABLE          0
+#define RDX_CFG_ONLINE_RECORDING_ENABLE        0
 #define RDX_CFG_RECORD_PAUSE_RESUME_ENABLE     0
 #define RDX_CFG_RECORD_MARK_ENABLE             0
 #define RDX_CFG_IMPLEMENTED_ABILITY            0

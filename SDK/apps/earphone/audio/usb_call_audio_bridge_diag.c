@@ -86,7 +86,7 @@ static int usb_call_audio_bridge_diag_init(void)
 {
     int ret;
 
-    ret = usb_call_audio_bridge_open(NULL, NULL);
+    ret = usb_call_audio_bridge_open(NULL, NULL, NULL);
     if (ret) {
         printf("[USB_CALL_BRIDGE][DIAG] init=failed reason=bridge ret=%d\n",
                ret);

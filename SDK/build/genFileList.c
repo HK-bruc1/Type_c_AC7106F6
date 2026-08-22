@@ -1071,11 +1071,20 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
 #endif
 
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+#endif
+
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/rdx_mic_gain_service.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+    apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c
+#endif
+
+#if RDX_CFG_CALL_RECORDING_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/rdx_record_call_audio_br56.c
 #endif
 
 #if RDX_CFG_RECORD_MARK_ENABLE

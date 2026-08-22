@@ -9,6 +9,12 @@
 #define RDX_RECORD_MEETING_V1_FRAME_MS          20
 #define RDX_RECORD_MEETING_V1_PAYLOAD_SIZE      80
 #define RDX_RECORD_MEETING_V1_WARMUP_FRAMES     10
+#define RDX_RECORD_CALL_V1_SAMPLE_RATE           16000
+#define RDX_RECORD_CALL_V1_CHANNELS              1
+#define RDX_RECORD_CALL_V1_BIT_RATE              32000
+#define RDX_RECORD_CALL_V1_FRAME_MS              20
+#define RDX_RECORD_CALL_V1_PAYLOAD_SIZE          80
+#define RDX_RECORD_CALL_V1_WARMUP_FRAMES         10
 #define RDX_RECORD_CANDIDATE_MAX_SIZE           96
 #define RDX_RECORD_CANDIDATE_QUEUE_DEPTH        16
 #define RDX_RECORD_CONTROL_QUEUE_DEPTH          4
@@ -18,6 +24,12 @@
 enum rdx_record_format_id {
     RDX_RECORD_FORMAT_NONE = 0,
     RDX_RECORD_FORMAT_MEETING_V1 = 1,
+    RDX_RECORD_FORMAT_CALL_V1 = 2,
+};
+
+enum rdx_record_scene {
+    RDX_RECORD_SCENE_MEETING = 0,
+    RDX_RECORD_SCENE_CALL = 1,
 };
 
 enum rdx_record_controller_id {
@@ -59,6 +71,7 @@ enum rdx_record_result {
     RDX_RECORD_RESULT_QUEUE_FULL,
     RDX_RECORD_RESULT_LINK_LOST,
     RDX_RECORD_RESULT_CANCELLED,
+    RDX_RECORD_RESULT_SOURCE_LOST,
     RDX_RECORD_RESULT_SHUTDOWN_TIMEOUT,
 };
 
@@ -76,6 +89,7 @@ enum rdx_record_cause {
     RDX_RECORD_CAUSE_CCC_OFF,
     RDX_RECORD_CAUSE_QUEUE_FULL,
     RDX_RECORD_CAUSE_FORMAT_MISMATCH,
+    RDX_RECORD_CAUSE_SOURCE_LOST,
     RDX_RECORD_CAUSE_START_FAILED,
     RDX_RECORD_CAUSE_SHUTDOWN,
 };
@@ -93,6 +107,7 @@ enum rdx_record_system_event_type {
     RDX_RECORD_SYSTEM_CCC_OFF = 3,
     RDX_RECORD_SYSTEM_SHUTDOWN = 4,
     RDX_RECORD_SYSTEM_ENGINE_FAULT = 5,
+    RDX_RECORD_SYSTEM_SOURCE_LOST = 6,
 };
 
 enum rdx_record_engine_event_type {
@@ -132,6 +147,7 @@ struct rdx_record_request {
     u32 session_id;
     enum rdx_record_request_type type;
     enum rdx_record_controller_id controller_id;
+    enum rdx_record_scene scene;
     enum rdx_record_format_id format_id;
     u8 source;
     const struct rdx_record_destination_ops *destination_ops;
@@ -144,6 +160,7 @@ struct rdx_record_engine_event {
     u32 session_id;
     u32 capture_generation;
     enum rdx_record_controller_id controller_id;
+    enum rdx_record_scene scene;
     enum rdx_record_result result;
     enum rdx_record_termination_mode termination_mode;
     enum rdx_record_cause cause;

@@ -12,9 +12,11 @@
 #include "rdx_mvp0_protocol.h"
 #include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+#include "rdx_record_engine.h"
+#endif
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 #include "rdx_mic_gain_service.h"
-#include "rdx_record_engine.h"
 #endif
 #if RDX_CFG_RTC_ENABLE
 #include "rdx_rtc.h"
@@ -38,7 +40,7 @@ static const u8 rdx_cmd_appkey[] = "*APP#appkey#";
 static const u8 rdx_cmd_rtc[] = "*APP#rtc#";
 #endif
 static const u8 rdx_cmd_ostype[] = "*APP#ostype#";
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
 static const u8 rdx_cmd_record[] = "*APP#record#";
 #if RDX_CFG_RECORD_MARK_ENABLE
 static const u8 rdx_cmd_recmark[] = "*APP#recmark#";
@@ -84,7 +86,7 @@ static rdx_mvp0_state_t rdx_mvp0_state;
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len);
 static const char *rdx_mvp0_post_ack_action_name(u8 action);
 
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
 typedef enum {
     RDX_ONLINE_RECORD_IDLE = 0,
     RDX_ONLINE_RECORD_START_PENDING,
@@ -110,6 +112,7 @@ typedef struct {
     u8 tx_count;
     u8 tx_peak;
     u8 wire_state;
+    u8 scene;
     u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_online_record_runtime_t;
@@ -165,7 +168,7 @@ static int rdx_mvp0_send(const u8 *data, u16 len)
     return rdx_mvp0_send_callback(data, len);
 }
 
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
 static int rdx_mvp0_record_send_state(u8 wire_state)
 {
     u8 response[32];
@@ -173,7 +176,8 @@ static int rdx_mvp0_record_send_state(u8 wire_state)
     int ret;
 
     len = snprintf((char *)response, sizeof(response),
-                   "*DEV#record#%u#0#1#0#1#0#", wire_state);
+                   "*DEV#record#%u#%u#1#0#1#0#", wire_state,
+                   rdx_online_record.scene);
     if (len <= 0 || len >= sizeof(response)) {
         return -1;
     }
@@ -224,8 +228,12 @@ static int rdx_mvp0_record_queue_packet(const u8 *packet, u16 len)
         return -1;
     }
     if (rdx_online_record.tx_count >= RDX_RECORD_TX_QUEUE_DEPTH) {
+        /* Keep the bounded queue current; a congested BLE link must not stop
+         * the USB capture session.  Dropping the oldest packet bounds latency. */
+        rdx_online_record.tx_head =
+            (rdx_online_record.tx_head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
+        rdx_online_record.tx_count--;
         rdx_online_record.queue_drop_count++;
-        return -1;
     }
 
     tail = rdx_online_record.tx_tail;
@@ -331,7 +339,9 @@ static int rdx_mvp0_record_destination_consume(
                (unsigned int)rdx_online_record.tx_peak,
                (unsigned int)rdx_online_record.queue_drop_count);
     }
-    return ret;
+    /* Transport back-pressure is handled by the bounded TX queue.  The
+     * packet-size check above is the only fatal validation in this path. */
+    return 0;
 }
 
 static void rdx_mvp0_record_destination_cancel(void *priv, u32 session_id,
@@ -394,6 +404,7 @@ static void rdx_mvp0_record_engine_event(
             return;
         }
         rdx_online_record.session_id = event->session_id;
+        rdx_online_record.scene = event->scene;
         rdx_online_record.capture_generation = event->capture_generation;
 #if RDX_CFG_RECORD_MARK_ENABLE
         rdx_session_metadata_begin(event->session_id);
@@ -501,7 +512,15 @@ static void rdx_mvp0_record_engine_event(
     }
 }
 
-static void rdx_mvp0_record_start(void)
+static enum rdx_record_format_id rdx_mvp0_record_format_for_scene(
+    enum rdx_record_scene scene)
+{
+    return scene == RDX_RECORD_SCENE_CALL
+           ? RDX_RECORD_FORMAT_CALL_V1
+           : RDX_RECORD_FORMAT_MEETING_V1;
+}
+
+static void rdx_mvp0_record_start_scene(enum rdx_record_scene scene)
 {
     struct rdx_record_request request;
     int ret;
@@ -520,8 +539,10 @@ static void rdx_mvp0_record_start(void)
     request.request_id = rdx_mvp0_record_next_request_id();
     request.type = RDX_RECORD_REQUEST_START;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
-    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    request.scene = scene;
+    request.format_id = rdx_mvp0_record_format_for_scene(scene);
     request.destination_ops = &rdx_mvp0_record_destination;
+    rdx_online_record.scene = scene;
     rdx_online_record.state = RDX_ONLINE_RECORD_START_PENDING;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
@@ -530,6 +551,11 @@ static void rdx_mvp0_record_start(void)
                (unsigned int)request.request_id, ret);
         rdx_mvp0_record_send_state(0);
     }
+}
+
+static void rdx_mvp0_record_start(void)
+{
+    rdx_mvp0_record_start_scene(RDX_RECORD_SCENE_MEETING);
 }
 
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
@@ -568,7 +594,9 @@ static void rdx_mvp0_record_control(enum rdx_record_request_type type)
     request.session_id = rdx_online_record.session_id;
     request.type = type;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
-    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    request.scene = rdx_online_record.scene;
+    request.format_id = rdx_mvp0_record_format_for_scene(
+        rdx_online_record.scene);
     ret = rdx_record_engine_submit(&request);
     if (ret) {
         rdx_online_record.state = type == RDX_RECORD_REQUEST_PAUSE
@@ -602,6 +630,7 @@ static void rdx_mvp0_record_mark(void)
     request.session_id = rdx_online_record.session_id;
     request.type = RDX_RECORD_REQUEST_MARK;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
+    request.scene = rdx_online_record.scene;
     request.source = RDX_RECORD_MARK_SOURCE_APP;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
@@ -629,7 +658,9 @@ static void rdx_mvp0_record_stop(void)
     request.request_id = rdx_mvp0_record_next_request_id();
     request.type = RDX_RECORD_REQUEST_STOP;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
-    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    request.scene = rdx_online_record.scene;
+    request.format_id = rdx_mvp0_record_format_for_scene(
+        rdx_online_record.scene);
     rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
@@ -642,21 +673,40 @@ static void rdx_mvp0_handle_record(const u8 *data, u16 len)
 {
     static const u8 stop[] = "*APP#record#0#";
     static const u8 stop_meeting_16k[] = "*APP#record#0#0#1#";
+    static const u8 stop_call[] = "*APP#record#0#1#";
+    static const u8 stop_call_16k[] = "*APP#record#0#1#1#";
     static const u8 start[] = "*APP#record#1#";
     static const u8 start_meeting[] = "*APP#record#1#0#";
     static const u8 start_meeting_16k[] = "*APP#record#1#0#1#";
+    static const u8 start_call[] = "*APP#record#1#1#";
+    static const u8 start_call_16k[] = "*APP#record#1#1#1#";
     static const u8 pause[] = "*APP#record#2#";
     static const u8 pause_meeting_16k[] = "*APP#record#2#0#1#";
+    static const u8 pause_call[] = "*APP#record#2#1#";
+    static const u8 pause_call_16k[] = "*APP#record#2#1#1#";
     static const u8 resume[] = "*APP#record#3#";
     static const u8 resume_meeting_16k[] = "*APP#record#3#0#1#";
+    static const u8 resume_call[] = "*APP#record#3#1#";
+    static const u8 resume_call_16k[] = "*APP#record#3#1#1#";
 
     if (!rdx_mvp0_management_query_ready("record", len)) {
         return;
     }
     if (rdx_mvp0_data_equals(data, len, stop, sizeof(stop) - 1)
         || rdx_mvp0_data_equals(data, len, stop_meeting_16k,
-                                sizeof(stop_meeting_16k) - 1)) {
+                                sizeof(stop_meeting_16k) - 1)
+        || rdx_mvp0_data_equals(data, len, stop_call,
+                                sizeof(stop_call) - 1)
+        || rdx_mvp0_data_equals(data, len, stop_call_16k,
+                                sizeof(stop_call_16k) - 1)) {
         rdx_mvp0_record_stop();
+        return;
+    }
+    if (rdx_mvp0_data_equals(data, len, start_call,
+                             sizeof(start_call) - 1)
+        || rdx_mvp0_data_equals(data, len, start_call_16k,
+                                sizeof(start_call_16k) - 1)) {
+        rdx_mvp0_record_start_scene(RDX_RECORD_SCENE_CALL);
         return;
     }
     if (rdx_mvp0_data_equals(data, len, start, sizeof(start) - 1)
@@ -670,13 +720,21 @@ static void rdx_mvp0_handle_record(const u8 *data, u16 len)
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
     if (rdx_mvp0_data_equals(data, len, pause, sizeof(pause) - 1)
         || rdx_mvp0_data_equals(data, len, pause_meeting_16k,
-                                sizeof(pause_meeting_16k) - 1)) {
+                                sizeof(pause_meeting_16k) - 1)
+        || rdx_mvp0_data_equals(data, len, pause_call,
+                                sizeof(pause_call) - 1)
+        || rdx_mvp0_data_equals(data, len, pause_call_16k,
+                                sizeof(pause_call_16k) - 1)) {
         rdx_mvp0_record_control(RDX_RECORD_REQUEST_PAUSE);
         return;
     }
     if (rdx_mvp0_data_equals(data, len, resume, sizeof(resume) - 1)
         || rdx_mvp0_data_equals(data, len, resume_meeting_16k,
-                                sizeof(resume_meeting_16k) - 1)) {
+                                sizeof(resume_meeting_16k) - 1)
+        || rdx_mvp0_data_equals(data, len, resume_call,
+                                sizeof(resume_call) - 1)
+        || rdx_mvp0_data_equals(data, len, resume_call_16k,
+                                sizeof(resume_call_16k) - 1)) {
         rdx_mvp0_record_control(RDX_RECORD_REQUEST_RESUME);
         return;
     }
@@ -1412,14 +1470,14 @@ send_ack:
 int rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
                            rdx_mvp0_disconnect_callback_t disconnect_callback)
 {
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     int ret;
 #endif
 
     rdx_mvp0_send_callback = send_callback;
     rdx_mvp0_disconnect_callback = disconnect_callback;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     memset(&rdx_online_record, 0, sizeof(rdx_online_record));
     ret = rdx_record_engine_init(rdx_mvp0_record_engine_event, NULL);
     if (ret) {
@@ -1433,7 +1491,7 @@ int rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
 
 void rdx_mvp0_protocol_exit(void)
 {
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
         rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
         rdx_online_record.tx_count = 0;
@@ -1448,7 +1506,7 @@ void rdx_mvp0_protocol_exit(void)
 
 void rdx_mvp0_protocol_set_connected(u8 connected)
 {
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (!connected) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
@@ -1479,7 +1537,7 @@ void rdx_mvp0_protocol_set_identity_read(void)
 
 void rdx_mvp0_protocol_set_ccc(u8 enabled)
 {
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (!enabled) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
@@ -1541,7 +1599,7 @@ void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
         printf("[RDX][TX] cmd=ostype wire=%s len=%u ret=%d\n",
                (char *)rdx_rsp_ostype,
                (unsigned int)(sizeof(rdx_rsp_ostype) - 1), ret);
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
     } else if (rdx_mvp0_data_starts_with(data, len, rdx_cmd_record,
                                           sizeof(rdx_cmd_record) - 1)) {
         rdx_mvp0_log_rx("record", data, len);

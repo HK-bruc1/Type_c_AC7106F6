@@ -35,10 +35,13 @@
  * 产品功能只允许通过 Device Ability 统一配置。
  * rdx_integration_config.h 会根据该掩码派生所有内部模块的编译门控；
  * 不要再为单项 RDX 能力增加平行的产品功能开关。
+ * 当前 CALL_RECORDING 位仅用于目标 APP 联调；APP 解码、异常矩阵和长稳
+ * 验收通过前不得把此掩码视为量产发布结论。
  */
 #define RDX_COMPAT_DEVICE_ABILITY              \
     (RDX_ABILITY_RTC                          | \
      RDX_ABILITY_CONFERENCE_RECORDING         | \
+     RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
      RDX_ABILITY_RECORD_MARK)
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1

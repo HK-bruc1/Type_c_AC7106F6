@@ -40,6 +40,7 @@ struct usb_call_audio_bridge_context {
     struct usb_call_audio_bridge_source source[USB_CALL_AUDIO_TAP_COUNT];
     struct usb_call_audio_bridge_mix_interval mix_interval;
     usb_call_audio_bridge_consumer_t consumer;
+    usb_call_audio_bridge_event_callback_t event_callback;
     void *consumer_priv;
     u32 capture_generation;
     u32 last_runtime_generation[USB_CALL_AUDIO_TAP_COUNT];
@@ -255,6 +256,8 @@ static void usb_call_audio_bridge_push_normalized(
     u32 input_samples)
 {
     struct usb_call_audio_bridge_source *source;
+    usb_call_audio_bridge_event_callback_t event_callback = NULL;
+    void *event_priv = NULL;
     enum usb_call_audio_tap_id peer_id;
     u32 now = sys_timer_get_ms();
 
@@ -275,9 +278,16 @@ static void usb_call_audio_bridge_push_normalized(
            >= USB_CALL_AUDIO_BRIDGE_SOURCE_LOST_MS) {
         usb_call_audio_bridge.mix_interval.source_lost_events++;
         usb_call_audio_bridge_invalidate_locked();
+        event_callback = usb_call_audio_bridge.event_callback;
+        event_priv = usb_call_audio_bridge.consumer_priv;
     }
     usb_call_audio_bridge_ring_write(source, samples, count);
     spin_unlock(&usb_call_audio_bridge_lock);
+
+    if (event_callback) {
+        event_callback(event_priv,
+                       USB_CALL_AUDIO_BRIDGE_EVENT_SOURCE_LOST);
+    }
 
     if (tap_id == USB_CALL_AUDIO_TAP_NEAR) {
         usb_call_audio_bridge_drain_from_near();
@@ -492,6 +502,9 @@ static void usb_call_audio_bridge_stream_observer(
     const struct usb_call_audio_tap_format *format,
     u8 active)
 {
+    usb_call_audio_bridge_event_callback_t event_callback = NULL;
+    void *event_priv = NULL;
+
     (void)priv;
     if (tap_id >= USB_CALL_AUDIO_TAP_COUNT || !format) {
         return;
@@ -505,8 +518,10 @@ static void usb_call_audio_bridge_stream_observer(
     if (usb_call_audio_bridge.last_runtime_active[tap_id] != !!active
         || usb_call_audio_bridge.last_runtime_generation[tap_id]
            != format->format_generation) {
-        if (usb_call_audio_bridge.timeline_active) {
+        if (usb_call_audio_bridge.last_runtime_active[tap_id]) {
             usb_call_audio_bridge.mix_interval.source_lost_events++;
+            event_callback = usb_call_audio_bridge.event_callback;
+            event_priv = usb_call_audio_bridge.consumer_priv;
         }
         usb_call_audio_bridge.last_runtime_active[tap_id] = !!active;
         usb_call_audio_bridge.last_runtime_generation[tap_id] =
@@ -515,6 +530,11 @@ static void usb_call_audio_bridge_stream_observer(
         usb_call_audio_bridge_invalidate_locked();
     }
     spin_unlock(&usb_call_audio_bridge_lock);
+
+    if (event_callback) {
+        event_callback(event_priv,
+                       USB_CALL_AUDIO_BRIDGE_EVENT_SOURCE_LOST);
+    }
 }
 
 static void usb_call_audio_bridge_drain_from_near(void)
@@ -619,7 +639,9 @@ static void usb_call_audio_bridge_drain_from_near(void)
 }
 
 int usb_call_audio_bridge_open(
-    usb_call_audio_bridge_consumer_t consumer, void *priv)
+    usb_call_audio_bridge_consumer_t consumer,
+    usb_call_audio_bridge_event_callback_t event_callback,
+    void *priv)
 {
     struct usb_call_audio_tap_runtime_info runtime;
     u8 tap_id;
@@ -632,6 +654,7 @@ int usb_call_audio_bridge_open(
     }
     memset(&usb_call_audio_bridge, 0, sizeof(usb_call_audio_bridge));
     usb_call_audio_bridge.consumer = consumer;
+    usb_call_audio_bridge.event_callback = event_callback;
     usb_call_audio_bridge.consumer_priv = priv;
     usb_call_audio_bridge.capture_generation = 1;
     usb_call_audio_bridge.opened = 1;
@@ -643,6 +666,7 @@ int usb_call_audio_bridge_open(
         spin_lock(&usb_call_audio_bridge_lock);
         usb_call_audio_bridge.opened = 0;
         usb_call_audio_bridge.consumer = NULL;
+        usb_call_audio_bridge.event_callback = NULL;
         usb_call_audio_bridge.consumer_priv = NULL;
         spin_unlock(&usb_call_audio_bridge_lock);
         return ret;
@@ -655,6 +679,7 @@ int usb_call_audio_bridge_open(
         spin_lock(&usb_call_audio_bridge_lock);
         usb_call_audio_bridge.opened = 0;
         usb_call_audio_bridge.consumer = NULL;
+        usb_call_audio_bridge.event_callback = NULL;
         usb_call_audio_bridge.consumer_priv = NULL;
         spin_unlock(&usb_call_audio_bridge_lock);
         return ret;
@@ -672,6 +697,33 @@ int usb_call_audio_bridge_open(
     return 0;
 }
 
+int usb_call_audio_bridge_probe(void)
+{
+    struct usb_call_audio_tap_runtime_info runtime;
+    u32 frame_bytes;
+    u8 tap_id;
+
+    for (tap_id = 0; tap_id < USB_CALL_AUDIO_TAP_COUNT; tap_id++) {
+        usb_call_audio_tap_get_runtime_info(tap_id, &runtime);
+        frame_bytes = runtime.format.channels
+                      * (runtime.format.bit_width
+                         ? sizeof(s32) : sizeof(s16));
+        if (!runtime.stream_active
+            || !usb_call_audio_bridge_format_is_supported(
+                   &runtime.format, frame_bytes)) {
+            printf("[USB_CALL_BRIDGE] probe_failed tap=%s gate=%u active=%u sr=%u channels=%u bit_width=%u qval=%u coding=0x%x\n",
+                   tap_id == USB_CALL_AUDIO_TAP_NEAR ? "near" : "far",
+                   runtime.gate_open, runtime.stream_active,
+                   (unsigned int)runtime.format.sample_rate,
+                   runtime.format.channels, runtime.format.bit_width,
+                   runtime.format.qval,
+                   (unsigned int)runtime.format.coding_type);
+            return -ENODEV;
+        }
+    }
+    return 0;
+}
+
 void usb_call_audio_bridge_close(void)
 {
     usb_call_audio_tap_set_gate(USB_CALL_AUDIO_TAP_NEAR, 0);
@@ -685,6 +737,7 @@ void usb_call_audio_bridge_close(void)
     usb_call_audio_bridge.opened = 0;
     usb_call_audio_bridge.timeline_active = 0;
     usb_call_audio_bridge.consumer = NULL;
+    usb_call_audio_bridge.event_callback = NULL;
     usb_call_audio_bridge.consumer_priv = NULL;
     spin_unlock(&usb_call_audio_bridge_lock);
 }

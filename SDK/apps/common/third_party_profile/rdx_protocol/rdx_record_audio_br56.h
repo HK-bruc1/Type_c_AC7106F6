@@ -12,6 +12,9 @@ typedef int (*rdx_record_audio_frame_callback_t)(
     const u8 *data,
     u32 len);
 
+typedef void (*rdx_record_audio_fault_callback_t)(
+    void *priv, enum rdx_record_cause cause);
+
 struct rdx_record_audio_open_params {
     enum rdx_record_format_id format_id;
     u8 mic_gain_override_valid;
@@ -20,6 +23,7 @@ struct rdx_record_audio_open_params {
     u32 session_id;
     u32 capture_generation;
     rdx_record_audio_frame_callback_t frame_callback;
+    rdx_record_audio_fault_callback_t fault_callback;
     void *frame_priv;
 };
 

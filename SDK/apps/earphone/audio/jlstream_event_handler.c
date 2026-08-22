@@ -426,12 +426,21 @@ static int media_switch_get_status()
 
 static int usb_call_near_tap_get_status(void)
 {
+#if RDX_CFG_CALL_RECORDING_ENABLE
+    /* Keep the Tap branch negotiated; the Tap gate controls PCM consumption. */
+    return 1;
+#else
     return usb_call_audio_tap_gate_is_open(USB_CALL_AUDIO_TAP_NEAR);
+#endif
 }
 
 static int usb_call_far_tap_get_status(void)
 {
+#if RDX_CFG_CALL_RECORDING_ENABLE
+    return 1;
+#else
     return usb_call_audio_tap_gate_is_open(USB_CALL_AUDIO_TAP_FAR);
+#endif
 }
 
 static int get_switch_node_callback(const char *arg)
