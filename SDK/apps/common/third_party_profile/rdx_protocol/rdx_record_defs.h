@@ -138,6 +138,7 @@ struct rdx_record_frame {
 struct rdx_record_destination_ops {
     int (*attach)(void *priv, u32 session_id, u32 capture_generation);
     int (*consume)(void *priv, const struct rdx_record_frame *frame);
+    void (*poll)(void *priv, u32 session_id, u32 capture_generation);
     void (*cancel)(void *priv, u32 session_id, u32 capture_generation);
     void (*detach)(void *priv, u32 session_id, u32 capture_generation);
 };

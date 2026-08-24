@@ -41,6 +41,35 @@
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             1
 #endif
 
+/* Stage 1: wake the existing Record Engine task from ATT can-send events. */
+#ifndef RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+#define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         1
+#endif
+#ifndef RDX_CFG_BLE_TX_BURST_BUDGET
+#define RDX_CFG_BLE_TX_BURST_BUDGET            4
+#endif
+#ifndef RDX_CFG_BLE_TX_QUEUE_DEPTH
+#define RDX_CFG_BLE_TX_QUEUE_DEPTH             64
+#endif
+#ifndef RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS
+#define RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS     100
+#endif
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    ((RDX_CFG_BLE_TX_BURST_BUDGET < 1) || \
+     (RDX_CFG_BLE_TX_BURST_BUDGET > 16))
+#error "RDX BLE TX burst budget must be between 1 and 16"
+#endif
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    ((RDX_CFG_BLE_TX_QUEUE_DEPTH < 16) || \
+     (RDX_CFG_BLE_TX_QUEUE_DEPTH > 128))
+#error "RDX BLE TX queue depth must be between 16 and 128"
+#endif
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    ((RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS < 20) || \
+     (RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS > 1000))
+#error "RDX BLE TX can-send timeout must be between 20 and 1000 ms"
+#endif
+
 /* Reject advertised abilities that this target integration cannot provide. */
 #define RDX_CFG_IMPLEMENTED_ABILITY            \
     (RDX_ABILITY_RTC                          | \
@@ -135,6 +164,10 @@
 #define RDX_CFG_RECORD_MARK_ENABLE             0
 #define RDX_CFG_IMPLEMENTED_ABILITY            0
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             0
+#define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         0
+#define RDX_CFG_BLE_TX_BURST_BUDGET            1
+#define RDX_CFG_BLE_TX_QUEUE_DEPTH             16
+#define RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS     100
 #endif
 
 #endif

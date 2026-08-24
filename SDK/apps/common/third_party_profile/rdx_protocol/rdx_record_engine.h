@@ -10,6 +10,8 @@ int rdx_record_engine_submit_system_event(
     enum rdx_record_system_event_source source,
     enum rdx_record_system_event_type type,
     enum rdx_record_cause cause);
+int rdx_record_engine_notify_destination_ready(
+    u32 session_id, u32 capture_generation);
 int rdx_record_engine_shutdown(u16 timeout_ticks);
 enum rdx_record_state rdx_record_engine_get_state(void);
 

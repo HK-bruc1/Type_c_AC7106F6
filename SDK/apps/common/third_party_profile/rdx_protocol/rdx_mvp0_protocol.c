@@ -29,7 +29,8 @@
 #define RDX_APPKEY_HEX_STRING_SIZE            (RDX_APPKEY_PAYLOAD_SIZE * 2 + 1)
 #define RDX_POST_ACK_DISCONNECT_DELAY_MS       100
 #define RDX_RECORD_STREAM_PACKET_SIZE           128
-#define RDX_RECORD_TX_QUEUE_DEPTH                16
+#define RDX_RECORD_TX_QUEUE_DEPTH                RDX_CFG_BLE_TX_QUEUE_DEPTH
+#define RDX_RECORD_TX_INLINE_BUDGET               1
 
 static const u8 rdx_mvp0_ping[] = "RDX_MVP0_PING";
 static const u8 rdx_mvp0_pong[] = "RDX_MVP0_PONG";
@@ -109,6 +110,10 @@ typedef struct {
     u32 queue_drop_count;
     u32 cancel_discard_count;
     u32 pause_discard_count;
+    u32 drain_count;
+    u32 event_poll_count;
+    u32 budget_hit_count;
+    u32 arm_fail_count;
     u8 tx_head;
     u8 tx_tail;
     u8 tx_count;
@@ -116,6 +121,7 @@ typedef struct {
     u8 wire_state;
     u8 scene;
     u8 final_stats_logged;
+    u8 burst_peak;
     u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_online_record_runtime_t;
@@ -251,24 +257,46 @@ static int rdx_mvp0_record_queue_packet(const u8 *packet, u16 len)
     return 0;
 }
 
-static int rdx_mvp0_record_drain_queue(void)
+static int rdx_mvp0_record_drain_queue(u8 budget)
 {
-    int ret;
+    int ret = 0;
+    u8 sent_now = 0;
 
-    while (rdx_online_record.tx_count) {
+    rdx_online_record.drain_count++;
+    if (!budget) {
+        budget = 0xff;
+    }
+
+    while (rdx_online_record.tx_count && sent_now < budget) {
         u8 head = rdx_online_record.tx_head;
 
         ret = rdx_mvp0_send(rdx_online_record.tx_packet[head],
                             rdx_online_record.tx_len[head]);
         if (ret) {
             rdx_online_record.send_fail_count++;
-            return ret;
+            break;
         }
         rdx_online_record.sent_count++;
         rdx_online_record.tx_head =
             (head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
         rdx_online_record.tx_count--;
+        sent_now++;
     }
+    if (sent_now > rdx_online_record.burst_peak) {
+        rdx_online_record.burst_peak = sent_now;
+    }
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    if (rdx_online_record.tx_count) {
+        if (sent_now >= budget) {
+            rdx_online_record.budget_hit_count++;
+        }
+        if (rdx_ble_transport_request_can_send_now(
+                rdx_online_record.session_id,
+                rdx_online_record.capture_generation)) {
+            rdx_online_record.arm_fail_count++;
+        }
+    }
+#endif
     return 0;
 }
 
@@ -316,15 +344,32 @@ static void rdx_mvp0_record_log_final(const char *reason)
            (unsigned int)ble_stats.valid_len_sample_count,
            ble_stats.valid_len_min, ble_stats.valid_len_max);
     printf("[RDX][TXQ] can_req=%u can_evt=%u spurious_evt=%u"
-           " mtu=%u interval=%u latency=%u phy=%u/%u dle=%u/%u"
-           " ret_overflow=%u\n",
+           " can_ready=%u can_coalesced=%u timeout_rearm=%u pending=%u"
+           "\n",
            (unsigned int)ble_stats.can_send_request_count,
            (unsigned int)ble_stats.can_send_event_count,
            (unsigned int)ble_stats.spurious_event_count,
+           (unsigned int)ble_stats.can_send_ready_count,
+           (unsigned int)ble_stats.can_send_coalesced_count,
+           (unsigned int)ble_stats.can_send_timeout_rearm_count,
+           ble_stats.can_send_pending);
+    printf("[RDX][TXQ] mtu=%u interval=%u latency=%u phy=%u/%u"
+           " dle=%u/%u ret_overflow=%u\n",
            ble_stats.mtu, ble_stats.conn_interval,
            ble_stats.conn_latency, ble_stats.tx_phy, ble_stats.rx_phy,
            ble_stats.dle_tx_octets, ble_stats.dle_tx_time,
            (unsigned int)ble_stats.app_send_ret_overflow_count);
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    printf("[RDX][TXQ] drain=%u event_poll=%u budget_hit=%u"
+           " burst_peak=%u arm_fail=%u budget=%u depth=%u direct_att=0\n",
+           (unsigned int)rdx_online_record.drain_count,
+           (unsigned int)rdx_online_record.event_poll_count,
+           (unsigned int)rdx_online_record.budget_hit_count,
+           rdx_online_record.burst_peak,
+           (unsigned int)rdx_online_record.arm_fail_count,
+           RDX_CFG_BLE_TX_BURST_BUDGET,
+           RDX_RECORD_TX_QUEUE_DEPTH);
+#endif
     for (i = 0; i < RDX_BLE_APP_SEND_RET_SLOTS; i++) {
         if (ble_stats.app_send_ret[i].count) {
             printf("[RDX][TXQ] app_ret code=%d count=%u\n",
@@ -351,10 +396,15 @@ static int rdx_mvp0_record_destination_attach(void *priv, u32 session_id,
     rdx_online_record.queue_drop_count = 0;
     rdx_online_record.cancel_discard_count = 0;
     rdx_online_record.pause_discard_count = 0;
+    rdx_online_record.drain_count = 0;
+    rdx_online_record.event_poll_count = 0;
+    rdx_online_record.budget_hit_count = 0;
+    rdx_online_record.arm_fail_count = 0;
     rdx_online_record.tx_head = 0;
     rdx_online_record.tx_tail = 0;
     rdx_online_record.tx_count = 0;
     rdx_online_record.tx_peak = 0;
+    rdx_online_record.burst_peak = 0;
     rdx_online_record.final_stats_logged = 0;
     rdx_ble_transport_tx_stats_reset();
     return 0;
@@ -390,7 +440,18 @@ static int rdx_mvp0_record_destination_consume(
         return -1;
     }
     memcpy(packet + header_len, frame->payload, frame->payload_len);
-    rdx_mvp0_record_drain_queue();
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    ret = rdx_mvp0_record_queue_packet(
+        packet, header_len + frame->payload_len);
+    if (ret) {
+        return ret;
+    }
+    /* Keep frame ingestion cheap.  ATT-ready events use the larger burst
+     * budget to recover backlog without turning a candidate batch into one
+     * unbounded send loop. */
+    rdx_mvp0_record_drain_queue(RDX_RECORD_TX_INLINE_BUDGET);
+#else
+    rdx_mvp0_record_drain_queue(0);
     if (rdx_online_record.tx_count) {
         ret = rdx_mvp0_record_queue_packet(
             packet, header_len + frame->payload_len);
@@ -404,6 +465,7 @@ static int rdx_mvp0_record_destination_consume(
             rdx_online_record.sent_count++;
         }
     }
+#endif
 
     if ((frame->session_frame_seq + 1) % 250 == 0) {
         printf("[RDX][ONLINE] frames=%u sent=%u send_fail=%u queued=%u"
@@ -420,6 +482,21 @@ static int rdx_mvp0_record_destination_consume(
      * packet-size check above is the only fatal validation in this path. */
     return 0;
 }
+
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+static void rdx_mvp0_record_destination_poll(
+    void *priv, u32 session_id, u32 capture_generation)
+{
+    (void)priv;
+    if (session_id != rdx_online_record.session_id
+        || capture_generation != rdx_online_record.capture_generation
+        || rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING) {
+        return;
+    }
+    rdx_online_record.event_poll_count++;
+    rdx_mvp0_record_drain_queue(RDX_CFG_BLE_TX_BURST_BUDGET);
+}
+#endif
 
 static void rdx_mvp0_record_destination_cancel(void *priv, u32 session_id,
                                                u32 capture_generation)
@@ -455,6 +532,9 @@ static void rdx_mvp0_record_destination_detach(void *priv, u32 session_id,
 static const struct rdx_record_destination_ops rdx_mvp0_record_destination = {
     .attach = rdx_mvp0_record_destination_attach,
     .consume = rdx_mvp0_record_destination_consume,
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    .poll = rdx_mvp0_record_destination_poll,
+#endif
     .cancel = rdx_mvp0_record_destination_cancel,
     .detach = rdx_mvp0_record_destination_detach,
 };

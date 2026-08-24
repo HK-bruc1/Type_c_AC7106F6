@@ -41,6 +41,12 @@ struct rdx_record_stop_latch {
     enum rdx_record_cause cause;
 };
 
+struct rdx_record_destination_latch {
+    u8 pending;
+    u32 session_id;
+    u32 capture_generation;
+};
+
 struct rdx_record_engine_runtime {
     spinlock_t lock;
     OS_SEM stopped_sem;
@@ -48,6 +54,7 @@ struct rdx_record_engine_runtime {
     struct rdx_record_candidate candidates[RDX_RECORD_CANDIDATE_QUEUE_DEPTH];
     struct rdx_record_system_latch system_latch;
     struct rdx_record_stop_latch stop_latch;
+    struct rdx_record_destination_latch destination_latch;
     struct audio_capture_lease capture_lease;
     const struct rdx_record_destination_ops *destination_ops;
     void *destination_priv;
@@ -197,6 +204,8 @@ static void rdx_record_engine_clear_queues(void)
     rdx_record_engine.candidate_head = 0;
     rdx_record_engine.candidate_tail = 0;
     rdx_record_engine.candidate_count = 0;
+    memset(&rdx_record_engine.destination_latch, 0,
+           sizeof(rdx_record_engine.destination_latch));
     spin_unlock(&rdx_record_engine.lock);
 }
 
@@ -209,6 +218,8 @@ static u32 rdx_record_engine_discard_candidates(void)
     rdx_record_engine.candidate_head = 0;
     rdx_record_engine.candidate_tail = 0;
     rdx_record_engine.candidate_count = 0;
+    memset(&rdx_record_engine.destination_latch, 0,
+           sizeof(rdx_record_engine.destination_latch));
     spin_unlock(&rdx_record_engine.lock);
     return count;
 }
@@ -741,6 +752,22 @@ static u8 rdx_record_engine_take_request(struct rdx_record_request *request)
     return taken;
 }
 
+static u8 rdx_record_engine_take_destination_ready(
+    struct rdx_record_destination_latch *ready)
+{
+    u8 taken = 0;
+
+    spin_lock(&rdx_record_engine.lock);
+    if (rdx_record_engine.destination_latch.pending) {
+        *ready = rdx_record_engine.destination_latch;
+        memset(&rdx_record_engine.destination_latch, 0,
+               sizeof(rdx_record_engine.destination_latch));
+        taken = 1;
+    }
+    spin_unlock(&rdx_record_engine.lock);
+    return taken;
+}
+
 static void rdx_record_engine_cancel_requests(
     enum rdx_record_termination_mode termination_mode,
     enum rdx_record_cause cause)
@@ -1049,6 +1076,7 @@ static u8 rdx_record_engine_process_one(void)
 {
     struct rdx_record_system_latch system_event;
     struct rdx_record_stop_latch stop;
+    struct rdx_record_destination_latch destination_ready;
     struct rdx_record_request request;
     struct rdx_record_candidate candidate;
 
@@ -1119,6 +1147,20 @@ static u8 rdx_record_engine_process_one(void)
         } else if (request.type == RDX_RECORD_REQUEST_MARK) {
             rdx_record_engine_mark(&request);
 #endif
+        }
+        return 1;
+    }
+    if (rdx_record_engine_take_destination_ready(&destination_ready)) {
+        if (rdx_record_engine.state == RDX_RECORD_STATE_ACTIVE
+            && destination_ready.session_id == rdx_record_engine.session_id
+            && destination_ready.capture_generation ==
+                rdx_record_engine.capture_generation
+            && rdx_record_engine.destination_ops
+            && rdx_record_engine.destination_ops->poll) {
+            rdx_record_engine.destination_ops->poll(
+                rdx_record_engine.destination_priv,
+                destination_ready.session_id,
+                destination_ready.capture_generation);
         }
         return 1;
     }
@@ -1257,6 +1299,38 @@ int rdx_record_engine_submit_system_event(
     spin_unlock(&rdx_record_engine.lock);
     rdx_record_engine_wake();
     return RDX_RECORD_RESULT_OK;
+}
+
+int rdx_record_engine_notify_destination_ready(
+    u32 session_id, u32 capture_generation)
+{
+    u8 wake = 0;
+    int result = RDX_RECORD_RESULT_BAD_STATE;
+
+    if (!rdx_record_engine.initialized) {
+        return result;
+    }
+    spin_lock(&rdx_record_engine.lock);
+    if (rdx_record_engine.accepting
+        && rdx_record_engine.state == RDX_RECORD_STATE_ACTIVE
+        && rdx_record_engine.destination_ops
+        && rdx_record_engine.destination_ops->poll
+        && session_id == rdx_record_engine.session_id
+        && capture_generation == rdx_record_engine.capture_generation) {
+        if (!rdx_record_engine.destination_latch.pending) {
+            rdx_record_engine.destination_latch.pending = 1;
+            rdx_record_engine.destination_latch.session_id = session_id;
+            rdx_record_engine.destination_latch.capture_generation =
+                capture_generation;
+            wake = 1;
+        }
+        result = RDX_RECORD_RESULT_OK;
+    }
+    spin_unlock(&rdx_record_engine.lock);
+    if (wake) {
+        rdx_record_engine_wake();
+    }
+    return result;
 }
 
 int rdx_record_engine_shutdown(u16 timeout_ticks)

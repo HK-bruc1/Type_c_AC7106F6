@@ -3,7 +3,9 @@
 
 
 const char log_tag_const_v_APP_BLE = CONFIG_DEBUG_LIB(0);
-const char log_tag_const_i_APP_BLE = CONFIG_DEBUG_LIB(1);
+/* RDX online recording sends 50 notifications/s.  Keep the app_ble wrapper
+ * ownership boundary, but suppress its per-packet INFO payload dump. */
+const char log_tag_const_i_APP_BLE = CONFIG_DEBUG_LIB(0);
 const char log_tag_const_d_APP_BLE = CONFIG_DEBUG_LIB(0);
 const char log_tag_const_w_APP_BLE = CONFIG_DEBUG_LIB(1);
 const char log_tag_const_e_APP_BLE = CONFIG_DEBUG_LIB(1);
