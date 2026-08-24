@@ -104,8 +104,10 @@ typedef struct {
     u32 capture_generation;
     u32 sent_count;
     u32 send_fail_count;
+    u32 destination_in_count;
     u32 queued_count;
     u32 queue_drop_count;
+    u32 cancel_discard_count;
     u32 pause_discard_count;
     u8 tx_head;
     u8 tx_tail;
@@ -113,6 +115,7 @@ typedef struct {
     u8 tx_peak;
     u8 wire_state;
     u8 scene;
+    u8 final_stats_logged;
     u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_online_record_runtime_t;
@@ -269,6 +272,71 @@ static int rdx_mvp0_record_drain_queue(void)
     return 0;
 }
 
+static void rdx_mvp0_record_log_final(const char *reason)
+{
+    if (rdx_online_record.final_stats_logged) {
+        return;
+    }
+    rdx_online_record.final_stats_logged = 1;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+    struct rdx_ble_transport_tx_stats ble_stats;
+    u32 accounted;
+    u8 i;
+
+    accounted = rdx_online_record.sent_count
+                + rdx_online_record.queue_drop_count
+                + rdx_online_record.cancel_discard_count
+                + rdx_online_record.tx_count;
+    rdx_ble_transport_tx_stats_get(&ble_stats);
+
+    printf("[RDX][TXQ] final reason=%s session=%u capture=%u"
+           " destination_in=%u sent=%u pending=%u tx_drop=%u"
+           " cancel_discard=%u pause_discard=%u accounted=%u"
+           " queued=%u q_peak=%u send_fail=%u\n",
+           reason,
+           (unsigned int)rdx_online_record.session_id,
+           (unsigned int)rdx_online_record.capture_generation,
+           (unsigned int)rdx_online_record.destination_in_count,
+           (unsigned int)rdx_online_record.sent_count,
+           rdx_online_record.tx_count,
+           (unsigned int)rdx_online_record.queue_drop_count,
+           (unsigned int)rdx_online_record.cancel_discard_count,
+           (unsigned int)rdx_online_record.pause_discard_count,
+           (unsigned int)accounted,
+           (unsigned int)rdx_online_record.queued_count,
+           rdx_online_record.tx_peak,
+           (unsigned int)rdx_online_record.send_fail_count);
+    printf("[RDX][TXQ] ble unavailable=%u busy_valid_len=%u"
+           " app_ok=%u app_error=%u valid_samples=%u"
+           " valid_min=%u valid_max=%u\n",
+           (unsigned int)ble_stats.unavailable_count,
+           (unsigned int)ble_stats.valid_len_busy_count,
+           (unsigned int)ble_stats.app_send_ok_count,
+           (unsigned int)ble_stats.app_send_error_count,
+           (unsigned int)ble_stats.valid_len_sample_count,
+           ble_stats.valid_len_min, ble_stats.valid_len_max);
+    printf("[RDX][TXQ] can_req=%u can_evt=%u spurious_evt=%u"
+           " mtu=%u interval=%u latency=%u phy=%u/%u dle=%u/%u"
+           " ret_overflow=%u\n",
+           (unsigned int)ble_stats.can_send_request_count,
+           (unsigned int)ble_stats.can_send_event_count,
+           (unsigned int)ble_stats.spurious_event_count,
+           ble_stats.mtu, ble_stats.conn_interval,
+           ble_stats.conn_latency, ble_stats.tx_phy, ble_stats.rx_phy,
+           ble_stats.dle_tx_octets, ble_stats.dle_tx_time,
+           (unsigned int)ble_stats.app_send_ret_overflow_count);
+    for (i = 0; i < RDX_BLE_APP_SEND_RET_SLOTS; i++) {
+        if (ble_stats.app_send_ret[i].count) {
+            printf("[RDX][TXQ] app_ret code=%d count=%u\n",
+                   ble_stats.app_send_ret[i].code,
+                   (unsigned int)ble_stats.app_send_ret[i].count);
+        }
+    }
+#else
+    (void)reason;
+#endif
+}
+
 static int rdx_mvp0_record_destination_attach(void *priv, u32 session_id,
                                               u32 capture_generation)
 {
@@ -278,13 +346,17 @@ static int rdx_mvp0_record_destination_attach(void *priv, u32 session_id,
     rdx_online_record.capture_generation = capture_generation;
     rdx_online_record.sent_count = 0;
     rdx_online_record.send_fail_count = 0;
+    rdx_online_record.destination_in_count = 0;
     rdx_online_record.queued_count = 0;
     rdx_online_record.queue_drop_count = 0;
+    rdx_online_record.cancel_discard_count = 0;
     rdx_online_record.pause_discard_count = 0;
     rdx_online_record.tx_head = 0;
     rdx_online_record.tx_tail = 0;
     rdx_online_record.tx_count = 0;
     rdx_online_record.tx_peak = 0;
+    rdx_online_record.final_stats_logged = 0;
+    rdx_ble_transport_tx_stats_reset();
     return 0;
 }
 
@@ -297,11 +369,15 @@ static int rdx_mvp0_record_destination_consume(
 
     (void)priv;
     if (!frame
-        || (rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING
-            && rdx_online_record.state != RDX_ONLINE_RECORD_PAUSE_PENDING)
         || frame->session_id != rdx_online_record.session_id
         || frame->capture_generation !=
-        rdx_online_record.capture_generation) {
+            rdx_online_record.capture_generation) {
+        return 0;
+    }
+    rdx_online_record.destination_in_count++;
+    if (rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING
+        && rdx_online_record.state != RDX_ONLINE_RECORD_PAUSE_PENDING) {
+        rdx_online_record.cancel_discard_count++;
         return 0;
     }
 
@@ -310,6 +386,7 @@ static int rdx_mvp0_record_destination_consume(
                            frame->payload_len, frame->payload_len);
     if (header_len <= 0
         || (u32)header_len + frame->payload_len > sizeof(packet)) {
+        rdx_online_record.cancel_discard_count++;
         return -1;
     }
     memcpy(packet + header_len, frame->payload, frame->payload_len);
@@ -350,7 +427,12 @@ static void rdx_mvp0_record_destination_cancel(void *priv, u32 session_id,
     (void)priv;
     if (session_id == rdx_online_record.session_id
         && capture_generation == rdx_online_record.capture_generation) {
+        rdx_online_record.cancel_discard_count +=
+            rdx_online_record.tx_count;
+        rdx_online_record.tx_head = 0;
+        rdx_online_record.tx_tail = 0;
         rdx_online_record.tx_count = 0;
+        rdx_mvp0_record_log_final("cancel");
     }
 }
 
@@ -358,8 +440,16 @@ static void rdx_mvp0_record_destination_detach(void *priv, u32 session_id,
                                                u32 capture_generation)
 {
     (void)priv;
-    (void)session_id;
-    (void)capture_generation;
+    if (session_id == rdx_online_record.session_id
+        && capture_generation == rdx_online_record.capture_generation
+        && !rdx_online_record.final_stats_logged) {
+        rdx_online_record.cancel_discard_count +=
+            rdx_online_record.tx_count;
+        rdx_online_record.tx_head = 0;
+        rdx_online_record.tx_tail = 0;
+        rdx_online_record.tx_count = 0;
+        rdx_mvp0_record_log_final("detach");
+    }
 }
 
 static const struct rdx_record_destination_ops rdx_mvp0_record_destination = {
@@ -438,8 +528,8 @@ static void rdx_mvp0_record_engine_event(
             return;
         }
         rdx_ble_transport_set_record_streaming(0);
-        rdx_online_record.pause_discard_count +=
-            rdx_online_record.tx_count;
+        rdx_online_record.pause_discard_count += rdx_online_record.tx_count;
+        rdx_online_record.cancel_discard_count += rdx_online_record.tx_count;
         rdx_online_record.tx_head = 0;
         rdx_online_record.tx_tail = 0;
         rdx_online_record.tx_count = 0;
@@ -1494,7 +1584,6 @@ void rdx_mvp0_protocol_exit(void)
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
         rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-        rdx_online_record.tx_count = 0;
         rdx_ble_transport_set_record_streaming(0);
     }
 #endif
@@ -1510,7 +1599,6 @@ void rdx_mvp0_protocol_set_connected(u8 connected)
     if (!connected) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-            rdx_online_record.tx_count = 0;
             rdx_ble_transport_set_record_streaming(0);
         }
         rdx_record_engine_submit_system_event(
@@ -1541,7 +1629,6 @@ void rdx_mvp0_protocol_set_ccc(u8 enabled)
     if (!enabled) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-            rdx_online_record.tx_count = 0;
             rdx_ble_transport_set_record_streaming(0);
         }
         rdx_record_engine_submit_system_event(

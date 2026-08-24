@@ -36,6 +36,11 @@
 #define RDX_CFG_RECORD_MARK_ENABLE             \
     ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_RECORD_MARK) != 0)
 
+/* Stage diagnostics can be disabled after BLE TX tuning is complete. */
+#ifndef RDX_CFG_BLE_TX_DIAG_ENABLE
+#define RDX_CFG_BLE_TX_DIAG_ENABLE             1
+#endif
+
 /* Reject advertised abilities that this target integration cannot provide. */
 #define RDX_CFG_IMPLEMENTED_ABILITY            \
     (RDX_ABILITY_RTC                          | \
@@ -129,6 +134,7 @@
 #define RDX_CFG_RECORD_PAUSE_RESUME_ENABLE     0
 #define RDX_CFG_RECORD_MARK_ENABLE             0
 #define RDX_CFG_IMPLEMENTED_ABILITY            0
+#define RDX_CFG_BLE_TX_DIAG_ENABLE             0
 #endif
 
 #endif

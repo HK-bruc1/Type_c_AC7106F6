@@ -80,6 +80,7 @@ struct rdx_record_engine_runtime {
     u32 session_frame_seq;
     u32 capture_frame_seq;
     u32 warmup_count;
+    u32 warmup_discard_count;
     u32 produced_count;
     u32 enqueued_count;
     u32 overflow_count;
@@ -197,6 +198,19 @@ static void rdx_record_engine_clear_queues(void)
     rdx_record_engine.candidate_tail = 0;
     rdx_record_engine.candidate_count = 0;
     spin_unlock(&rdx_record_engine.lock);
+}
+
+static u32 rdx_record_engine_discard_candidates(void)
+{
+    u32 count;
+
+    spin_lock(&rdx_record_engine.lock);
+    count = rdx_record_engine.candidate_count;
+    rdx_record_engine.candidate_head = 0;
+    rdx_record_engine.candidate_tail = 0;
+    rdx_record_engine.candidate_count = 0;
+    spin_unlock(&rdx_record_engine.lock);
+    return count;
 }
 
 static int rdx_record_engine_audio_frame(void *priv,
@@ -386,7 +400,8 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     rdx_record_engine.frame_gate = 0;
     rdx_record_engine.state = RDX_RECORD_STATE_STOPPING;
     rdx_record_engine_capture_close(0);
-    rdx_record_engine_clear_queues();
+    rdx_record_engine.stop_discarded +=
+        rdx_record_engine_discard_candidates();
     if (rdx_record_engine.destination_ops
         && rdx_record_engine.destination_ops->cancel) {
         rdx_record_engine.destination_ops->cancel(
@@ -420,6 +435,12 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
            (unsigned int)rdx_record_engine.format_mismatch_count,
            (unsigned int)rdx_record_engine.stale_count,
            (unsigned int)rdx_record_engine.stop_discarded);
+    printf("[RDX][ENGINE] stop_account session=%u capture=%u"
+           " warmup_discard=%u destination_out=%u\n",
+           (unsigned int)rdx_record_engine.session_id,
+           (unsigned int)rdx_record_engine.capture_generation,
+           (unsigned int)rdx_record_engine.warmup_discard_count,
+           (unsigned int)rdx_record_engine.session_frame_seq);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_SESSION_STOPPED,
                            request_id, result, mode, cause);
 
@@ -507,6 +528,7 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
     rdx_record_engine.session_frame_seq = 0;
     rdx_record_engine.capture_frame_seq = 0;
     rdx_record_engine.warmup_count = 0;
+    rdx_record_engine.warmup_discard_count = 0;
     rdx_record_engine.produced_count = 0;
     rdx_record_engine.enqueued_count = 0;
     rdx_record_engine.overflow_count = 0;
@@ -804,6 +826,7 @@ static void rdx_record_engine_process_candidate(
     }
     if (rdx_record_engine.warmup_count < format->warmup_frames) {
         rdx_record_engine.warmup_count++;
+        rdx_record_engine.warmup_discard_count++;
         return;
     }
 
