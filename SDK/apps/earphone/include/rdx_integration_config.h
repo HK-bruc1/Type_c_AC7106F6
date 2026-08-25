@@ -41,6 +41,11 @@
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             1
 #endif
 
+/* Key ownership and routing diagnostics can be disabled after bring-up. */
+#ifndef RDX_CFG_KEY_DIAG_ENABLE
+#define RDX_CFG_KEY_DIAG_ENABLE                1
+#endif
+
 /* Stage 1: wake the existing Record Engine task from ATT can-send events. */
 #ifndef RDX_CFG_BLE_TX_CAN_SEND_ENABLE
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         1
@@ -164,6 +169,7 @@
 #define RDX_CFG_RECORD_MARK_ENABLE             0
 #define RDX_CFG_IMPLEMENTED_ABILITY            0
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             0
+#define RDX_CFG_KEY_DIAG_ENABLE                0
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         0
 #define RDX_CFG_BLE_TX_BURST_BUDGET            1
 #define RDX_CFG_BLE_TX_QUEUE_DEPTH             16
