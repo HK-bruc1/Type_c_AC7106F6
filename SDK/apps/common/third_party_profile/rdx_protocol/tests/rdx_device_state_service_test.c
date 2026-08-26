@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "rdx_device_state.h"
+#include "rdx/rdx_device_state_service.h"
 #include "rdx_device_state_repository_fake.h"
 
 static void test_first_start_and_default_repair(void)

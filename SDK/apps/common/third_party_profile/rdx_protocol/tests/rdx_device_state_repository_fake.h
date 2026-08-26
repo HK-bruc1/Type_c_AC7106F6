@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "rdx_device_state_repository.h"
+#include "rdx/ports/rdx_device_state_repository_port.h"
 
 struct rdx_device_state_repository_fake_state {
     int load_result;

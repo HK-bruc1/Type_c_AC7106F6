@@ -1056,51 +1056,56 @@ c_SRC_FILES += \
 
 #if TCFG_RDX_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_key_adapter_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_ble_name.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_device_management.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_device_state.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_device_state_repository_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_identity.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_system_actions_type_c.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_protocol_session.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
+    apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_runtime.c \
+    apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_profile_type_c.c \
+    apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_key_routing.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_ble_name_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_transport_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_device_management_service.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_device_state_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_state_repository_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_identity_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_identity_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_system_action_type_c.c \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_session.c \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23.c \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_management.c \
+    apps/common/third_party_profile/rdx_protocol/providers/appkey/rdx_appkey_verifier.c
 
 #if RDX_CFG_RTC_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_rtc.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_clock_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_rtc_backup_repository_br56.c
+    apps/common/third_party_profile/rdx_protocol/application/rdx_rtc_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_clock_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_rtc_backup_repository_jl_br56.c
 #endif
 
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_audio_capture_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_audio_capture_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/domain/rdx_record_session.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_record_engine.c \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_record.c
 #endif
 
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_mic_gain_service.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_mic_settings_br56.c \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c
+    apps/common/third_party_profile/rdx_protocol/application/rdx_mic_gain_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_mic_settings_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/audio/rdx_meeting_capture_jlstream.c
 #endif
 
 #if RDX_CFG_CALL_RECORDING_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_record_call_audio_br56.c
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/audio/rdx_call_capture_jlstream.c
 #endif
 
 #if RDX_CFG_RECORD_MARK_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_session_metadata_service.c
+    apps/common/third_party_profile/rdx_protocol/application/rdx_session_metadata_service.c
 #endif
 
 THIRD_PARTY_LIBS += \
-    apps/common/third_party_profile/rdx_protocol/librdxApp.a
+    apps/common/third_party_profile/rdx_protocol/providers/appkey/librdxApp.a
 #endif
 
 #if (THIRD_PARTY_PROTOCOLS_SEL & HID_ISO_EN)

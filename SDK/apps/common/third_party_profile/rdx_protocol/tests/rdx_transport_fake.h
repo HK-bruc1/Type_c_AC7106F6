@@ -1,7 +1,7 @@
 #ifndef RDX_TRANSPORT_FAKE_H
 #define RDX_TRANSPORT_FAKE_H
 
-#include "rdx_transport.h"
+#include "rdx/ports/rdx_transport_port.h"
 
 #define RDX_TRANSPORT_FAKE_TX_BUFFER_SIZE      160
 

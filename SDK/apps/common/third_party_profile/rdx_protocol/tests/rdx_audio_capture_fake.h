@@ -1,7 +1,7 @@
 #ifndef RDX_AUDIO_CAPTURE_FAKE_H
 #define RDX_AUDIO_CAPTURE_FAKE_H
 
-#include "rdx_audio_capture.h"
+#include "rdx/ports/rdx_audio_capture_port.h"
 
 struct rdx_audio_capture_fake_state {
     struct rdx_audio_capture_open_params params;

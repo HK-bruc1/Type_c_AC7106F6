@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #include "rdx_clock_fake.h"
-#include "rdx_rtc.h"
+#include "rdx/rdx_rtc_service.h"
 #include "rdx_rtc_backup_repository_fake.h"
 
 #define TIMESTAMP_1999_12_31    946598400u

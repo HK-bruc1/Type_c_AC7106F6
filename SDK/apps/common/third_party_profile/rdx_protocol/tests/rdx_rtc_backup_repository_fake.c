@@ -1,6 +1,6 @@
 #include <string.h>
 
-#include "rdx_rtc_backup_repository.h"
+#include "rdx/ports/rdx_rtc_backup_repository_port.h"
 #include "rdx_rtc_backup_repository_fake.h"
 
 static struct rdx_rtc_backup_repository_fake_state fake_state;

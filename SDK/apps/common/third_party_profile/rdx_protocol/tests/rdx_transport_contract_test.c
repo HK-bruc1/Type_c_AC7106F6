@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "rdx_protocol_session.h"
+#include "rdx_protocol/protocol/v23/rdx_protocol_session.h"
 #include "rdx_transport_fake.h"
 
 struct protocol_observer {

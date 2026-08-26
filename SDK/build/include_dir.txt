@@ -65,6 +65,7 @@
 -Iapps/common/ai_audio
 -Iinterface/utils/ui/ui/cpu/br56
 -Iapps/common/third_party_profile
+-Iapps/common/third_party_profile/rdx_protocol/include
 -Iapps/common/third_party_profile/common
 -Iapps/common/third_party_profile/interface
 -Iapps/common/third_party_profile/mma_protocol
@@ -155,4 +156,3 @@
 -Iinterface/media/aispeech/enc
 -Iapps/common/device/sensor/hr_sensor
 -Iinterface/system/math/cpu/br56
-

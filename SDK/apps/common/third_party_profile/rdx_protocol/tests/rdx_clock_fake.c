@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
-#include "rdx_clock.h"
+#include "rdx/ports/rdx_clock_port.h"
 #include "rdx_clock_fake.h"
 
 struct rdx_clock_fake_read {

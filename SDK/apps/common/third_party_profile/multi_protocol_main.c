@@ -15,7 +15,7 @@
 #include "hid_iso.h"
 
 #if TCFG_RDX_ENABLE
-#include "rdx_protocol/rdx_protocol_entry.h"
+#include "rdx/rdx_runtime.h"
 #endif
 
 #if TCFG_APP_PC_EN && !TCFG_APP_BT_EN && TCFG_USER_BLE_ENABLE && THIRD_PARTY_PROTOCOLS_SEL
@@ -475,7 +475,7 @@ void multi_protocol_bt_init(void)
 #endif
 #if TCFG_RDX_ENABLE
     {
-        int ret = rdx_protocol_start();
+        int ret = rdx_runtime_start();
         if (ret) {
             printf("[RDX] start failed=%d\n", ret);
         }
@@ -542,7 +542,7 @@ void multi_protocol_bt_exit(void)
 #endif
 
 #if TCFG_RDX_ENABLE
-    rdx_protocol_stop();
+    rdx_runtime_stop();
 #endif
 
 #if !TCFG_THIRD_PARTY_PROTOCOLS_SIMPLIFIED

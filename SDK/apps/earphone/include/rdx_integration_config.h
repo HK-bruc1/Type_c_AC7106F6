@@ -12,7 +12,7 @@
 
 #if TCFG_THIRD_PARTY_PROTOCOLS_ENABLE && (TCFG_THIRD_PARTY_PROTOCOLS_SEL & RDX_EN)
 
-#include "rdx_mvp0_compat_config.h"
+#include "rdx_protocol/integration/type_c_ac7106f6/rdx_product_compat_profile.h"
 
 /*
  * Internal compile gates are derived from the product's advertised Ability.
@@ -88,7 +88,7 @@
 #endif
 
 #if TCFG_THIRD_PARTY_PROTOCOLS_SEL != RDX_EN
-#error "RDX BLE MVP0 cannot coexist with other third-party protocols"
+#error "RDX cannot coexist with other third-party protocols"
 #endif
 
 #if !TCFG_USER_BLE_ENABLE
@@ -96,7 +96,7 @@
 #endif
 
 #if !TCFG_TYPEC_EARPHONE_CASE
-#error "RDX BLE MVP0 requires the Type-C dedicated PC application mode"
+#error "RDX requires the Type-C dedicated PC application mode"
 #endif
 
 #if RDX_CFG_RTC_ENABLE && !TCFG_APP_RTC_EN
