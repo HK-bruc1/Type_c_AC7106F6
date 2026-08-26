@@ -5,12 +5,9 @@
 #include "system/includes.h"
 #include "spinlock.h"
 #include "audio_capture_lease.h"
+#include "rdx_audio_capture.h"
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 #include "rdx_mic_gain_service.h"
-#include "rdx_record_audio_br56.h"
-#endif
-#if RDX_CFG_CALL_RECORDING_ENABLE
-#include "rdx_record_call_audio_br56.h"
 #endif
 #include "rdx_record_engine.h"
 
@@ -313,55 +310,26 @@ static u8 rdx_record_engine_uses_capture_lease(void)
     return rdx_record_engine.scene == RDX_RECORD_SCENE_MEETING;
 }
 
-static int rdx_record_engine_capture_probe(void)
+static enum rdx_audio_capture_result rdx_record_engine_capture_probe(void)
 {
-#if RDX_CFG_CALL_RECORDING_ENABLE
-    if (rdx_record_engine.scene == RDX_RECORD_SCENE_CALL) {
-        return rdx_record_call_audio_br56_probe(
-            rdx_record_engine.format_id);
-    }
-#endif
-    return 0;
+    return rdx_audio_capture_probe(rdx_record_engine.scene,
+                                   rdx_record_engine.format_id);
 }
 
-static int rdx_record_engine_capture_open(
-    const struct rdx_record_audio_open_params *params, u8 resume)
+static enum rdx_audio_capture_result rdx_record_engine_capture_open(
+    const struct rdx_audio_capture_open_params *params, u8 resume)
 {
-#if RDX_CFG_CALL_RECORDING_ENABLE
-    if (rdx_record_engine.scene == RDX_RECORD_SCENE_CALL) {
-        return resume
-               ? rdx_record_call_audio_br56_resume(params)
-               : rdx_record_call_audio_br56_open(params);
-    }
-#endif
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
-    (void)resume;
-    return rdx_record_audio_br56_open(params);
-#else
-    (void)params;
-    (void)resume;
-    return -EFAULT;
-#endif
+    return resume ? rdx_audio_capture_resume(params)
+                  : rdx_audio_capture_open(params);
 }
 
 static void rdx_record_engine_capture_close(u8 pause)
 {
-#if RDX_CFG_CALL_RECORDING_ENABLE
-    if (rdx_record_engine.scene == RDX_RECORD_SCENE_CALL) {
-        if (pause) {
-            rdx_record_call_audio_br56_pause();
-        } else {
-            rdx_record_call_audio_br56_close();
-        }
-        return;
+    if (pause) {
+        rdx_audio_capture_pause(rdx_record_engine.scene);
+    } else {
+        rdx_audio_capture_close(rdx_record_engine.scene);
     }
-#endif
-#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
-    (void)pause;
-    rdx_record_audio_br56_close();
-#else
-    (void)pause;
-#endif
 }
 
 static void rdx_record_engine_release_capture_lease(void)
@@ -494,7 +462,8 @@ static const struct audio_capture_lease_client rdx_record_capture_client = {
 
 static void rdx_record_engine_start(const struct rdx_record_request *request)
 {
-    struct rdx_record_audio_open_params audio_params;
+    struct rdx_audio_capture_open_params audio_params;
+    enum rdx_audio_capture_result capture_result;
     enum rdx_record_result failure_result = RDX_RECORD_RESULT_START_FAILED;
     enum rdx_record_termination_mode failure_mode =
         RDX_RECORD_TERMINATION_FORCED;
@@ -573,8 +542,8 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
            rdx_record_engine.session_mic_gain_override_valid,
            rdx_record_engine.session_mic_gain);
 
-    ret = rdx_record_engine_capture_probe();
-    if (ret) {
+    capture_result = rdx_record_engine_capture_probe();
+    if (capture_result != RDX_AUDIO_CAPTURE_OK) {
         failure_result = RDX_RECORD_RESULT_SOURCE_LOST;
         failure_cause = RDX_RECORD_CAUSE_SOURCE_LOST;
         goto rollback;
@@ -622,6 +591,7 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
     }
 
     memset(&audio_params, 0, sizeof(audio_params));
+    audio_params.scene = rdx_record_engine.scene;
     audio_params.format_id = rdx_record_engine.format_id;
     audio_params.mic_gain_override_valid =
         rdx_record_engine.session_mic_gain_override_valid;
@@ -634,10 +604,10 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
     audio_params.fault_callback = rdx_record_engine_audio_fault;
     audio_params.frame_priv = &rdx_record_engine;
     recorder_open_attempted = 1;
-    ret = rdx_record_engine_capture_open(&audio_params, 0);
-    if (ret) {
+    capture_result = rdx_record_engine_capture_open(&audio_params, 0);
+    if (capture_result != RDX_AUDIO_CAPTURE_OK) {
         rdx_record_engine.frame_gate = 0;
-        if (ret == -ENODEV) {
+        if (capture_result == RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE) {
             failure_result = RDX_RECORD_RESULT_SOURCE_LOST;
             failure_cause = RDX_RECORD_CAUSE_SOURCE_LOST;
         }
@@ -937,7 +907,8 @@ static void rdx_record_engine_pause(const struct rdx_record_request *request)
 
 static void rdx_record_engine_resume(const struct rdx_record_request *request)
 {
-    struct rdx_record_audio_open_params audio_params;
+    struct rdx_audio_capture_open_params audio_params;
+    enum rdx_audio_capture_result capture_result;
     u8 recorder_open_attempted = 0;
     int ret;
 
@@ -965,8 +936,9 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     rdx_record_engine.warmup_count = 0;
     rdx_record_engine_clear_queues();
 
-    ret = rdx_record_engine_capture_probe();
-    if (ret) {
+    capture_result = rdx_record_engine_capture_probe();
+    if (capture_result != RDX_AUDIO_CAPTURE_OK) {
+        ret = capture_result;
         goto resume_failed;
     }
     if (rdx_record_engine_uses_capture_lease()) {
@@ -989,6 +961,7 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     spin_unlock(&rdx_record_engine.lock);
 
     memset(&audio_params, 0, sizeof(audio_params));
+    audio_params.scene = rdx_record_engine.scene;
     audio_params.format_id = rdx_record_engine.format_id;
     audio_params.mic_gain_override_valid =
         rdx_record_engine.session_mic_gain_override_valid;
@@ -1000,8 +973,9 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     audio_params.fault_callback = rdx_record_engine_audio_fault;
     audio_params.frame_priv = &rdx_record_engine;
     recorder_open_attempted = 1;
-    ret = rdx_record_engine_capture_open(&audio_params, 1);
-    if (ret) {
+    capture_result = rdx_record_engine_capture_open(&audio_params, 1);
+    if (capture_result != RDX_AUDIO_CAPTURE_OK) {
+        ret = capture_result;
         rdx_record_engine.frame_gate = 0;
         goto release_capture;
     }
@@ -1029,7 +1003,7 @@ release_capture:
 resume_failed:
     rdx_record_engine.frame_gate = 0;
     rdx_record_engine_clear_queues();
-    if (ret == -ENODEV) {
+    if (ret == RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE) {
         printf("[RDX][ENGINE] resume_source_lost request=%u session=%u\n",
                (unsigned int)request->request_id,
                (unsigned int)rdx_record_engine.session_id);
@@ -1045,12 +1019,13 @@ resume_failed:
            (unsigned int)rdx_record_engine.session_id, ret);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_RESUME_COMPLETE,
                            request->request_id,
-                           ret == -EBUSY ? RDX_RECORD_RESULT_BUSY
-                           : ret == -ENODEV
+                           ret == RDX_AUDIO_CAPTURE_BUSY
+                           ? RDX_RECORD_RESULT_BUSY
+                           : ret == RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE
                              ? RDX_RECORD_RESULT_SOURCE_LOST
                              : RDX_RECORD_RESULT_START_FAILED,
                            RDX_RECORD_TERMINATION_NONE,
-                           ret == -ENODEV
+                           ret == RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE
                            ? RDX_RECORD_CAUSE_SOURCE_LOST
                            : RDX_RECORD_CAUSE_START_FAILED);
 }

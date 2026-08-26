@@ -9,6 +9,22 @@ $earphoneInclude = Resolve-Path `
 $outputPaths = @()
 
 try {
+    $audioOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_audio_capture_contract_{0}.exe" -f `
+            [guid]::NewGuid().ToString('N'))
+    $outputPaths += $audioOutput
+    & $compiler.Source -Wall -Werror -I $moduleDir -o $audioOutput `
+        (Join-Path $testDir 'rdx_audio_capture_contract_test.c') `
+        (Join-Path $testDir 'rdx_audio_capture_fake.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX audio capture contract test compilation failed: $LASTEXITCODE"
+    }
+
+    & $audioOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX audio capture contract tests failed: $LASTEXITCODE"
+    }
+
     $contractOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
         ("rdx_transport_contract_{0}.exe" -f [guid]::NewGuid().ToString('N'))
     $outputPaths += $contractOutput

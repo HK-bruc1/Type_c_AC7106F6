@@ -8,10 +8,10 @@ int rdx_record_call_audio_br56_probe(
 int rdx_record_call_audio_br56_get_format(
     enum rdx_record_format_id *format_id);
 int rdx_record_call_audio_br56_open(
-    const struct rdx_record_audio_open_params *params);
+    const struct rdx_audio_capture_open_params *params);
 int rdx_record_call_audio_br56_pause(void);
 int rdx_record_call_audio_br56_resume(
-    const struct rdx_record_audio_open_params *params);
+    const struct rdx_audio_capture_open_params *params);
 void rdx_record_call_audio_br56_close(void);
 
 #endif

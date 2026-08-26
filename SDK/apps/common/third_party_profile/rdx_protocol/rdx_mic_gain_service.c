@@ -5,7 +5,7 @@
 #include "system/includes.h"
 #include "rdx_device_state.h"
 #include "rdx_mic_gain_service.h"
-#include "rdx_record_audio_br56.h"
+#include "rdx_mic_settings.h"
 
 int rdx_mic_gain_get_override(u8 mode, u8 *valid, u8 *gain)
 {
@@ -44,7 +44,7 @@ int rdx_mic_gain_get_configured(u8 mode, u8 *gain)
         return 0;
     }
 
-    ret = rdx_record_audio_br56_get_factory_gain(&configured_gain);
+    ret = rdx_mic_settings_get_factory_gain(&configured_gain);
     if (ret) {
         printf("[RDX][MIC_GAIN] query result=failed mode=%u source=factory ret=%d\n",
                mode, ret);

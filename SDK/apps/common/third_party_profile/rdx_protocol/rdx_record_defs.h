@@ -1,7 +1,7 @@
 #ifndef RDX_RECORD_DEFS_H
 #define RDX_RECORD_DEFS_H
 
-#include "system/includes.h"
+#include <stdint.h>
 
 #define RDX_RECORD_MEETING_V1_SAMPLE_RATE       16000
 #define RDX_RECORD_MEETING_V1_CHANNELS          1
@@ -19,7 +19,7 @@
 #define RDX_RECORD_CANDIDATE_QUEUE_DEPTH        16
 #define RDX_RECORD_CONTROL_QUEUE_DEPTH          4
 
-#define RDX_RECORD_FRAME_FIRST_AFTER_RESUME     BIT(0)
+#define RDX_RECORD_FRAME_FIRST_AFTER_RESUME     (1u << 0)
 
 enum rdx_record_format_id {
     RDX_RECORD_FORMAT_NONE = 0,
@@ -124,49 +124,53 @@ enum rdx_record_mark_source {
 };
 
 struct rdx_record_frame {
-    u32 session_id;
-    u32 capture_generation;
-    u32 session_frame_seq;
-    u32 capture_frame_seq;
-    u64 active_pts;
-    u32 duration;
-    u32 flags;
-    const u8 *payload;
-    u16 payload_len;
+    uint32_t session_id;
+    uint32_t capture_generation;
+    uint32_t session_frame_seq;
+    uint32_t capture_frame_seq;
+    uint64_t active_pts;
+    uint32_t duration;
+    uint32_t flags;
+    const uint8_t *payload;
+    uint16_t payload_len;
 };
 
 struct rdx_record_destination_ops {
-    int (*attach)(void *priv, u32 session_id, u32 capture_generation);
+    int (*attach)(void *priv, uint32_t session_id,
+                  uint32_t capture_generation);
     int (*consume)(void *priv, const struct rdx_record_frame *frame);
-    void (*poll)(void *priv, u32 session_id, u32 capture_generation);
-    void (*cancel)(void *priv, u32 session_id, u32 capture_generation);
-    void (*detach)(void *priv, u32 session_id, u32 capture_generation);
+    void (*poll)(void *priv, uint32_t session_id,
+                 uint32_t capture_generation);
+    void (*cancel)(void *priv, uint32_t session_id,
+                   uint32_t capture_generation);
+    void (*detach)(void *priv, uint32_t session_id,
+                   uint32_t capture_generation);
 };
 
 struct rdx_record_request {
-    u32 request_id;
-    u32 session_id;
+    uint32_t request_id;
+    uint32_t session_id;
     enum rdx_record_request_type type;
     enum rdx_record_controller_id controller_id;
     enum rdx_record_scene scene;
     enum rdx_record_format_id format_id;
-    u8 source;
+    uint8_t source;
     const struct rdx_record_destination_ops *destination_ops;
     void *destination_priv;
 };
 
 struct rdx_record_engine_event {
     enum rdx_record_engine_event_type type;
-    u32 request_id;
-    u32 session_id;
-    u32 capture_generation;
+    uint32_t request_id;
+    uint32_t session_id;
+    uint32_t capture_generation;
     enum rdx_record_controller_id controller_id;
     enum rdx_record_scene scene;
     enum rdx_record_result result;
     enum rdx_record_termination_mode termination_mode;
     enum rdx_record_cause cause;
-    u64 active_pts;
-    u8 source;
+    uint64_t active_pts;
+    uint8_t source;
 };
 
 typedef void (*rdx_record_engine_event_callback_t)(

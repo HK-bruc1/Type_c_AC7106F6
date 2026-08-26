@@ -31,8 +31,8 @@ struct rdx_call_audio_context {
     struct jlstream *stream;
     struct rdx_call_audio_pcm_slot queue[RDX_CALL_AUDIO_PCM_QUEUE_DEPTH];
     struct rdx_call_audio_stats stats;
-    rdx_record_audio_frame_callback_t frame_callback;
-    rdx_record_audio_fault_callback_t fault_callback;
+    rdx_audio_capture_frame_callback_t frame_callback;
+    rdx_audio_capture_fault_callback_t fault_callback;
     void *frame_priv;
     u32 engine_generation;
     u32 session_id;
@@ -139,7 +139,7 @@ static void rdx_call_audio_bridge_event(
     void *priv, enum usb_call_audio_bridge_event event)
 {
     struct rdx_call_audio_context *context = priv;
-    rdx_record_audio_fault_callback_t callback = NULL;
+    rdx_audio_capture_fault_callback_t callback = NULL;
     void *callback_priv = NULL;
 
     if (event != USB_CALL_AUDIO_BRIDGE_EVENT_SOURCE_LOST) {
@@ -158,7 +158,7 @@ static void rdx_call_audio_bridge_event(
 
 static int rdx_call_audio_ai_tx(u8 *data, u32 len)
 {
-    rdx_record_audio_frame_callback_t callback;
+    rdx_audio_capture_frame_callback_t callback;
     void *priv;
     u32 engine_generation;
     u32 session_id;
@@ -202,7 +202,7 @@ int rdx_record_call_audio_br56_get_format(
 }
 
 int rdx_record_call_audio_br56_open(
-    const struct rdx_record_audio_open_params *params)
+    const struct rdx_audio_capture_open_params *params)
 {
     struct stream_enc_fmt stream_fmt = {
         .channel = RDX_RECORD_CALL_V1_CHANNELS,
@@ -340,7 +340,7 @@ int rdx_record_call_audio_br56_pause(void)
 }
 
 int rdx_record_call_audio_br56_resume(
-    const struct rdx_record_audio_open_params *params)
+    const struct rdx_audio_capture_open_params *params)
 {
     return rdx_record_call_audio_br56_open(params);
 }

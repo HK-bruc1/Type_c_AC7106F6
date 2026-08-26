@@ -31,7 +31,7 @@ struct rdx_record_audio_br56_runtime {
     u32 engine_generation;
     u32 session_id;
     u32 capture_generation;
-    rdx_record_audio_frame_callback_t frame_callback;
+    rdx_audio_capture_frame_callback_t frame_callback;
     void *frame_priv;
 };
 
@@ -140,7 +140,7 @@ static void rdx_record_audio_br56_clear_locked(void)
 static int rdx_record_audio_br56_prepare_mic_gain(
     struct jlstream *stream,
     const struct adc_file_cfg *adc_cfg,
-    const struct rdx_record_audio_open_params *params,
+    const struct rdx_audio_capture_open_params *params,
     const char *node_name)
 {
     int ret = jlstream_node_ioctl(stream, NODE_UUID_SOURCE,
@@ -166,7 +166,7 @@ static int rdx_record_audio_br56_prepare_mic_gain(
 
 static int rdx_record_audio_br56_ai_tx(u8 *data, u32 len)
 {
-    rdx_record_audio_frame_callback_t callback;
+    rdx_audio_capture_frame_callback_t callback;
     void *priv;
     u32 engine_generation;
     u32 session_id;
@@ -189,7 +189,7 @@ static int rdx_record_audio_br56_ai_tx(u8 *data, u32 len)
 }
 
 int rdx_record_audio_br56_open(
-    const struct rdx_record_audio_open_params *params)
+    const struct rdx_audio_capture_open_params *params)
 {
     struct adc_file_cfg adc_cfg;
     char adc_node_name[16] = {0};

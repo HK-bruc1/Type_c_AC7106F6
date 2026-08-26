@@ -11,17 +11,17 @@ enum rdx_session_mark_result {
 };
 
 struct rdx_session_mark {
-    u32 session_id;
-    u32 offset_ms;
-    u8 index;
-    u8 source;
-    u8 result;
+    uint32_t session_id;
+    uint32_t offset_ms;
+    uint8_t index;
+    uint8_t source;
+    uint8_t result;
 };
 
-void rdx_session_metadata_begin(u32 session_id);
-void rdx_session_metadata_end(u32 session_id);
+void rdx_session_metadata_begin(uint32_t session_id);
+void rdx_session_metadata_end(uint32_t session_id);
 void rdx_session_metadata_apply_mark(
-    u32 session_id, u64 active_pts, u8 source,
+    uint32_t session_id, uint64_t active_pts, uint8_t source,
     enum rdx_record_result engine_result,
     struct rdx_session_mark *mark);
 
