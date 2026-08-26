@@ -10,6 +10,7 @@
 #include "rdx_mvp0_compat_config.h"
 #include "rdx_mvp0_protocol.h"
 #include "rdx_platform_br56.h"
+#include "rdx_protocol_session.h"
 #include "rdx_protocol_defs.h"
 #include "rdx_transport.h"
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
@@ -70,11 +71,7 @@ typedef enum {
 } rdx_post_ack_action_t;
 
 typedef struct {
-    u32 transport_generation;
-    u8 connected;
-    u8 identity_read;
-    u8 ccc_ready;
-    u8 app_ready;
+    struct rdx_protocol_session session;
     u8 state_transition_pending;
     u8 post_ack_action;
     u16 post_ack_timer_id;
@@ -131,7 +128,7 @@ static void rdx_mvp0_log_rx(const char *command, const u8 *data, u16 len)
 {
     printf("[RDX][RX] cmd=%s wire=%.*s len=%u app_ready=%u\n",
            command, (int)len, (char *)data,
-           len, rdx_mvp0_state.app_ready);
+           len, rdx_mvp0_state.session.authenticated);
 }
 
 static void rdx_mvp0_bytes_to_hex(const u8 *data, u16 len,
@@ -168,7 +165,7 @@ static u8 rdx_mvp0_data_starts_with(const u8 *data, u16 len,
 
 static int rdx_mvp0_send(const u8 *data, u16 len)
 {
-    if (!rdx_mvp0_state.connected || !rdx_mvp0_state.ccc_ready) {
+    if (!rdx_protocol_session_can_send(&rdx_mvp0_state.session)) {
         return RDX_TRANSPORT_UNAVAILABLE;
     }
     return rdx_transport_send(data, len);
@@ -528,8 +525,8 @@ static void rdx_mvp0_record_engine_event(
             }
             rdx_transport_set_record_streaming(0);
             if (!wait_for_stop && !connection_invalid
-                && rdx_mvp0_state.connected
-                && rdx_mvp0_state.ccc_ready) {
+                && rdx_protocol_session_can_send(
+                    &rdx_mvp0_state.session)) {
                 rdx_mvp0_record_send_state(0);
             }
             printf("[RDX][ONLINE] start_failed request=%u result=%u\n",
@@ -634,7 +631,8 @@ static void rdx_mvp0_record_engine_event(
 #if RDX_CFG_RECORD_MARK_ENABLE
         rdx_session_metadata_end(event->session_id);
 #endif
-        if (notify && rdx_mvp0_state.connected && rdx_mvp0_state.ccc_ready) {
+        if (notify && rdx_protocol_session_can_send(
+                &rdx_mvp0_state.session)) {
             rdx_mvp0_record_send_state(0);
         }
         printf("[RDX][ONLINE] stopped session=%u mode=%u cause=%u"
@@ -989,7 +987,7 @@ static int rdx_mvp0_send_ble_name_result(u8 query, u8 result)
 
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len)
 {
-    if (rdx_mvp0_state.app_ready) {
+    if (rdx_protocol_session_is_ready(&rdx_mvp0_state.session)) {
         return 1;
     }
 
@@ -1094,7 +1092,7 @@ static void rdx_mvp0_post_ack_timeout(void *priv)
     rdx_mvp0_state.state_transition_pending = 0;
     rdx_mvp0_state.post_ack_action = RDX_POST_ACK_ACTION_NONE;
     rdx_mvp0_state.post_ack_timer_id = 0;
-    if (!rdx_mvp0_state.connected) {
+    if (!rdx_mvp0_state.session.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive\n",
                rdx_mvp0_post_ack_action_name(action));
         return;
@@ -1109,7 +1107,7 @@ static void rdx_mvp0_schedule_post_ack_disconnect(u8 action, int ack_ret)
 {
     u16 timer_id;
 
-    if (!rdx_mvp0_state.connected) {
+    if (!rdx_mvp0_state.session.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive ack_ret=%d\n",
                rdx_mvp0_post_ack_action_name(action), ack_ret);
         return;
@@ -1494,7 +1492,7 @@ static void rdx_mvp0_handle_appkey(const u8 *data, u16 len)
 
     if (len != request_len || data[len - 1] != '#') {
         printf("[RDX][RX] cmd=appkey len=%u app_ready=%u\n",
-               len, rdx_mvp0_state.app_ready);
+               len, rdx_mvp0_state.session.authenticated);
         printf("[RDX][DROP] cmd=appkey reason=malformed len=%u\n", len);
         goto reject;
     }
@@ -1514,13 +1512,13 @@ static void rdx_mvp0_handle_appkey(const u8 *data, u16 len)
                           sizeof(appkey_plaintext_hex));
     printf("[RDX][RX] cmd=appkey wire_payload=%s appkey=%s appkey_hex=%s len=%u app_ready=%u\n",
            appkey_hex, appkey_plaintext, appkey_plaintext_hex,
-           len, rdx_mvp0_state.app_ready);
+           len, rdx_mvp0_state.session.authenticated);
     if (result) {
         printf("[RDX][AUTH] verify=failed\n");
         goto reject;
     }
 
-    if (!rdx_mvp0_state.ccc_ready) {
+    if (!rdx_mvp0_state.session.ccc_ready) {
         printf("[RDX][AUTH] verify=ok state=invalid ccc=0\n");
         goto reject;
     }
@@ -1529,8 +1527,13 @@ static void rdx_mvp0_handle_appkey(const u8 *data, u16 len)
     printf("[RDX][TX] cmd=appkey wire=%s len=%u ret=%d\n",
            (char *)success, (unsigned int)(sizeof(success) - 1), result);
     if (!result) {
-        rdx_mvp0_state.app_ready = 1;
-        printf("[RDX][AUTH] verify=ok app_ready=1\n");
+        if (!rdx_protocol_session_mark_authenticated(
+                &rdx_mvp0_state.session)) {
+            printf("[RDX][AUTH] verify=ok app_ready=1\n");
+            return;
+        }
+        printf("[RDX][AUTH] verify=ok state=invalid_after_ack\n");
+        rdx_transport_disconnect();
         return;
     }
     printf("[RDX][AUTH] verify=ok ack=failed ret=%d\n", result);
@@ -1627,8 +1630,7 @@ void rdx_mvp0_protocol_exit(void)
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 }
 
-static void rdx_mvp0_protocol_set_connected(u8 connected,
-                                            u32 transport_generation)
+static void rdx_mvp0_protocol_handle_link_change(u8 connected)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (!connected) {
@@ -1644,27 +1646,14 @@ static void rdx_mvp0_protocol_set_connected(u8 connected,
 #endif
     rdx_mvp0_cancel_post_ack_action(connected ? "new_connection"
                                               : "link_disconnected");
-    memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
-    rdx_mvp0_state.connected = !!connected;
-    if (rdx_mvp0_state.connected) {
-        rdx_mvp0_state.transport_generation = transport_generation;
-    }
     printf("[RDX][SESSION] link=%s app_ready=0\n",
-           rdx_mvp0_state.connected ? "connected" : "disconnected");
+           connected ? "connected" : "disconnected");
 }
 
-static void rdx_mvp0_protocol_set_identity_read(void)
-{
-    if (rdx_mvp0_state.connected && !rdx_mvp0_state.identity_read) {
-        rdx_mvp0_state.identity_read = 1;
-        printf("[RDX][GATT] identity=read\n");
-    }
-}
-
-static void rdx_mvp0_protocol_set_ccc(u8 enabled)
+static void rdx_mvp0_protocol_handle_ccc_change(void)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
-    if (!enabled) {
+    if (!rdx_mvp0_state.session.ccc_ready) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
             rdx_transport_set_record_streaming(0);
@@ -1675,12 +1664,9 @@ static void rdx_mvp0_protocol_set_ccc(u8 enabled)
             RDX_RECORD_CAUSE_CCC_OFF);
     }
 #endif
-    rdx_mvp0_state.ccc_ready = !!enabled;
-    if (!rdx_mvp0_state.ccc_ready) {
-        rdx_mvp0_state.app_ready = 0;
-    }
     printf("[RDX][SESSION] ccc=%u app_ready=%u\n",
-           rdx_mvp0_state.ccc_ready, rdx_mvp0_state.app_ready);
+           rdx_mvp0_state.session.ccc_ready,
+           rdx_mvp0_state.session.authenticated);
 }
 
 static void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
@@ -1798,40 +1784,31 @@ static void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
 void rdx_mvp0_protocol_handle_transport_event(
     const struct rdx_transport_event *event, void *context)
 {
+    enum rdx_protocol_session_event_result result;
+
     (void)context;
 
-    if (!event || !event->connection_generation) {
-        return;
-    }
+    result = rdx_protocol_session_handle_event(
+        &rdx_mvp0_state.session, event);
 
-    if (event->type == RDX_TRANSPORT_EVENT_CONNECTED) {
-        rdx_mvp0_protocol_set_connected(
-            1, event->connection_generation);
-        return;
-    }
-
-    if (!rdx_mvp0_state.connected
-        || event->connection_generation !=
-            rdx_mvp0_state.transport_generation) {
-        return;
-    }
-
-    switch (event->type) {
-    case RDX_TRANSPORT_EVENT_LINK_LOST:
-        rdx_mvp0_protocol_set_connected(
-            0, event->connection_generation);
+    switch (result) {
+    case RDX_PROTOCOL_SESSION_EVENT_CONNECTED:
+        rdx_mvp0_protocol_handle_link_change(1);
         break;
-    case RDX_TRANSPORT_EVENT_IDENTITY_READ:
-        rdx_mvp0_protocol_set_identity_read();
+    case RDX_PROTOCOL_SESSION_EVENT_LINK_LOST:
+        rdx_mvp0_protocol_handle_link_change(0);
         break;
-    case RDX_TRANSPORT_EVENT_CCC_CHANGED:
-        rdx_mvp0_protocol_set_ccc(event->data.ccc_enabled);
+    case RDX_PROTOCOL_SESSION_EVENT_IDENTITY_READ:
+        printf("[RDX][GATT] identity=read\n");
         break;
-    case RDX_TRANSPORT_EVENT_RX:
+    case RDX_PROTOCOL_SESSION_EVENT_CCC_CHANGED:
+        rdx_mvp0_protocol_handle_ccc_change();
+        break;
+    case RDX_PROTOCOL_SESSION_EVENT_RX:
         rdx_mvp0_protocol_receive(event->data.rx.data,
                                   event->data.rx.len);
         break;
-    case RDX_TRANSPORT_EVENT_CAN_SEND_NOW:
+    case RDX_PROTOCOL_SESSION_EVENT_CAN_SEND_NOW:
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
         rdx_record_engine_notify_destination_ready(
             event->data.can_send.session_id,
