@@ -8,8 +8,8 @@
 #include "rdx_device_management.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_protocol.h"
-#include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
+#include "rdx_system_actions.h"
 #include "rdx_transport.h"
 #include "rdx_transport_fake.h"
 
@@ -101,7 +101,7 @@ const char *rdx_identity_get_label_sn(void)
     return "0000000000000000";
 }
 
-int rdx_platform_get_auto_off_time_minutes(u32 *minutes)
+int rdx_system_action_get_auto_off_time_minutes(uint32_t *minutes)
 {
     if (!minutes) {
         return -1;
@@ -137,6 +137,7 @@ static void test_protocol_transport_sequence(void)
 {
     static const uint8_t ping[] = "RDX_MVP0_PING";
     static const uint8_t auth_sn[] = "*APP#authsn#";
+    static const uint8_t offtime_check[] = "*APP#cofftime#";
     uint8_t appkey_request[64];
     const struct rdx_transport_fake_state *fake;
     uint16_t appkey_len;
@@ -174,6 +175,11 @@ static void test_protocol_transport_sequence(void)
     assert(fake->accepted_len > strlen("*DEV#authsn#"));
     assert(!memcmp(fake->accepted_data, "*DEV#authsn#",
                    strlen("*DEV#authsn#")));
+
+    rdx_transport_fake_receive(first_generation,
+                               offtime_check,
+                               sizeof(offtime_check) - 1);
+    assert_last_tx("*DEV#cofftime#0#0#");
 
     rdx_transport_fake_set_ccc(first_generation, 0);
     accepted_before = fake->accepted_count;

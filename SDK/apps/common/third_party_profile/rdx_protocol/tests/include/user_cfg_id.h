@@ -1,0 +1,6 @@
+#ifndef RDX_HOST_TEST_USER_CFG_ID_H
+#define RDX_HOST_TEST_USER_CFG_ID_H
+
+#define CFG_RDX_DEVICE_STATE 15
+
+#endif

@@ -9,9 +9,9 @@
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
 #include "rdx_mvp0_protocol.h"
-#include "rdx_platform_br56.h"
 #include "rdx_protocol_session.h"
 #include "rdx_protocol_defs.h"
+#include "rdx_system_actions.h"
 #include "rdx_transport.h"
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx_record_engine.h"
@@ -945,7 +945,7 @@ static void rdx_mvp0_send_offtime_check(void)
     int len;
     int ret;
 
-    result = rdx_platform_get_auto_off_time_minutes(&minutes) ? 1 : 0;
+    result = rdx_system_action_get_auto_off_time_minutes(&minutes) ? 1 : 0;
     len = snprintf((char *)response, sizeof(response),
                    RDX_CMD_UP_OFFTIME_CHECK "%d#%u#",
                    (int)result, (unsigned int)minutes);

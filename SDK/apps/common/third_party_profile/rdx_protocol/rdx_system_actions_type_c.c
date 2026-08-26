@@ -2,10 +2,9 @@
 
 #if TCFG_RDX_ENABLE
 
-#include "system/includes.h"
-#include "rdx_platform_br56.h"
+#include "rdx_system_actions.h"
 
-int rdx_platform_get_auto_off_time_minutes(u32 *minutes)
+int rdx_system_action_get_auto_off_time_minutes(uint32_t *minutes)
 {
     if (!minutes) {
         return -1;

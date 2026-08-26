@@ -9,6 +9,45 @@ $earphoneInclude = Resolve-Path `
 $outputPaths = @()
 
 try {
+    $stateServiceOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_device_state_service_{0}.exe" -f `
+            [guid]::NewGuid().ToString('N'))
+    $outputPaths += $stateServiceOutput
+    & $compiler.Source -Wall -Werror `
+        -I (Join-Path $testDir 'include') `
+        -I $moduleDir `
+        -o $stateServiceOutput `
+        (Join-Path $testDir 'rdx_device_state_service_test.c') `
+        (Join-Path $testDir 'rdx_device_state_repository_fake.c') `
+        (Join-Path $moduleDir 'rdx_device_state.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX device state service test compilation failed: $LASTEXITCODE"
+    }
+
+    & $stateServiceOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX device state service tests failed: $LASTEXITCODE"
+    }
+
+    $stateRepositoryOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_device_state_repository_br56_{0}.exe" -f `
+            [guid]::NewGuid().ToString('N'))
+    $outputPaths += $stateRepositoryOutput
+    & $compiler.Source -Wall -Werror `
+        -I (Join-Path $testDir 'include') `
+        -I $moduleDir `
+        -o $stateRepositoryOutput `
+        (Join-Path $testDir 'rdx_device_state_repository_br56_test.c') `
+        (Join-Path $moduleDir 'rdx_device_state_repository_br56.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 device state repository test compilation failed: $LASTEXITCODE"
+    }
+
+    & $stateRepositoryOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 device state repository tests failed: $LASTEXITCODE"
+    }
+
     $audioOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
         ("rdx_audio_capture_contract_{0}.exe" -f `
             [guid]::NewGuid().ToString('N'))

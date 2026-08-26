@@ -13,5 +13,7 @@ typedef int32_t s32;
 
 u16 sys_timeout_add(void *priv, void (*callback)(void *), u32 timeout_ms);
 void sys_timeout_del(u16 timer_id);
+int syscfg_read(unsigned int id, void *buffer, unsigned int len);
+int syscfg_write(unsigned int id, const void *buffer, unsigned int len);
 
 #endif
