@@ -5,10 +5,10 @@
 #include "system/includes.h"
 #include "rdx_protocol_entry.h"
 #include "rdx_ble_name.h"
-#include "rdx_ble_transport_br56.h"
 #include "rdx_device_state.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_protocol.h"
+#include "rdx_transport.h"
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx_record_engine.h"
 #endif
@@ -48,13 +48,13 @@ int rdx_protocol_start(void)
         return ret;
     }
 #endif
-    ret = rdx_mvp0_protocol_init(rdx_ble_transport_send,
-                                 rdx_ble_transport_disconnect);
+    ret = rdx_mvp0_protocol_init();
     if (ret) {
         rdx_device_state_exit();
         return ret;
     }
-    ret = rdx_ble_transport_init();
+    ret = rdx_transport_init(rdx_mvp0_protocol_handle_transport_event,
+                             NULL);
     if (ret) {
         rdx_mvp0_protocol_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
@@ -85,7 +85,7 @@ void rdx_protocol_stop(void)
         return;
     }
 #endif
-    rdx_ble_transport_exit();
+    rdx_transport_exit();
     rdx_device_state_exit();
     rdx_protocol_started = 0;
     printf("[RDX] MVP0 stopped\n");

@@ -9,13 +9,9 @@
 #include "btstack/le/att.h"
 #include "btstack/le/ble_api.h"
 #include "rdx_ble_name.h"
-#include "rdx_ble_transport_br56.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
-#include "rdx_mvp0_protocol.h"
-#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
-#include "rdx_record_engine.h"
-#endif
+#include "rdx_transport.h"
 
 #define RDX_HANDLE_GAP_NAME                   0x0003
 #define RDX_HANDLE_RX                         0x0006
@@ -33,6 +29,39 @@
 #define RDX_RECORD_CONN_INTERVAL_MAX          6
 #define RDX_RECORD_DLE_TX_OCTETS              251
 #define RDX_RECORD_DLE_TX_TIME                2120
+#define RDX_BLE_APP_SEND_RET_SLOTS               4
+
+struct rdx_ble_app_send_ret_stat {
+    int code;
+    u32 count;
+};
+
+struct rdx_ble_transport_tx_stats {
+    u32 unavailable_count;
+    u32 valid_len_busy_count;
+    u32 app_send_ok_count;
+    u32 app_send_error_count;
+    u32 app_send_ret_overflow_count;
+    u32 can_send_request_count;
+    u32 can_send_event_count;
+    u32 can_send_ready_count;
+    u32 can_send_coalesced_count;
+    u32 can_send_timeout_rearm_count;
+    u32 spurious_event_count;
+    u32 valid_len_sample_count;
+    u16 valid_len_min;
+    u16 valid_len_max;
+    u16 mtu;
+    u16 conn_interval;
+    u16 conn_latency;
+    u16 dle_tx_octets;
+    u16 dle_tx_time;
+    u8 tx_phy;
+    u8 rx_phy;
+    u8 can_send_pending;
+    struct rdx_ble_app_send_ret_stat
+        app_send_ret[RDX_BLE_APP_SEND_RET_SLOTS];
+};
 
 static const struct conn_update_param_t rdx_record_conn_param = {
     RDX_RECORD_CONN_INTERVAL_MIN,
@@ -61,6 +90,8 @@ typedef struct {
     u32 can_send_session_id;
     u32 can_send_capture_generation;
     u32 can_send_request_ms;
+    rdx_transport_event_callback_t event_callback;
+    void *event_context;
     struct rdx_ble_transport_tx_stats tx_stats;
 } rdx_ble_transport_t;
 
@@ -70,6 +101,15 @@ static u32 rdx_ble_next_generation(u32 generation)
 {
     generation++;
     return generation ? generation : 1;
+}
+
+static void rdx_ble_emit_event(struct rdx_transport_event *event)
+{
+    if (!event || !rdx_ble.event_callback) {
+        return;
+    }
+    event->connection_generation = rdx_ble.connection_generation;
+    rdx_ble.event_callback(event, rdx_ble.event_context);
 }
 
 static void rdx_ble_clear_can_send_locked(void)
@@ -284,6 +324,7 @@ static int rdx_ble_adv_enable(u8 enable)
 
 static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *packet, u16 size)
 {
+    struct rdx_transport_event transport_event;
     u8 event_type;
     u8 subevent;
     u16 con_handle;
@@ -315,7 +356,9 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.tx_phy = 1;
             rdx_ble.rx_phy = 1;
             rdx_ble.tx_ccc = 0;
-            rdx_mvp0_protocol_set_connected(1);
+            memset(&transport_event, 0, sizeof(transport_event));
+            transport_event.type = RDX_TRANSPORT_EVENT_CONNECTED;
+            rdx_ble_emit_event(&transport_event);
             att_server_set_exchange_mtu(con_handle);
             printf("[RDX] connected handle=%04x interval=%u latency=%u"
                    " timeout=%u\n",
@@ -410,8 +453,12 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
         spin_unlock(&rdx_ble.tx_lock);
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
         if (ready) {
-            rdx_record_engine_notify_destination_ready(
-                session_id, capture_generation);
+            memset(&transport_event, 0, sizeof(transport_event));
+            transport_event.type = RDX_TRANSPORT_EVENT_CAN_SEND_NOW;
+            transport_event.data.can_send.session_id = session_id;
+            transport_event.data.can_send.capture_generation =
+                capture_generation;
+            rdx_ble_emit_event(&transport_event);
         }
 #endif
         break;
@@ -430,7 +477,9 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.con_handle = 0;
             rdx_ble_clear_can_send();
             rdx_ble.tx_ccc = 0;
-            rdx_mvp0_protocol_set_connected(0);
+            memset(&transport_event, 0, sizeof(transport_event));
+            transport_event.type = RDX_TRANSPORT_EVENT_LINK_LOST;
+            rdx_ble_emit_event(&transport_event);
             if (rdx_ble.initialized) {
                 rdx_ble_adv_enable(1);
             }
@@ -445,11 +494,16 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
 static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_handle,
                                      u16 offset, u8 *buffer, u16 buffer_size)
 {
+    struct rdx_transport_event transport_event;
     const u8 *data = NULL;
     const char *name;
     u16 data_len = 0;
     u16 ccc;
     u8 value[2];
+
+    if (!rdx_ble.con_handle || connection_handle != rdx_ble.con_handle) {
+        return 0;
+    }
 
     switch (att_handle) {
     case RDX_HANDLE_GAP_NAME:
@@ -460,7 +514,9 @@ static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_h
 
     case RDX_HANDLE_IDENTITY:
         data_len = rdx_identity_get_read_value(&data);
-        rdx_mvp0_protocol_set_identity_read();
+        memset(&transport_event, 0, sizeof(transport_event));
+        transport_event.type = RDX_TRANSPORT_EVENT_IDENTITY_READ;
+        rdx_ble_emit_event(&transport_event);
         break;
 
     case RDX_HANDLE_BATTERY:
@@ -489,15 +545,23 @@ static u16 rdx_ble_att_read_callback(void *hdl, u16 connection_handle, u16 att_h
 static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_handle,
                                       u16 transaction_mode, u16 offset, u8 *buffer, u16 buffer_size)
 {
+    struct rdx_transport_event transport_event;
     u16 ccc;
 
     if (!buffer || !buffer_size) {
         return 0;
     }
+    if (!rdx_ble.con_handle || connection_handle != rdx_ble.con_handle) {
+        return 0;
+    }
 
     switch (att_handle) {
     case RDX_HANDLE_RX:
-        rdx_mvp0_protocol_receive(buffer, buffer_size);
+        memset(&transport_event, 0, sizeof(transport_event));
+        transport_event.type = RDX_TRANSPORT_EVENT_RX;
+        transport_event.data.rx.data = buffer;
+        transport_event.data.rx.len = buffer_size;
+        rdx_ble_emit_event(&transport_event);
         break;
 
     case RDX_HANDLE_TX_CCC:
@@ -513,7 +577,10 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
             if (!rdx_ble.tx_ccc) {
                 rdx_ble_clear_can_send();
             }
-            rdx_mvp0_protocol_set_ccc(rdx_ble.tx_ccc);
+            memset(&transport_event, 0, sizeof(transport_event));
+            transport_event.type = RDX_TRANSPORT_EVENT_CCC_CHANGED;
+            transport_event.data.ccc_enabled = rdx_ble.tx_ccc;
+            rdx_ble_emit_event(&transport_event);
             printf("[RDX] tx ccc=%u\n", rdx_ble.tx_ccc);
         }
         break;
@@ -528,16 +595,24 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
     return 0;
 }
 
-int rdx_ble_transport_init(void)
+int rdx_transport_init(rdx_transport_event_callback_t event_callback,
+                       void *context)
 {
     int ret;
 
+    if (!event_callback) {
+        return -1;
+    }
     if (rdx_ble.hdl) {
+        rdx_ble.event_callback = event_callback;
+        rdx_ble.event_context = context;
         return 0;
     }
 
     memset(&rdx_ble, 0, sizeof(rdx_ble));
     spin_lock_init(&rdx_ble.tx_lock);
+    rdx_ble.event_callback = event_callback;
+    rdx_ble.event_context = context;
 
     rdx_ble.hdl = app_ble_hdl_alloc();
     if (!rdx_ble.hdl) {
@@ -565,7 +640,7 @@ int rdx_ble_transport_init(void)
     return 0;
 }
 
-void rdx_ble_transport_exit(void)
+void rdx_transport_exit(void)
 {
     if (!rdx_ble.hdl) {
         return;
@@ -573,23 +648,27 @@ void rdx_ble_transport_exit(void)
 
     rdx_ble.initialized = 0;
     rdx_ble_adv_enable(0);
-    rdx_ble_transport_disconnect();
+    rdx_transport_disconnect();
     app_ble_hdl_free(rdx_ble.hdl);
     memset(&rdx_ble, 0, sizeof(rdx_ble));
 }
 
-int rdx_ble_transport_send(const u8 *data, u16 len)
+enum rdx_transport_result rdx_transport_send(
+    const uint8_t *data, uint16_t len)
 {
     int valid_len;
     int ret;
 
-    if (!rdx_ble.hdl || !rdx_ble.con_handle || !rdx_ble.tx_ccc || !data || !len) {
+    if (!data || !len) {
+        return RDX_TRANSPORT_FATAL;
+    }
+    if (!rdx_ble.hdl || !rdx_ble.con_handle || !rdx_ble.tx_ccc) {
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
         if (rdx_ble.record_streaming) {
             rdx_ble.tx_stats.unavailable_count++;
         }
 #endif
-        return -1;
+        return RDX_TRANSPORT_UNAVAILABLE;
     }
 
     valid_len = app_ble_att_vaild_len_get(rdx_ble.hdl);
@@ -613,7 +692,7 @@ int rdx_ble_transport_send(const u8 *data, u16 len)
             rdx_ble.tx_stats.valid_len_busy_count++;
         }
 #endif
-        return -2;
+        return RDX_TRANSPORT_RETRYABLE;
     }
 
     ret = app_ble_att_send_data(rdx_ble.hdl, RDX_HANDLE_TX, (u8 *)data,
@@ -628,11 +707,20 @@ int rdx_ble_transport_send(const u8 *data, u16 len)
         }
     }
 #endif
-    return ret;
+    if (!ret) {
+        return RDX_TRANSPORT_ACCEPTED;
+    }
+    if (ret == BLE_CMD_RET_BUSY || ret == BLE_BUFFER_FULL) {
+        return RDX_TRANSPORT_RETRYABLE;
+    }
+    if (ret == BLE_CMD_STACK_NOT_RUN || ret == BLE_CMD_CCC_FAIL) {
+        return RDX_TRANSPORT_UNAVAILABLE;
+    }
+    return RDX_TRANSPORT_FATAL;
 }
 
-int rdx_ble_transport_request_can_send_now(
-    u32 session_id, u32 capture_generation)
+int rdx_transport_request_can_send_now(
+    uint32_t session_id, uint32_t capture_generation)
 {
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
     u16 con_handle;
@@ -685,7 +773,7 @@ int rdx_ble_transport_request_can_send_now(
 #endif
 }
 
-int rdx_ble_transport_set_record_streaming(u8 enabled)
+int rdx_transport_set_record_streaming(uint8_t enabled)
 {
     spin_lock(&rdx_ble.tx_lock);
     rdx_ble.record_streaming = !!enabled;
@@ -699,7 +787,7 @@ int rdx_ble_transport_set_record_streaming(u8 enabled)
     return rdx_ble_request_record_conn_param("record_start");
 }
 
-void rdx_ble_transport_tx_stats_reset(void)
+void rdx_transport_tx_diagnostics_reset(void)
 {
     spin_lock(&rdx_ble.tx_lock);
     memset(&rdx_ble.tx_stats, 0, sizeof(rdx_ble.tx_stats));
@@ -707,7 +795,8 @@ void rdx_ble_transport_tx_stats_reset(void)
     spin_unlock(&rdx_ble.tx_lock);
 }
 
-void rdx_ble_transport_tx_stats_get(
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+static void rdx_ble_tx_stats_get(
     struct rdx_ble_transport_tx_stats *stats)
 {
     if (!stats) {
@@ -726,8 +815,51 @@ void rdx_ble_transport_tx_stats_get(
     stats->tx_phy = rdx_ble.tx_phy;
     stats->rx_phy = rdx_ble.rx_phy;
 }
+#endif
 
-int rdx_ble_transport_refresh_local_name(void)
+void rdx_transport_tx_diagnostics_log(void)
+{
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+    struct rdx_ble_transport_tx_stats stats;
+    u8 i;
+
+    rdx_ble_tx_stats_get(&stats);
+    printf("[RDX][TXQ] ble unavailable=%u busy_valid_len=%u"
+           " app_ok=%u app_error=%u valid_samples=%u"
+           " valid_min=%u valid_max=%u\n",
+           (unsigned int)stats.unavailable_count,
+           (unsigned int)stats.valid_len_busy_count,
+           (unsigned int)stats.app_send_ok_count,
+           (unsigned int)stats.app_send_error_count,
+           (unsigned int)stats.valid_len_sample_count,
+           stats.valid_len_min, stats.valid_len_max);
+    printf("[RDX][TXQ] can_req=%u can_evt=%u spurious_evt=%u"
+           " can_ready=%u can_coalesced=%u timeout_rearm=%u pending=%u"
+           "\n",
+           (unsigned int)stats.can_send_request_count,
+           (unsigned int)stats.can_send_event_count,
+           (unsigned int)stats.spurious_event_count,
+           (unsigned int)stats.can_send_ready_count,
+           (unsigned int)stats.can_send_coalesced_count,
+           (unsigned int)stats.can_send_timeout_rearm_count,
+           stats.can_send_pending);
+    printf("[RDX][TXQ] mtu=%u interval=%u latency=%u phy=%u/%u"
+           " dle=%u/%u ret_overflow=%u\n",
+           stats.mtu, stats.conn_interval,
+           stats.conn_latency, stats.tx_phy, stats.rx_phy,
+           stats.dle_tx_octets, stats.dle_tx_time,
+           (unsigned int)stats.app_send_ret_overflow_count);
+    for (i = 0; i < RDX_BLE_APP_SEND_RET_SLOTS; i++) {
+        if (stats.app_send_ret[i].count) {
+            printf("[RDX][TXQ] app_ret code=%d count=%u\n",
+                   stats.app_send_ret[i].code,
+                   (unsigned int)stats.app_send_ret[i].count);
+        }
+    }
+#endif
+}
+
+int rdx_transport_refresh_local_name(void)
 {
     int adv_enabled;
     int ret;
@@ -756,16 +888,11 @@ int rdx_ble_transport_refresh_local_name(void)
     return ret;
 }
 
-void rdx_ble_transport_disconnect(void)
+void rdx_transport_disconnect(void)
 {
     if (rdx_ble.hdl && app_ble_get_hdl_con_handle(rdx_ble.hdl)) {
         app_ble_disconnect(rdx_ble.hdl);
     }
-}
-
-u8 rdx_ble_transport_is_connected(void)
-{
-    return rdx_ble.con_handle != 0;
 }
 
 #endif

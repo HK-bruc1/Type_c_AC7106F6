@@ -5,13 +5,13 @@
 #include "system/includes.h"
 #include "rdx_appkey_verifier.h"
 #include "rdx_ble_name.h"
-#include "rdx_ble_transport_br56.h"
 #include "rdx_device_management.h"
 #include "rdx_identity.h"
 #include "rdx_mvp0_compat_config.h"
 #include "rdx_mvp0_protocol.h"
 #include "rdx_platform_br56.h"
 #include "rdx_protocol_defs.h"
+#include "rdx_transport.h"
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx_record_engine.h"
 #endif
@@ -63,9 +63,6 @@ static const char *const rdx_mvp0_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
 };
 
-static rdx_mvp0_send_callback_t rdx_mvp0_send_callback;
-static rdx_mvp0_disconnect_callback_t rdx_mvp0_disconnect_callback;
-
 typedef enum {
     RDX_POST_ACK_ACTION_NONE = 0,
     RDX_POST_ACK_ACTION_UNBOUND,
@@ -73,6 +70,7 @@ typedef enum {
 } rdx_post_ack_action_t;
 
 typedef struct {
+    u32 transport_generation;
     u8 connected;
     u8 identity_read;
     u8 ccc_ready;
@@ -170,11 +168,10 @@ static u8 rdx_mvp0_data_starts_with(const u8 *data, u16 len,
 
 static int rdx_mvp0_send(const u8 *data, u16 len)
 {
-    if (!rdx_mvp0_state.connected || !rdx_mvp0_state.ccc_ready
-        || !rdx_mvp0_send_callback) {
-        return -1;
+    if (!rdx_mvp0_state.connected || !rdx_mvp0_state.ccc_ready) {
+        return RDX_TRANSPORT_UNAVAILABLE;
     }
-    return rdx_mvp0_send_callback(data, len);
+    return rdx_transport_send(data, len);
 }
 
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
@@ -290,7 +287,7 @@ static int rdx_mvp0_record_drain_queue(u8 budget)
         if (sent_now >= budget) {
             rdx_online_record.budget_hit_count++;
         }
-        if (rdx_ble_transport_request_can_send_now(
+        if (rdx_transport_request_can_send_now(
                 rdx_online_record.session_id,
                 rdx_online_record.capture_generation)) {
             rdx_online_record.arm_fail_count++;
@@ -307,15 +304,12 @@ static void rdx_mvp0_record_log_final(const char *reason)
     }
     rdx_online_record.final_stats_logged = 1;
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
-    struct rdx_ble_transport_tx_stats ble_stats;
     u32 accounted;
-    u8 i;
 
     accounted = rdx_online_record.sent_count
                 + rdx_online_record.queue_drop_count
                 + rdx_online_record.cancel_discard_count
                 + rdx_online_record.tx_count;
-    rdx_ble_transport_tx_stats_get(&ble_stats);
 
     printf("[RDX][TXQ] final reason=%s session=%u capture=%u"
            " destination_in=%u sent=%u pending=%u tx_drop=%u"
@@ -334,31 +328,6 @@ static void rdx_mvp0_record_log_final(const char *reason)
            (unsigned int)rdx_online_record.queued_count,
            rdx_online_record.tx_peak,
            (unsigned int)rdx_online_record.send_fail_count);
-    printf("[RDX][TXQ] ble unavailable=%u busy_valid_len=%u"
-           " app_ok=%u app_error=%u valid_samples=%u"
-           " valid_min=%u valid_max=%u\n",
-           (unsigned int)ble_stats.unavailable_count,
-           (unsigned int)ble_stats.valid_len_busy_count,
-           (unsigned int)ble_stats.app_send_ok_count,
-           (unsigned int)ble_stats.app_send_error_count,
-           (unsigned int)ble_stats.valid_len_sample_count,
-           ble_stats.valid_len_min, ble_stats.valid_len_max);
-    printf("[RDX][TXQ] can_req=%u can_evt=%u spurious_evt=%u"
-           " can_ready=%u can_coalesced=%u timeout_rearm=%u pending=%u"
-           "\n",
-           (unsigned int)ble_stats.can_send_request_count,
-           (unsigned int)ble_stats.can_send_event_count,
-           (unsigned int)ble_stats.spurious_event_count,
-           (unsigned int)ble_stats.can_send_ready_count,
-           (unsigned int)ble_stats.can_send_coalesced_count,
-           (unsigned int)ble_stats.can_send_timeout_rearm_count,
-           ble_stats.can_send_pending);
-    printf("[RDX][TXQ] mtu=%u interval=%u latency=%u phy=%u/%u"
-           " dle=%u/%u ret_overflow=%u\n",
-           ble_stats.mtu, ble_stats.conn_interval,
-           ble_stats.conn_latency, ble_stats.tx_phy, ble_stats.rx_phy,
-           ble_stats.dle_tx_octets, ble_stats.dle_tx_time,
-           (unsigned int)ble_stats.app_send_ret_overflow_count);
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
     printf("[RDX][TXQ] drain=%u event_poll=%u budget_hit=%u"
            " burst_peak=%u arm_fail=%u budget=%u depth=%u direct_att=0\n",
@@ -370,13 +339,7 @@ static void rdx_mvp0_record_log_final(const char *reason)
            RDX_CFG_BLE_TX_BURST_BUDGET,
            RDX_RECORD_TX_QUEUE_DEPTH);
 #endif
-    for (i = 0; i < RDX_BLE_APP_SEND_RET_SLOTS; i++) {
-        if (ble_stats.app_send_ret[i].count) {
-            printf("[RDX][TXQ] app_ret code=%d count=%u\n",
-                   ble_stats.app_send_ret[i].code,
-                   (unsigned int)ble_stats.app_send_ret[i].count);
-        }
-    }
+    rdx_transport_tx_diagnostics_log();
 #else
     (void)reason;
 #endif
@@ -406,7 +369,7 @@ static int rdx_mvp0_record_destination_attach(void *priv, u32 session_id,
     rdx_online_record.tx_peak = 0;
     rdx_online_record.burst_peak = 0;
     rdx_online_record.final_stats_logged = 0;
-    rdx_ble_transport_tx_stats_reset();
+    rdx_transport_tx_diagnostics_reset();
     return 0;
 }
 
@@ -563,7 +526,7 @@ static void rdx_mvp0_record_engine_event(
             if (!wait_for_stop) {
                 rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
             }
-            rdx_ble_transport_set_record_streaming(0);
+            rdx_transport_set_record_streaming(0);
             if (!wait_for_stop && !connection_invalid
                 && rdx_mvp0_state.connected
                 && rdx_mvp0_state.ccc_ready) {
@@ -579,7 +542,7 @@ static void rdx_mvp0_record_engine_event(
 #if RDX_CFG_RECORD_MARK_ENABLE
         rdx_session_metadata_begin(event->session_id);
 #endif
-        rdx_ble_transport_set_record_streaming(1);
+        rdx_transport_set_record_streaming(1);
         ret = rdx_mvp0_record_send_state(1);
         if (ret) {
             rdx_record_engine_submit_system_event(
@@ -607,7 +570,7 @@ static void rdx_mvp0_record_engine_event(
                    (unsigned int)event->request_id, event->result);
             return;
         }
-        rdx_ble_transport_set_record_streaming(0);
+        rdx_transport_set_record_streaming(0);
         rdx_online_record.pause_discard_count += rdx_online_record.tx_count;
         rdx_online_record.cancel_discard_count += rdx_online_record.tx_count;
         rdx_online_record.tx_head = 0;
@@ -636,7 +599,7 @@ static void rdx_mvp0_record_engine_event(
             return;
         }
         rdx_online_record.capture_generation = event->capture_generation;
-        rdx_ble_transport_set_record_streaming(1);
+        rdx_transport_set_record_streaming(1);
         rdx_online_record.state = RDX_ONLINE_RECORD_STREAMING;
         rdx_online_record.wire_state = 3;
         rdx_mvp0_record_send_state(3);
@@ -664,7 +627,7 @@ static void rdx_mvp0_record_engine_event(
                     && event->cause != RDX_RECORD_CAUSE_CCC_OFF
                     && event->cause != RDX_RECORD_CAUSE_SHUTDOWN;
 
-        rdx_ble_transport_set_record_streaming(0);
+        rdx_transport_set_record_streaming(0);
         rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
         rdx_online_record.wire_state = 0;
         rdx_online_record.tx_count = 0;
@@ -1082,7 +1045,7 @@ static void rdx_mvp0_handle_ble_name_set(const u8 *data, u16 len)
 
     ret = rdx_ble_name_set(data + prefix_len, name_len, &changed);
     if (!ret && changed) {
-        refresh_ret = rdx_ble_transport_refresh_local_name();
+        refresh_ret = rdx_transport_refresh_local_name();
         if (refresh_ret) {
             printf("[RDX][BLE] name_refresh result=degraded ret=%d\n",
                    refresh_ret);
@@ -1131,7 +1094,7 @@ static void rdx_mvp0_post_ack_timeout(void *priv)
     rdx_mvp0_state.state_transition_pending = 0;
     rdx_mvp0_state.post_ack_action = RDX_POST_ACK_ACTION_NONE;
     rdx_mvp0_state.post_ack_timer_id = 0;
-    if (!rdx_mvp0_state.connected || !rdx_mvp0_disconnect_callback) {
+    if (!rdx_mvp0_state.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive\n",
                rdx_mvp0_post_ack_action_name(action));
         return;
@@ -1139,14 +1102,14 @@ static void rdx_mvp0_post_ack_timeout(void *priv)
 
     printf("[RDX][SESSION] post_ack action=%s event=execute disconnect=rdx_ble\n",
            rdx_mvp0_post_ack_action_name(action));
-    rdx_mvp0_disconnect_callback();
+    rdx_transport_disconnect();
 }
 
 static void rdx_mvp0_schedule_post_ack_disconnect(u8 action, int ack_ret)
 {
     u16 timer_id;
 
-    if (!rdx_mvp0_state.connected || !rdx_mvp0_disconnect_callback) {
+    if (!rdx_mvp0_state.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive ack_ret=%d\n",
                rdx_mvp0_post_ack_action_name(action), ack_ret);
         return;
@@ -1576,9 +1539,7 @@ reject:
     send_ret = rdx_mvp0_send(failure, sizeof(failure) - 1);
     printf("[RDX][TX] cmd=appkey wire=%s len=%u ret=%d\n",
            (char *)failure, (unsigned int)(sizeof(failure) - 1), send_ret);
-    if (rdx_mvp0_disconnect_callback) {
-        rdx_mvp0_disconnect_callback();
-    }
+    rdx_transport_disconnect();
 }
 
 #if RDX_CFG_RTC_ENABLE
@@ -1637,22 +1598,17 @@ send_ack:
 }
 #endif
 
-int rdx_mvp0_protocol_init(rdx_mvp0_send_callback_t send_callback,
-                           rdx_mvp0_disconnect_callback_t disconnect_callback)
+int rdx_mvp0_protocol_init(void)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     int ret;
 #endif
 
-    rdx_mvp0_send_callback = send_callback;
-    rdx_mvp0_disconnect_callback = disconnect_callback;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     memset(&rdx_online_record, 0, sizeof(rdx_online_record));
     ret = rdx_record_engine_init(rdx_mvp0_record_engine_event, NULL);
     if (ret) {
-        rdx_mvp0_send_callback = NULL;
-        rdx_mvp0_disconnect_callback = NULL;
         return ret;
     }
 #endif
@@ -1664,22 +1620,21 @@ void rdx_mvp0_protocol_exit(void)
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
         rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-        rdx_ble_transport_set_record_streaming(0);
+        rdx_transport_set_record_streaming(0);
     }
 #endif
     rdx_mvp0_cancel_post_ack_action("protocol_exit");
-    rdx_mvp0_send_callback = NULL;
-    rdx_mvp0_disconnect_callback = NULL;
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 }
 
-void rdx_mvp0_protocol_set_connected(u8 connected)
+static void rdx_mvp0_protocol_set_connected(u8 connected,
+                                            u32 transport_generation)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (!connected) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-            rdx_ble_transport_set_record_streaming(0);
+            rdx_transport_set_record_streaming(0);
         }
         rdx_record_engine_submit_system_event(
             RDX_RECORD_SYSTEM_SOURCE_TRANSPORT,
@@ -1691,11 +1646,14 @@ void rdx_mvp0_protocol_set_connected(u8 connected)
                                               : "link_disconnected");
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
     rdx_mvp0_state.connected = !!connected;
+    if (rdx_mvp0_state.connected) {
+        rdx_mvp0_state.transport_generation = transport_generation;
+    }
     printf("[RDX][SESSION] link=%s app_ready=0\n",
            rdx_mvp0_state.connected ? "connected" : "disconnected");
 }
 
-void rdx_mvp0_protocol_set_identity_read(void)
+static void rdx_mvp0_protocol_set_identity_read(void)
 {
     if (rdx_mvp0_state.connected && !rdx_mvp0_state.identity_read) {
         rdx_mvp0_state.identity_read = 1;
@@ -1703,13 +1661,13 @@ void rdx_mvp0_protocol_set_identity_read(void)
     }
 }
 
-void rdx_mvp0_protocol_set_ccc(u8 enabled)
+static void rdx_mvp0_protocol_set_ccc(u8 enabled)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (!enabled) {
         if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
-            rdx_ble_transport_set_record_streaming(0);
+            rdx_transport_set_record_streaming(0);
         }
         rdx_record_engine_submit_system_event(
             RDX_RECORD_SYSTEM_SOURCE_TRANSPORT,
@@ -1725,7 +1683,7 @@ void rdx_mvp0_protocol_set_ccc(u8 enabled)
            rdx_mvp0_state.ccc_ready, rdx_mvp0_state.app_ready);
 }
 
-void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
+static void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
 {
     if (!data || !len) {
         return;
@@ -1834,6 +1792,54 @@ void rdx_mvp0_protocol_receive(const u8 *data, u16 len)
         printf("[RDX][DROP] cmd=unknown wire=%.*s len=%u type=%02X%02X\n",
                (int)len, (char *)data, len,
                data[0], len > 1 ? data[1] : 0);
+    }
+}
+
+void rdx_mvp0_protocol_handle_transport_event(
+    const struct rdx_transport_event *event, void *context)
+{
+    (void)context;
+
+    if (!event || !event->connection_generation) {
+        return;
+    }
+
+    if (event->type == RDX_TRANSPORT_EVENT_CONNECTED) {
+        rdx_mvp0_protocol_set_connected(
+            1, event->connection_generation);
+        return;
+    }
+
+    if (!rdx_mvp0_state.connected
+        || event->connection_generation !=
+            rdx_mvp0_state.transport_generation) {
+        return;
+    }
+
+    switch (event->type) {
+    case RDX_TRANSPORT_EVENT_LINK_LOST:
+        rdx_mvp0_protocol_set_connected(
+            0, event->connection_generation);
+        break;
+    case RDX_TRANSPORT_EVENT_IDENTITY_READ:
+        rdx_mvp0_protocol_set_identity_read();
+        break;
+    case RDX_TRANSPORT_EVENT_CCC_CHANGED:
+        rdx_mvp0_protocol_set_ccc(event->data.ccc_enabled);
+        break;
+    case RDX_TRANSPORT_EVENT_RX:
+        rdx_mvp0_protocol_receive(event->data.rx.data,
+                                  event->data.rx.len);
+        break;
+    case RDX_TRANSPORT_EVENT_CAN_SEND_NOW:
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
+        rdx_record_engine_notify_destination_ready(
+            event->data.can_send.session_id,
+            event->data.can_send.capture_generation);
+#endif
+        break;
+    default:
+        break;
     }
 }
 
