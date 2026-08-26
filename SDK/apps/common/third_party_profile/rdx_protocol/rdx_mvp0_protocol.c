@@ -72,12 +72,15 @@ typedef enum {
 
 typedef struct {
     struct rdx_protocol_session session;
+    volatile u8 initialized;
     u8 state_transition_pending;
     u8 post_ack_action;
     u16 post_ack_timer_id;
+    u32 post_ack_generation;
 } rdx_mvp0_state_t;
 
 static rdx_mvp0_state_t rdx_mvp0_state;
+static u32 rdx_mvp0_post_ack_generation_seed;
 
 static u8 rdx_mvp0_management_query_ready(const char *command, u16 len);
 static const char *rdx_mvp0_post_ack_action_name(u8 action);
@@ -1066,32 +1069,55 @@ static const char *rdx_mvp0_post_ack_action_name(u8 action)
     }
 }
 
+static u32 rdx_mvp0_next_generation(u32 generation)
+{
+    generation++;
+    return generation ? generation : 1;
+}
+
 static void rdx_mvp0_cancel_post_ack_action(const char *reason)
 {
+    u8 action;
+    u16 timer_id;
+
     if (!rdx_mvp0_state.state_transition_pending
         && !rdx_mvp0_state.post_ack_timer_id) {
         return;
     }
 
-    if (rdx_mvp0_state.post_ack_timer_id) {
-        sys_timeout_del(rdx_mvp0_state.post_ack_timer_id);
-    }
-    printf("[RDX][SESSION] post_ack action=%s event=cancel reason=%s timer_id=%u\n",
-           rdx_mvp0_post_ack_action_name(rdx_mvp0_state.post_ack_action),
-           reason, rdx_mvp0_state.post_ack_timer_id);
+    action = rdx_mvp0_state.post_ack_action;
+    timer_id = rdx_mvp0_state.post_ack_timer_id;
     rdx_mvp0_state.state_transition_pending = 0;
     rdx_mvp0_state.post_ack_action = RDX_POST_ACK_ACTION_NONE;
     rdx_mvp0_state.post_ack_timer_id = 0;
+    rdx_mvp0_state.post_ack_generation = 0;
+    if (timer_id) {
+        sys_timeout_del(timer_id);
+    }
+    printf("[RDX][SESSION] post_ack action=%s event=cancel reason=%s timer_id=%u\n",
+           rdx_mvp0_post_ack_action_name(action), reason, timer_id);
 }
 
 static void rdx_mvp0_post_ack_timeout(void *priv)
 {
+    u32 generation = (u32)(uintptr_t)priv;
     u8 action = rdx_mvp0_state.post_ack_action;
 
-    (void)priv;
+    if (!rdx_mvp0_state.initialized
+        || !rdx_mvp0_state.state_transition_pending
+        || !generation
+        || generation != rdx_mvp0_state.post_ack_generation) {
+        printf("[RDX][SESSION] post_ack event=ignore reason=stale"
+               " generation=%u active_generation=%u\n",
+               (unsigned int)generation,
+               (unsigned int)rdx_mvp0_state.post_ack_generation);
+        return;
+    }
+
     rdx_mvp0_state.state_transition_pending = 0;
     rdx_mvp0_state.post_ack_action = RDX_POST_ACK_ACTION_NONE;
     rdx_mvp0_state.post_ack_timer_id = 0;
+    rdx_mvp0_state.post_ack_generation = 0;
     if (!rdx_mvp0_state.session.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive\n",
                rdx_mvp0_post_ack_action_name(action));
@@ -1105,6 +1131,7 @@ static void rdx_mvp0_post_ack_timeout(void *priv)
 
 static void rdx_mvp0_schedule_post_ack_disconnect(u8 action, int ack_ret)
 {
+    u32 generation;
     u16 timer_id;
 
     if (!rdx_mvp0_state.session.connected) {
@@ -1115,7 +1142,12 @@ static void rdx_mvp0_schedule_post_ack_disconnect(u8 action, int ack_ret)
 
     rdx_mvp0_state.state_transition_pending = 1;
     rdx_mvp0_state.post_ack_action = action;
-    timer_id = sys_timeout_add(NULL, rdx_mvp0_post_ack_timeout,
+    generation = rdx_mvp0_next_generation(
+        rdx_mvp0_post_ack_generation_seed);
+    rdx_mvp0_post_ack_generation_seed = generation;
+    rdx_mvp0_state.post_ack_generation = generation;
+    timer_id = sys_timeout_add((void *)(uintptr_t)generation,
+                               rdx_mvp0_post_ack_timeout,
                                RDX_POST_ACK_DISCONNECT_DELAY_MS);
     rdx_mvp0_state.post_ack_timer_id = timer_id;
     printf("[RDX][SESSION] post_ack action=%s event=schedule delay_ms=%u timer_id=%u ack_ret=%d\n",
@@ -1127,7 +1159,7 @@ static void rdx_mvp0_schedule_post_ack_disconnect(u8 action, int ack_ret)
 
     printf("[RDX][SESSION] post_ack action=%s event=fallback reason=timer_alloc_failed\n",
            rdx_mvp0_post_ack_action_name(action));
-    rdx_mvp0_post_ack_timeout(NULL);
+    rdx_mvp0_post_ack_timeout((void *)(uintptr_t)generation);
 }
 
 static int rdx_mvp0_parse_nonnegative_s32(const u8 *data, u16 len,
@@ -1607,6 +1639,10 @@ int rdx_mvp0_protocol_init(void)
     int ret;
 #endif
 
+    if (rdx_mvp0_state.initialized) {
+        return 0;
+    }
+
     memset(&rdx_mvp0_state, 0, sizeof(rdx_mvp0_state));
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     memset(&rdx_online_record, 0, sizeof(rdx_online_record));
@@ -1615,11 +1651,16 @@ int rdx_mvp0_protocol_init(void)
         return ret;
     }
 #endif
+    rdx_mvp0_state.initialized = 1;
     return 0;
 }
 
 void rdx_mvp0_protocol_exit(void)
 {
+    if (!rdx_mvp0_state.initialized) {
+        return;
+    }
+    rdx_mvp0_state.initialized = 0;
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
         rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
@@ -1787,6 +1828,10 @@ void rdx_mvp0_protocol_handle_transport_event(
     enum rdx_protocol_session_event_result result;
 
     (void)context;
+
+    if (!rdx_mvp0_state.initialized) {
+        return;
+    }
 
     result = rdx_protocol_session_handle_event(
         &rdx_mvp0_state.session, event);

@@ -60,6 +60,7 @@ struct rdx_record_engine_runtime {
     volatile u8 initialized;
     volatile u8 accepting;
     volatile u8 frame_gate;
+    volatile u8 worker_created;
     volatile u8 task_running;
     u8 request_head;
     u8 request_tail;
@@ -136,7 +137,7 @@ static u32 rdx_record_next_token(u32 token)
 
 static void rdx_record_engine_wake(void)
 {
-    if (rdx_record_engine.task_running) {
+    if (rdx_record_engine.worker_created) {
         os_taskq_post_msg(RDX_RECORD_TASK_NAME, 1, RDX_RECORD_TASK_WAKE);
     }
 }
@@ -1187,6 +1188,7 @@ int rdx_record_engine_init(rdx_record_engine_event_callback_t callback,
         rdx_record_engine.initialized = 0;
         return ret;
     }
+    rdx_record_engine.worker_created = 1;
     return 0;
 }
 
@@ -1308,13 +1310,18 @@ int rdx_record_engine_notify_destination_ready(
     return result;
 }
 
-int rdx_record_engine_shutdown(u16 timeout_ticks)
+int rdx_record_engine_shutdown(u16 timeout_ms)
 {
+    u16 timeout_ticks;
     int ret;
 
     if (!rdx_record_engine.initialized) {
         return 0;
     }
+    if (!timeout_ms) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    timeout_ticks = msecs_to_jiffies((u32)timeout_ms - 1) + 1;
     spin_lock(&rdx_record_engine.lock);
     rdx_record_engine.accepting = 0;
     rdx_record_engine.system_latch.pending = 1;
@@ -1337,6 +1344,7 @@ int rdx_record_engine_shutdown(u16 timeout_ticks)
     rdx_record_engine.initialized = 0;
     rdx_record_engine_wake();
     task_kill(RDX_RECORD_TASK_NAME);
+    rdx_record_engine.worker_created = 0;
     rdx_record_engine.event_callback = NULL;
     rdx_record_engine.event_priv = NULL;
     return 0;

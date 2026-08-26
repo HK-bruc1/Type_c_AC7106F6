@@ -17,6 +17,8 @@
 #include "rdx_rtc.h"
 #endif
 
+#define RDX_RECORD_SHUTDOWN_TIMEOUT_MS          1000
+
 static u8 rdx_protocol_started;
 
 int rdx_protocol_start(void)
@@ -58,7 +60,7 @@ int rdx_protocol_start(void)
     if (ret) {
         rdx_mvp0_protocol_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
-        rdx_record_engine_shutdown(100);
+        rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
         rdx_device_state_exit();
         return ret;
@@ -80,7 +82,7 @@ void rdx_protocol_stop(void)
 #endif
     rdx_mvp0_protocol_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
-    if (rdx_record_engine_shutdown(100)) {
+    if (rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS)) {
         printf("[RDX] record engine shutdown incomplete\n");
         return;
     }

@@ -15,6 +15,17 @@
 
 static char fake_ble_name[RDX_BLE_NAME_MAX_LEN + 1] = "IKKO";
 
+struct fake_timeout_state {
+    void (*callback)(void *);
+    void *priv;
+    u16 active_id;
+    u16 next_id;
+    u32 timeout_ms;
+    unsigned int delete_count;
+};
+
+static struct fake_timeout_state fake_timeout;
+
 static void assert_last_tx(const char *expected)
 {
     const struct rdx_transport_fake_state *fake =
@@ -112,15 +123,39 @@ int rdx_system_action_get_auto_off_time_minutes(uint32_t *minutes)
 
 u16 sys_timeout_add(void *priv, void (*callback)(void *), u32 timeout_ms)
 {
-    (void)priv;
-    (void)callback;
-    (void)timeout_ms;
-    return 1;
+    fake_timeout.next_id++;
+    if (!fake_timeout.next_id) {
+        fake_timeout.next_id = 1;
+    }
+    fake_timeout.callback = callback;
+    fake_timeout.priv = priv;
+    fake_timeout.timeout_ms = timeout_ms;
+    fake_timeout.active_id = fake_timeout.next_id;
+    return fake_timeout.active_id;
 }
 
 void sys_timeout_del(u16 timer_id)
 {
-    (void)timer_id;
+    if (timer_id && timer_id == fake_timeout.active_id) {
+        fake_timeout.active_id = 0;
+        fake_timeout.delete_count++;
+    }
+}
+
+static void fake_timeout_reset(void)
+{
+    memset(&fake_timeout, 0, sizeof(fake_timeout));
+}
+
+static void fake_timeout_fire(void)
+{
+    void (*callback)(void *) = fake_timeout.callback;
+    void *priv = fake_timeout.priv;
+
+    assert(fake_timeout.active_id);
+    assert(callback);
+    fake_timeout.active_id = 0;
+    callback(priv);
 }
 
 static void make_appkey_request(uint8_t *request, uint16_t *len)
@@ -131,6 +166,22 @@ static void make_appkey_request(uint8_t *request, uint16_t *len)
     memset(request + sizeof(prefix) - 1, 'A', 32);
     request[sizeof(prefix) - 1 + 32] = '#';
     *len = sizeof(prefix) - 1 + 32 + 1;
+}
+
+static uint32_t connect_and_authenticate(void)
+{
+    uint8_t appkey_request[64];
+    uint16_t appkey_len;
+    uint32_t generation;
+
+    make_appkey_request(appkey_request, &appkey_len);
+    generation = rdx_transport_fake_connect();
+    assert(generation);
+    rdx_transport_fake_set_ccc(generation, 1);
+    rdx_transport_fake_receive(generation,
+                               appkey_request, appkey_len);
+    assert_last_tx("*DEV#appkey#0#");
+    return generation;
 }
 
 static void test_protocol_transport_sequence(void)
@@ -146,6 +197,7 @@ static void test_protocol_transport_sequence(void)
     uint32_t first_generation;
     uint32_t second_generation;
 
+    fake_timeout_reset();
     assert(rdx_mvp0_protocol_init() == 0);
     assert(rdx_transport_init(rdx_mvp0_protocol_handle_transport_event,
                               NULL) == 0);
@@ -205,9 +257,70 @@ static void test_protocol_transport_sequence(void)
     rdx_transport_exit();
 }
 
+static void test_protocol_lifecycle_rejects_delayed_events(void)
+{
+    static const uint8_t ping[] = "RDX_MVP0_PING";
+    static const uint8_t set_default[] = "*APP#default#";
+    const struct rdx_transport_fake_state *fake;
+    void (*stale_callback)(void *);
+    void *stale_priv;
+    unsigned int accepted_before;
+    unsigned int disconnect_before;
+    uint32_t generation;
+
+    fake_timeout_reset();
+    assert(rdx_mvp0_protocol_init() == 0);
+    assert(rdx_transport_init(rdx_mvp0_protocol_handle_transport_event,
+                              NULL) == 0);
+    fake = rdx_transport_fake_get_state();
+    generation = connect_and_authenticate();
+
+    assert(rdx_mvp0_protocol_init() == 0);
+    accepted_before = fake->accepted_count;
+    rdx_transport_fake_receive(generation, ping, sizeof(ping) - 1);
+    assert(fake->accepted_count == accepted_before + 1);
+    assert_last_tx("RDX_MVP0_PONG");
+
+    rdx_transport_fake_receive(generation,
+                               set_default, sizeof(set_default) - 1);
+    assert(fake_timeout.active_id);
+    assert(fake_timeout.timeout_ms == 100);
+    stale_callback = fake_timeout.callback;
+    stale_priv = fake_timeout.priv;
+
+    rdx_mvp0_protocol_exit();
+    assert(fake_timeout.delete_count == 1);
+    assert(!fake_timeout.active_id);
+
+    accepted_before = fake->accepted_count;
+    generation = rdx_transport_fake_connect();
+    rdx_transport_fake_set_ccc(generation, 1);
+    rdx_transport_fake_receive(generation, ping, sizeof(ping) - 1);
+    assert(fake->accepted_count == accepted_before);
+
+    assert(rdx_mvp0_protocol_init() == 0);
+    generation = connect_and_authenticate();
+    disconnect_before = fake->disconnect_count;
+    rdx_transport_fake_receive(generation,
+                               set_default, sizeof(set_default) - 1);
+    assert(fake_timeout.active_id);
+    assert(fake_timeout.priv != stale_priv);
+    stale_callback(stale_priv);
+    assert(fake->disconnect_count == disconnect_before);
+    assert(fake->connected);
+    assert(fake_timeout.active_id);
+    fake_timeout_fire();
+    assert(fake->disconnect_count == disconnect_before + 1);
+    assert(!fake->connected);
+
+    rdx_mvp0_protocol_exit();
+    rdx_transport_exit();
+}
+
 int main(void)
 {
     test_protocol_transport_sequence();
+    test_protocol_lifecycle_rejects_delayed_events();
     puts("RDX MVP0 protocol host tests passed");
     return 0;
 }

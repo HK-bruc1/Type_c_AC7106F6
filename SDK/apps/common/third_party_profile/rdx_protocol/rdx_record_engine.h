@@ -12,7 +12,7 @@ int rdx_record_engine_submit_system_event(
     enum rdx_record_cause cause);
 int rdx_record_engine_notify_destination_ready(
     uint32_t session_id, uint32_t capture_generation);
-int rdx_record_engine_shutdown(uint16_t timeout_ticks);
+int rdx_record_engine_shutdown(uint16_t timeout_ms);
 enum rdx_record_state rdx_record_engine_get_state(void);
 
 #endif
