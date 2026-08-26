@@ -9,6 +9,63 @@ $earphoneInclude = Resolve-Path `
 $outputPaths = @()
 
 try {
+    $rtcServiceOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_rtc_service_{0}.exe" -f [guid]::NewGuid().ToString('N'))
+    $outputPaths += $rtcServiceOutput
+    & $compiler.Source -Wall -Werror -DRDX_CFG_RTC_ENABLE=1 `
+        -I (Join-Path $testDir 'include') `
+        -I $moduleDir `
+        -o $rtcServiceOutput `
+        (Join-Path $testDir 'rdx_rtc_service_test.c') `
+        (Join-Path $testDir 'rdx_clock_fake.c') `
+        (Join-Path $testDir 'rdx_rtc_backup_repository_fake.c') `
+        (Join-Path $moduleDir 'rdx_rtc.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX RTC service test compilation failed: $LASTEXITCODE"
+    }
+
+    & $rtcServiceOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX RTC service tests failed: $LASTEXITCODE"
+    }
+
+    $clockOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_clock_br56_{0}.exe" -f [guid]::NewGuid().ToString('N'))
+    $outputPaths += $clockOutput
+    & $compiler.Source -Wall -Werror -DRDX_CFG_RTC_ENABLE=1 `
+        -I (Join-Path $testDir 'include') `
+        -I $moduleDir `
+        -o $clockOutput `
+        (Join-Path $testDir 'rdx_clock_br56_test.c') `
+        (Join-Path $moduleDir 'rdx_clock_br56.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 clock adapter test compilation failed: $LASTEXITCODE"
+    }
+
+    & $clockOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 clock adapter tests failed: $LASTEXITCODE"
+    }
+
+    $rtcRepositoryOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ("rdx_rtc_repository_br56_{0}.exe" -f `
+            [guid]::NewGuid().ToString('N'))
+    $outputPaths += $rtcRepositoryOutput
+    & $compiler.Source -Wall -Werror -DRDX_CFG_RTC_ENABLE=1 `
+        -I (Join-Path $testDir 'include') `
+        -I $moduleDir `
+        -o $rtcRepositoryOutput `
+        (Join-Path $testDir 'rdx_rtc_backup_repository_br56_test.c') `
+        (Join-Path $moduleDir 'rdx_rtc_backup_repository_br56.c')
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 RTC backup repository test compilation failed: $LASTEXITCODE"
+    }
+
+    & $rtcRepositoryOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw "RDX BR56 RTC backup repository tests failed: $LASTEXITCODE"
+    }
+
     $stateServiceOutput = Join-Path ([System.IO.Path]::GetTempPath()) `
         ("rdx_device_state_service_{0}.exe" -f `
             [guid]::NewGuid().ToString('N'))

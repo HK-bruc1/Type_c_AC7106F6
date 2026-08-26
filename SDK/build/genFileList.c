@@ -1071,7 +1071,9 @@ c_SRC_FILES += \
 
 #if RDX_CFG_RTC_ENABLE
 c_SRC_FILES += \
-    apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
+    apps/common/third_party_profile/rdx_protocol/rdx_rtc.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_clock_br56.c \
+    apps/common/third_party_profile/rdx_protocol/rdx_rtc_backup_repository_br56.c
 #endif
 
 #if RDX_CFG_ONLINE_RECORDING_ENABLE

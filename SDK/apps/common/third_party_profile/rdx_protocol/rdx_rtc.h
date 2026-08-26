@@ -1,14 +1,14 @@
 #ifndef RDX_RTC_H
 #define RDX_RTC_H
 
-#include "typedef.h"
+#include <stdint.h>
 
 /*
- * RDX RTC uses the BR56 hardware RTC as its only time source.  A zero return
- * value means that the requested operation was completed and verified.
+ * A zero return value means that the requested operation was completed and
+ * verified by the RTC service.
  */
 int rdx_rtc_init(void);
-int rdx_rtc_set_timestamp(u32 timestamp);
+int rdx_rtc_set_timestamp(uint32_t timestamp);
 int rdx_rtc_store_backup(void);
 
 #endif /* RDX_RTC_H */
