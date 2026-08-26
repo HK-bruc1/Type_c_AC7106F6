@@ -93,6 +93,33 @@ static int rdx_meeting_capture_jlstream_read_adc_cfg(
     return 0;
 }
 
+int rdx_meeting_capture_jlstream_check_structure(
+    enum rdx_record_format_id format_id)
+{
+    struct adc_file_cfg adc_cfg;
+    char node_name[16] = {0};
+    struct jlstream *stream;
+    int ret;
+
+    if (format_id != RDX_RECORD_FORMAT_MEETING_V1) {
+        return -EINVAL;
+    }
+    ret = rdx_meeting_capture_jlstream_read_adc_cfg(&adc_cfg, node_name);
+    if (ret) {
+        return ret;
+    }
+    stream = jlstream_pipeline_parse(RDX_RECORD_PIPELINE_UUID,
+                                     NODE_UUID_ADC);
+    if (!stream) {
+        printf("[RDX][AUDIO] structure=failed scene=meeting reason=pipeline\n");
+        return -EFAULT;
+    }
+    jlstream_release(stream);
+    printf("[RDX][AUDIO] structure=ok scene=meeting pipeline=0x%x node=%s\n",
+           RDX_RECORD_PIPELINE_UUID, node_name);
+    return 0;
+}
+
 int rdx_meeting_capture_jlstream_get_factory_gain(u8 *gain)
 {
     struct adc_file_cfg adc_cfg;

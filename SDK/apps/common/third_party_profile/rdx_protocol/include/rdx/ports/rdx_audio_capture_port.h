@@ -40,7 +40,11 @@ struct rdx_audio_capture_open_params {
     void *frame_priv;
 };
 
-enum rdx_audio_capture_result rdx_audio_capture_probe(
+/* Stable boot-time structure; must not depend on an active USB/audio source. */
+enum rdx_audio_capture_result rdx_audio_capture_check_structure(
+    enum rdx_record_scene scene, enum rdx_record_format_id format_id);
+/* Transient command-time conditions such as source activity or arbitration. */
+enum rdx_audio_capture_result rdx_audio_capture_check_readiness(
     enum rdx_record_scene scene, enum rdx_record_format_id format_id);
 enum rdx_audio_capture_result rdx_audio_capture_open(
     const struct rdx_audio_capture_open_params *params);

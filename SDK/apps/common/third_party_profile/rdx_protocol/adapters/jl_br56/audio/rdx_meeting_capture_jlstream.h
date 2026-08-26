@@ -3,6 +3,8 @@
 
 #include "rdx/ports/rdx_audio_capture_port.h"
 
+int rdx_meeting_capture_jlstream_check_structure(
+    enum rdx_record_format_id format_id);
 int rdx_meeting_capture_jlstream_get_factory_gain(uint8_t *gain);
 int rdx_meeting_capture_jlstream_open(
     const struct rdx_audio_capture_open_params *params);

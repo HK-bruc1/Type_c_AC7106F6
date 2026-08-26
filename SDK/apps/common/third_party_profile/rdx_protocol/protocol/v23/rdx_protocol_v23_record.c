@@ -1,8 +1,10 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
-
-#include "system/includes.h"
 #include "rdx/rdx_record_engine.h"
 #include "rdx/rdx_session_metadata_service.h"
 #include "rdx/ports/rdx_transport_port.h"
@@ -12,9 +14,9 @@
 #define RDX_RECORD_TX_QUEUE_DEPTH                RDX_CFG_BLE_TX_QUEUE_DEPTH
 #define RDX_RECORD_TX_INLINE_BUDGET               1
 
-static const u8 rdx_cmd_record[] = "*APP#record#";
+static const uint8_t rdx_cmd_record[] = "*APP#record#";
 #if RDX_CFG_RECORD_MARK_ENABLE
-static const u8 rdx_cmd_recmark[] = "*APP#recmark#";
+static const uint8_t rdx_cmd_recmark[] = "*APP#recmark#";
 #endif
 
 static struct rdx_protocol_v23_context *rdx_v23_record_context;
@@ -29,38 +31,38 @@ typedef enum {
 } rdx_online_record_state_t;
 
 typedef struct {
-    volatile u8 state;
-    u32 next_request_id;
-    u32 session_id;
-    u32 capture_generation;
-    u32 sent_count;
-    u32 send_fail_count;
-    u32 destination_in_count;
-    u32 queued_count;
-    u32 queue_drop_count;
-    u32 cancel_discard_count;
-    u32 pause_discard_count;
-    u32 drain_count;
-    u32 event_poll_count;
-    u32 budget_hit_count;
-    u32 arm_fail_count;
-    u8 tx_head;
-    u8 tx_tail;
-    u8 tx_count;
-    u8 tx_peak;
-    u8 wire_state;
-    u8 scene;
-    u8 final_stats_logged;
-    u8 burst_peak;
-    u16 tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
-    u8 tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
+    volatile uint8_t state;
+    uint32_t next_request_id;
+    uint32_t session_id;
+    uint32_t capture_generation;
+    uint32_t sent_count;
+    uint32_t send_fail_count;
+    uint32_t destination_in_count;
+    uint32_t queued_count;
+    uint32_t queue_drop_count;
+    uint32_t cancel_discard_count;
+    uint32_t pause_discard_count;
+    uint32_t drain_count;
+    uint32_t event_poll_count;
+    uint32_t budget_hit_count;
+    uint32_t arm_fail_count;
+    uint8_t tx_head;
+    uint8_t tx_tail;
+    uint8_t tx_count;
+    uint8_t tx_peak;
+    uint8_t wire_state;
+    uint8_t scene;
+    uint8_t final_stats_logged;
+    uint8_t burst_peak;
+    uint16_t tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
+    uint8_t tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_online_record_runtime_t;
 
 static rdx_online_record_runtime_t rdx_online_record;
 
-static int rdx_v23_record_send_state(u8 wire_state)
+static int rdx_v23_record_send_state(uint8_t wire_state)
 {
-    u8 response[32];
+    uint8_t response[32];
     int len;
     int ret;
 
@@ -78,10 +80,10 @@ static int rdx_v23_record_send_state(u8 wire_state)
 }
 
 #if RDX_CFG_RECORD_MARK_ENABLE
-static int rdx_v23_record_send_mark(u8 result, u8 index,
-                                     u32 offset_ms, u8 source)
+static int rdx_v23_record_send_mark(uint8_t result, uint8_t index,
+                                     uint32_t offset_ms, uint8_t source)
 {
-    u8 response[64];
+    uint8_t response[64];
     int len;
     int ret;
 
@@ -100,7 +102,7 @@ static int rdx_v23_record_send_mark(u8 result, u8 index,
 }
 #endif
 
-static u32 rdx_v23_record_next_request_id(void)
+static uint32_t rdx_v23_record_next_request_id(void)
 {
     rdx_online_record.next_request_id++;
     if (!rdx_online_record.next_request_id) {
@@ -109,9 +111,9 @@ static u32 rdx_v23_record_next_request_id(void)
     return rdx_online_record.next_request_id;
 }
 
-static int rdx_v23_record_queue_packet(const u8 *packet, u16 len)
+static int rdx_v23_record_queue_packet(const uint8_t *packet, uint16_t len)
 {
-    u8 tail;
+    uint8_t tail;
 
     if (!packet || !len || len > RDX_RECORD_STREAM_PACKET_SIZE) {
         return -1;
@@ -137,10 +139,10 @@ static int rdx_v23_record_queue_packet(const u8 *packet, u16 len)
     return 0;
 }
 
-static int rdx_v23_record_drain_queue(u8 budget)
+static int rdx_v23_record_drain_queue(uint8_t budget)
 {
     int ret = 0;
-    u8 sent_now = 0;
+    uint8_t sent_now = 0;
 
     rdx_online_record.drain_count++;
     if (!budget) {
@@ -148,7 +150,7 @@ static int rdx_v23_record_drain_queue(u8 budget)
     }
 
     while (rdx_online_record.tx_count && sent_now < budget) {
-        u8 head = rdx_online_record.tx_head;
+        uint8_t head = rdx_online_record.tx_head;
 
         ret = rdx_protocol_v23_send(rdx_v23_record_context, rdx_online_record.tx_packet[head],
                             rdx_online_record.tx_len[head]);
@@ -187,7 +189,7 @@ static void rdx_v23_record_log_final(const char *reason)
     }
     rdx_online_record.final_stats_logged = 1;
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
-    u32 accounted;
+    uint32_t accounted;
 
     accounted = rdx_online_record.sent_count
                 + rdx_online_record.queue_drop_count
@@ -228,8 +230,8 @@ static void rdx_v23_record_log_final(const char *reason)
 #endif
 }
 
-static int rdx_v23_record_destination_attach(void *priv, u32 session_id,
-                                              u32 capture_generation)
+static int rdx_v23_record_destination_attach(void *priv, uint32_t session_id,
+                                              uint32_t capture_generation)
 {
     (void)priv;
     memset(&rdx_online_record.tx_len, 0, sizeof(rdx_online_record.tx_len));
@@ -259,7 +261,7 @@ static int rdx_v23_record_destination_attach(void *priv, u32 session_id,
 static int rdx_v23_record_destination_consume(
     void *priv, const struct rdx_record_frame *frame)
 {
-    u8 packet[RDX_RECORD_STREAM_PACKET_SIZE];
+    uint8_t packet[RDX_RECORD_STREAM_PACKET_SIZE];
     int header_len;
     int ret;
 
@@ -281,7 +283,7 @@ static int rdx_v23_record_destination_consume(
                            "*DEV#stream#%u#%u#",
                            frame->payload_len, frame->payload_len);
     if (header_len <= 0
-        || (u32)header_len + frame->payload_len > sizeof(packet)) {
+        || (uint32_t)header_len + frame->payload_len > sizeof(packet)) {
         rdx_online_record.cancel_discard_count++;
         return -1;
     }
@@ -331,7 +333,7 @@ static int rdx_v23_record_destination_consume(
 
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
 static void rdx_v23_record_destination_poll(
-    void *priv, u32 session_id, u32 capture_generation)
+    void *priv, uint32_t session_id, uint32_t capture_generation)
 {
     (void)priv;
     if (session_id != rdx_online_record.session_id
@@ -344,8 +346,8 @@ static void rdx_v23_record_destination_poll(
 }
 #endif
 
-static void rdx_v23_record_destination_cancel(void *priv, u32 session_id,
-                                               u32 capture_generation)
+static void rdx_v23_record_destination_cancel(void *priv, uint32_t session_id,
+                                               uint32_t capture_generation)
 {
     (void)priv;
     if (session_id == rdx_online_record.session_id
@@ -359,8 +361,8 @@ static void rdx_v23_record_destination_cancel(void *priv, u32 session_id,
     }
 }
 
-static void rdx_v23_record_destination_detach(void *priv, u32 session_id,
-                                               u32 capture_generation)
+static void rdx_v23_record_destination_detach(void *priv, uint32_t session_id,
+                                               uint32_t capture_generation)
 {
     (void)priv;
     if (session_id == rdx_online_record.session_id
@@ -397,11 +399,11 @@ static void rdx_v23_record_engine_event(
 
     if (event->type == RDX_RECORD_ENGINE_START_COMPLETE) {
         if (event->result) {
-            u8 wait_for_stop =
+            uint8_t wait_for_stop =
                 event->result == RDX_RECORD_RESULT_CANCELLED
                 && event->cause == RDX_RECORD_CAUSE_USER_REQUEST
                 && rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING;
-            u8 connection_invalid =
+            uint8_t connection_invalid =
                 event->cause == RDX_RECORD_CAUSE_LINK_LOST
                 || event->cause == RDX_RECORD_CAUSE_CCC_OFF
                 || event->cause == RDX_RECORD_CAUSE_SHUTDOWN;
@@ -506,7 +508,7 @@ static void rdx_v23_record_engine_event(
 #endif
 
     if (event->type == RDX_RECORD_ENGINE_SESSION_STOPPED) {
-        u8 notify = event->cause != RDX_RECORD_CAUSE_LINK_LOST
+        uint8_t notify = event->cause != RDX_RECORD_CAUSE_LINK_LOST
                     && event->cause != RDX_RECORD_CAUSE_CCC_OFF
                     && event->cause != RDX_RECORD_CAUSE_SHUTDOWN;
 
@@ -686,25 +688,25 @@ static void rdx_v23_record_stop(void)
     }
 }
 
-static void rdx_v23_handle_record(const u8 *data, u16 len)
+static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
 {
-    static const u8 stop[] = "*APP#record#0#";
-    static const u8 stop_meeting_16k[] = "*APP#record#0#0#1#";
-    static const u8 stop_call[] = "*APP#record#0#1#";
-    static const u8 stop_call_16k[] = "*APP#record#0#1#1#";
-    static const u8 start[] = "*APP#record#1#";
-    static const u8 start_meeting[] = "*APP#record#1#0#";
-    static const u8 start_meeting_16k[] = "*APP#record#1#0#1#";
-    static const u8 start_call[] = "*APP#record#1#1#";
-    static const u8 start_call_16k[] = "*APP#record#1#1#1#";
-    static const u8 pause[] = "*APP#record#2#";
-    static const u8 pause_meeting_16k[] = "*APP#record#2#0#1#";
-    static const u8 pause_call[] = "*APP#record#2#1#";
-    static const u8 pause_call_16k[] = "*APP#record#2#1#1#";
-    static const u8 resume[] = "*APP#record#3#";
-    static const u8 resume_meeting_16k[] = "*APP#record#3#0#1#";
-    static const u8 resume_call[] = "*APP#record#3#1#";
-    static const u8 resume_call_16k[] = "*APP#record#3#1#1#";
+    static const uint8_t stop[] = "*APP#record#0#";
+    static const uint8_t stop_meeting_16k[] = "*APP#record#0#0#1#";
+    static const uint8_t stop_call[] = "*APP#record#0#1#";
+    static const uint8_t stop_call_16k[] = "*APP#record#0#1#1#";
+    static const uint8_t start[] = "*APP#record#1#";
+    static const uint8_t start_meeting[] = "*APP#record#1#0#";
+    static const uint8_t start_meeting_16k[] = "*APP#record#1#0#1#";
+    static const uint8_t start_call[] = "*APP#record#1#1#";
+    static const uint8_t start_call_16k[] = "*APP#record#1#1#1#";
+    static const uint8_t pause[] = "*APP#record#2#";
+    static const uint8_t pause_meeting_16k[] = "*APP#record#2#0#1#";
+    static const uint8_t pause_call[] = "*APP#record#2#1#";
+    static const uint8_t pause_call_16k[] = "*APP#record#2#1#1#";
+    static const uint8_t resume[] = "*APP#record#3#";
+    static const uint8_t resume_meeting_16k[] = "*APP#record#3#0#1#";
+    static const uint8_t resume_call[] = "*APP#record#3#1#";
+    static const uint8_t resume_call_16k[] = "*APP#record#3#1#1#";
 
     if (!rdx_protocol_v23_query_ready(rdx_v23_record_context, "record", len)) {
         return;
@@ -782,7 +784,7 @@ void rdx_protocol_v23_record_exit(void)
     }
 }
 
-void rdx_protocol_v23_record_handle_link_change(u8 connected)
+void rdx_protocol_v23_record_handle_link_change(uint8_t connected)
 {
     if (connected) {
         return;
@@ -813,7 +815,7 @@ void rdx_protocol_v23_record_handle_ccc_change(void)
         RDX_RECORD_CAUSE_CCC_OFF);
 }
 
-u8 rdx_protocol_v23_record_handle_command(const u8 *data, u16 len)
+uint8_t rdx_protocol_v23_record_handle_command(const uint8_t *data, uint16_t len)
 {
     if (rdx_protocol_v23_data_starts_with(
             data, len, rdx_cmd_record, sizeof(rdx_cmd_record) - 1)) {
@@ -835,7 +837,7 @@ u8 rdx_protocol_v23_record_handle_command(const u8 *data, u16 len)
 }
 
 void rdx_protocol_v23_record_handle_can_send(
-    u32 session_id, u32 capture_generation)
+    uint32_t session_id, uint32_t capture_generation)
 {
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
     rdx_record_engine_notify_destination_ready(

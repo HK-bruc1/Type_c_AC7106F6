@@ -1,8 +1,12 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
 
-#include "system/includes.h"
+#include "timer.h"
 #include "rdx/rdx_appkey_verifier.h"
 #include "rdx/rdx_ble_name_service.h"
 #include "rdx/rdx_device_management_service.h"
@@ -23,25 +27,25 @@
 #define RDX_APPKEY_HEX_STRING_SIZE              (RDX_APPKEY_PAYLOAD_SIZE * 2 + 1)
 #define RDX_POST_ACK_DISCONNECT_DELAY_MS         100
 
-static const u8 rdx_cmd_battery[] = "*APP#battery#";
-static const u8 rdx_cmd_version[] = "*APP#version#";
-static const u8 rdx_cmd_appkey[] = "*APP#appkey#";
+static const uint8_t rdx_cmd_battery[] = "*APP#battery#";
+static const uint8_t rdx_cmd_version[] = "*APP#version#";
+static const uint8_t rdx_cmd_appkey[] = "*APP#appkey#";
 #if RDX_CFG_RTC_ENABLE
-static const u8 rdx_cmd_rtc[] = "*APP#rtc#";
+static const uint8_t rdx_cmd_rtc[] = "*APP#rtc#";
 #endif
-static const u8 rdx_cmd_ostype[] = "*APP#ostype#";
-static const u8 rdx_cmd_auth_sn[] = RDX_CMD_DL_AUTH_SN;
-static const u8 rdx_cmd_offtime_check[] = RDX_CMD_DL_OFFTIME_CHECK;
-static const u8 rdx_cmd_bound[] = RDX_CMD_DL_BOUND;
-static const u8 rdx_cmd_unbound[] = RDX_CMD_DL_UNBOUND;
-static const u8 rdx_cmd_set_default[] = RDX_CMD_DL_SET_DEFAULT;
-static const u8 rdx_cmd_ble_name_query[] = RDX_CMD_DL_BLE_NAME_QUERY;
-static const u8 rdx_cmd_ble_name_set[] = RDX_CMD_DL_BLE_NAME_SET;
+static const uint8_t rdx_cmd_ostype[] = "*APP#ostype#";
+static const uint8_t rdx_cmd_auth_sn[] = RDX_CMD_DL_AUTH_SN;
+static const uint8_t rdx_cmd_offtime_check[] = RDX_CMD_DL_OFFTIME_CHECK;
+static const uint8_t rdx_cmd_bound[] = RDX_CMD_DL_BOUND;
+static const uint8_t rdx_cmd_unbound[] = RDX_CMD_DL_UNBOUND;
+static const uint8_t rdx_cmd_set_default[] = RDX_CMD_DL_SET_DEFAULT;
+static const uint8_t rdx_cmd_ble_name_query[] = RDX_CMD_DL_BLE_NAME_QUERY;
+static const uint8_t rdx_cmd_ble_name_set[] = RDX_CMD_DL_BLE_NAME_SET;
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
-static const u8 rdx_cmd_mic_gain_query[] = RDX_CMD_DL_MIC_GAIN_QUERY;
-static const u8 rdx_cmd_mic_gain_set[] = RDX_CMD_DL_MIC_GAIN_SET;
+static const uint8_t rdx_cmd_mic_gain_query[] = RDX_CMD_DL_MIC_GAIN_QUERY;
+static const uint8_t rdx_cmd_mic_gain_set[] = RDX_CMD_DL_MIC_GAIN_SET;
 #endif
-static const u8 rdx_rsp_ostype[] = "*DEV#ostype#";
+static const uint8_t rdx_rsp_ostype[] = "*DEV#ostype#";
 
 typedef enum {
     RDX_POST_ACK_ACTION_NONE = 0,
@@ -51,22 +55,22 @@ typedef enum {
 
 struct rdx_protocol_v23_management_state {
     struct rdx_protocol_v23_context *context;
-    u8 state_transition_pending;
-    u8 post_ack_action;
-    u16 post_ack_timer_id;
-    u32 post_ack_generation;
+    uint8_t state_transition_pending;
+    uint8_t post_ack_action;
+    uint16_t post_ack_timer_id;
+    uint32_t post_ack_generation;
 };
 
 static struct rdx_protocol_v23_management_state rdx_v23_management;
-static u32 rdx_v23_post_ack_generation_seed;
+static uint32_t rdx_v23_post_ack_generation_seed;
 
-static const char *rdx_v23_post_ack_action_name(u8 action);
+static const char *rdx_v23_post_ack_action_name(uint8_t action);
 
-static void rdx_v23_bytes_to_hex(const u8 *data, u16 len,
-                                  char *output, u16 output_size)
+static void rdx_v23_bytes_to_hex(const uint8_t *data, uint16_t len,
+                                  char *output, uint16_t output_size)
 {
     static const char hex[] = "0123456789ABCDEF";
-    u16 i;
+    uint16_t i;
 
     if (!data || !output || output_size < len * 2 + 1) {
         if (output && output_size) {
@@ -83,7 +87,7 @@ static void rdx_v23_bytes_to_hex(const u8 *data, u16 len,
 static void rdx_v23_send_battery(void)
 {
     const struct rdx_product_profile *profile = rdx_product_profile_get();
-    u8 response[32];
+    uint8_t response[32];
     int len;
     int ret;
 
@@ -103,7 +107,7 @@ static void rdx_v23_send_battery(void)
 static void rdx_v23_send_version(void)
 {
     const struct rdx_product_profile *profile = rdx_product_profile_get();
-    u8 response[48];
+    uint8_t response[48];
     int len;
     int ret;
 
@@ -123,7 +127,7 @@ static void rdx_v23_send_version(void)
 
 static void rdx_v23_send_auth_sn(void)
 {
-    u8 response[96];
+    uint8_t response[96];
     int len;
     int ret;
 
@@ -145,9 +149,9 @@ static void rdx_v23_send_auth_sn(void)
 
 static void rdx_v23_send_offtime_check(void)
 {
-    u8 response[40];
-    u32 minutes = 0;
-    u8 result;
+    uint8_t response[40];
+    uint32_t minutes = 0;
+    uint8_t result;
     int len;
     int ret;
 
@@ -166,9 +170,9 @@ static void rdx_v23_send_offtime_check(void)
            (unsigned int)minutes, len, ret);
 }
 
-static int rdx_v23_send_ble_name_result(u8 query, u8 result)
+static int rdx_v23_send_ble_name_result(uint8_t query, uint8_t result)
 {
-    u8 response[48];
+    uint8_t response[48];
     const char *name = rdx_ble_name_get();
     const char *prefix = query ? RDX_CMD_UP_BLE_NAME_QUERY
                                : RDX_CMD_UP_BLE_NAME_SET;
@@ -192,7 +196,7 @@ static int rdx_v23_send_ble_name_result(u8 query, u8 result)
 }
 
 
-static void rdx_v23_handle_ble_name_query(const u8 *data, u16 len)
+static void rdx_v23_handle_ble_name_query(const uint8_t *data, uint16_t len)
 {
     if (!rdx_protocol_v23_data_equals(data, len, rdx_cmd_ble_name_query,
                               sizeof(rdx_cmd_ble_name_query) - 1)) {
@@ -206,12 +210,12 @@ static void rdx_v23_handle_ble_name_query(const u8 *data, u16 len)
     rdx_v23_send_ble_name_result(1, 0);
 }
 
-static void rdx_v23_handle_ble_name_set(const u8 *data, u16 len)
+static void rdx_v23_handle_ble_name_set(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_ble_name_set) - 1;
-    u16 name_len;
-    u16 i;
-    u8 changed = 0;
+    const uint16_t prefix_len = sizeof(rdx_cmd_ble_name_set) - 1;
+    uint16_t name_len;
+    uint16_t i;
+    uint8_t changed = 0;
     int ret;
     int refresh_ret = 0;
 
@@ -251,7 +255,7 @@ static void rdx_v23_handle_ble_name_set(const u8 *data, u16 len)
     rdx_v23_send_ble_name_result(0, ret ? 1 : 0);
 }
 
-static const char *rdx_v23_post_ack_action_name(u8 action)
+static const char *rdx_v23_post_ack_action_name(uint8_t action)
 {
     switch (action) {
     case RDX_POST_ACK_ACTION_UNBOUND:
@@ -263,7 +267,7 @@ static const char *rdx_v23_post_ack_action_name(u8 action)
     }
 }
 
-static u32 rdx_v23_next_generation(u32 generation)
+static uint32_t rdx_v23_next_generation(uint32_t generation)
 {
     generation++;
     return generation ? generation : 1;
@@ -271,8 +275,8 @@ static u32 rdx_v23_next_generation(u32 generation)
 
 static void rdx_v23_cancel_post_ack_action(const char *reason)
 {
-    u8 action;
-    u16 timer_id;
+    uint8_t action;
+    uint16_t timer_id;
 
     if (!rdx_v23_management.state_transition_pending
         && !rdx_v23_management.post_ack_timer_id) {
@@ -294,8 +298,8 @@ static void rdx_v23_cancel_post_ack_action(const char *reason)
 
 static void rdx_v23_post_ack_timeout(void *priv)
 {
-    u32 generation = (u32)(uintptr_t)priv;
-    u8 action = rdx_v23_management.post_ack_action;
+    uint32_t generation = (uint32_t)(uintptr_t)priv;
+    uint8_t action = rdx_v23_management.post_ack_action;
 
     if (!rdx_v23_management.context
         || !rdx_v23_management.context->initialized
@@ -324,10 +328,10 @@ static void rdx_v23_post_ack_timeout(void *priv)
     rdx_transport_disconnect();
 }
 
-static void rdx_v23_schedule_post_ack_disconnect(u8 action, int ack_ret)
+static void rdx_v23_schedule_post_ack_disconnect(uint8_t action, int ack_ret)
 {
-    u32 generation;
-    u16 timer_id;
+    uint32_t generation;
+    uint16_t timer_id;
 
     if (!rdx_v23_management.context->session.connected) {
         printf("[RDX][SESSION] post_ack action=%s event=skip reason=session_inactive ack_ret=%d\n",
@@ -357,18 +361,18 @@ static void rdx_v23_schedule_post_ack_disconnect(u8 action, int ack_ret)
     rdx_v23_post_ack_timeout((void *)(uintptr_t)generation);
 }
 
-static int rdx_v23_parse_nonnegative_s32(const u8 *data, u16 len,
-                                          s32 *value)
+static int rdx_v23_parse_nonnegative_s32(const uint8_t *data, uint16_t len,
+                                          int32_t *value)
 {
-    u32 parsed = 0;
-    u16 i;
+    uint32_t parsed = 0;
+    uint16_t i;
 
     if (!data || !len || !value) {
         return -1;
     }
 
     for (i = 0; i < len; i++) {
-        u8 digit;
+        uint8_t digit;
 
         if (data[i] < '0' || data[i] > '9') {
             return -1;
@@ -380,17 +384,17 @@ static int rdx_v23_parse_nonnegative_s32(const u8 *data, u16 len,
         parsed = parsed * 10 + digit;
     }
 
-    *value = (s32)parsed;
+    *value = (int32_t)parsed;
     return 0;
 }
 
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
-static int rdx_v23_parse_decimal_fields(const u8 *data, u16 len,
-                                          s32 *values, u8 field_count)
+static int rdx_v23_parse_decimal_fields(const uint8_t *data, uint16_t len,
+                                          int32_t *values, uint8_t field_count)
 {
-    u16 field_start = 0;
-    u16 i;
-    u8 field = 0;
+    uint16_t field_start = 0;
+    uint16_t i;
+    uint8_t field = 0;
 
     if (!data || !len || !values || !field_count
         || data[len - 1] != '#') {
@@ -414,10 +418,10 @@ static int rdx_v23_parse_decimal_fields(const u8 *data, u16 len,
     return field == field_count && field_start == len ? 0 : -1;
 }
 
-static int rdx_v23_send_mic_gain_result(u8 query, u8 result,
-                                         s32 mode, u8 gain)
+static int rdx_v23_send_mic_gain_result(uint8_t query, uint8_t result,
+                                         int32_t mode, uint8_t gain)
 {
-    u8 response[64];
+    uint8_t response[64];
     const char *prefix = query ? RDX_CMD_UP_MIC_GAIN_QUERY
                                : RDX_CMD_UP_MIC_GAIN_SET;
     const char *command = query ? "cmicgain" : "micgain";
@@ -439,11 +443,11 @@ static int rdx_v23_send_mic_gain_result(u8 query, u8 result,
     return ret;
 }
 
-static void rdx_v23_handle_mic_gain_query(const u8 *data, u16 len)
+static void rdx_v23_handle_mic_gain_query(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_mic_gain_query) - 1;
-    s32 fields[1];
-    u8 gain = 0;
+    const uint16_t prefix_len = sizeof(rdx_cmd_mic_gain_query) - 1;
+    int32_t fields[1];
+    uint8_t gain = 0;
     int ret;
 
     if (len <= prefix_len
@@ -464,16 +468,16 @@ static void rdx_v23_handle_mic_gain_query(const u8 *data, u16 len)
         return;
     }
 
-    ret = rdx_mic_gain_get_configured((u8)fields[0], &gain);
+    ret = rdx_mic_gain_get_configured((uint8_t)fields[0], &gain);
     rdx_v23_send_mic_gain_result(1, ret ? 1 : 0,
                                   fields[0], ret ? 0 : gain);
 }
 
-static void rdx_v23_handle_mic_gain_set(const u8 *data, u16 len)
+static void rdx_v23_handle_mic_gain_set(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_mic_gain_set) - 1;
-    s32 fields[3];
-    u8 effective = 0;
+    const uint16_t prefix_len = sizeof(rdx_cmd_mic_gain_set) - 1;
+    int32_t fields[3];
+    uint8_t effective = 0;
     int ret;
 
     if (len <= prefix_len
@@ -508,7 +512,7 @@ static void rdx_v23_handle_mic_gain_set(const u8 *data, u16 len)
         return;
     }
     if (rdx_v23_management.state_transition_pending) {
-        rdx_mic_gain_get_configured((u8)fields[0], &effective);
+        rdx_mic_gain_get_configured((uint8_t)fields[0], &effective);
         printf("[RDX][MIC_GAIN] cmd=micgain result=failed reason=transition_pending action=%s mode=%d wire_gain1=%d wire_gain2=%d effective=%u\n",
                rdx_v23_post_ack_action_name(
                    rdx_v23_management.post_ack_action),
@@ -517,8 +521,8 @@ static void rdx_v23_handle_mic_gain_set(const u8 *data, u16 len)
         return;
     }
 
-    ret = rdx_mic_gain_set_configured((u8)fields[0],
-                                      (u8)fields[1], &effective);
+    ret = rdx_mic_gain_set_configured((uint8_t)fields[0],
+                                      (uint8_t)fields[1], &effective);
     printf("[RDX][MIC_GAIN] cmd=micgain result=%s mode=%d wire_gain1=%d wire_gain2=%d configured_gain=%u apply=next_session ret=%d\n",
            ret ? "failed" : "ok", (int)fields[0],
            (int)fields[1], (int)fields[2], effective, ret);
@@ -527,10 +531,10 @@ static void rdx_v23_handle_mic_gain_set(const u8 *data, u16 len)
 }
 #endif
 
-static int rdx_v23_send_bound_result(u8 result)
+static int rdx_v23_send_bound_result(uint8_t result)
 {
-    u8 response[32];
-    u8 bound = rdx_device_management_get_bound();
+    uint8_t response[32];
+    uint8_t bound = rdx_device_management_get_bound();
     int len;
     int ret;
 
@@ -547,10 +551,10 @@ static int rdx_v23_send_bound_result(u8 result)
     return ret;
 }
 
-static int rdx_v23_send_unbound_result(u8 result)
+static int rdx_v23_send_unbound_result(uint8_t result)
 {
-    u8 response[32];
-    u8 bound = rdx_device_management_get_bound();
+    uint8_t response[32];
+    uint8_t bound = rdx_device_management_get_bound();
     int len;
     int ret;
 
@@ -567,9 +571,9 @@ static int rdx_v23_send_unbound_result(u8 result)
     return ret;
 }
 
-static int rdx_v23_send_set_default_result(u8 result)
+static int rdx_v23_send_set_default_result(uint8_t result)
 {
-    u8 response[24];
+    uint8_t response[24];
     int len;
     int ret;
 
@@ -586,10 +590,10 @@ static int rdx_v23_send_set_default_result(u8 result)
     return ret;
 }
 
-static void rdx_v23_handle_bound(const u8 *data, u16 len)
+static void rdx_v23_handle_bound(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_bound) - 1;
-    const u16 request_len = prefix_len + 2;
+    const uint16_t prefix_len = sizeof(rdx_cmd_bound) - 1;
+    const uint16_t request_len = prefix_len + 2;
     int ret;
     int ack_ret;
 
@@ -625,12 +629,12 @@ static void rdx_v23_handle_bound(const u8 *data, u16 len)
     }
 }
 
-static void rdx_v23_handle_unbound(const u8 *data, u16 len)
+static void rdx_v23_handle_unbound(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_unbound) - 1;
-    u16 separator;
-    s32 user_para;
-    u8 format_en;
+    const uint16_t prefix_len = sizeof(rdx_cmd_unbound) - 1;
+    uint16_t separator;
+    int32_t user_para;
+    uint8_t format_en;
     int ret;
     int ack_ret;
 
@@ -676,7 +680,7 @@ static void rdx_v23_handle_unbound(const u8 *data, u16 len)
     }
 }
 
-static void rdx_v23_handle_set_default(const u8 *data, u16 len)
+static void rdx_v23_handle_set_default(const uint8_t *data, uint16_t len)
 {
     int ret;
     int ack_ret;
@@ -705,13 +709,13 @@ static void rdx_v23_handle_set_default(const u8 *data, u16 len)
     }
 }
 
-static void rdx_v23_handle_appkey(const u8 *data, u16 len)
+static void rdx_v23_handle_appkey(const uint8_t *data, uint16_t len)
 {
     const struct rdx_product_profile *profile = rdx_product_profile_get();
-    const u16 prefix_len = sizeof(rdx_cmd_appkey) - 1;
-    const u16 request_len = prefix_len + RDX_APPKEY_PAYLOAD_SIZE + 1;
-    static const u8 success[] = "*DEV#appkey#0#";
-    static const u8 failure[] = "*DEV#appkey#1#";
+    const uint16_t prefix_len = sizeof(rdx_cmd_appkey) - 1;
+    const uint16_t request_len = prefix_len + RDX_APPKEY_PAYLOAD_SIZE + 1;
+    static const uint8_t success[] = "*DEV#appkey#0#";
+    static const uint8_t failure[] = "*DEV#appkey#1#";
     char appkey_hex[RDX_APPKEY_HEX_STRING_SIZE];
     char appkey_plaintext[RDX_APPKEY_PLAINTEXT_SIZE + 1];
     char appkey_plaintext_hex[RDX_APPKEY_PLAINTEXT_SIZE * 2 + 1];
@@ -733,7 +737,7 @@ static void rdx_v23_handle_appkey(const u8 *data, u16 len)
                                profile->app_key_count,
                                appkey_plaintext,
                                sizeof(appkey_plaintext));
-    rdx_v23_bytes_to_hex((const u8 *)appkey_plaintext,
+    rdx_v23_bytes_to_hex((const uint8_t *)appkey_plaintext,
                           RDX_APPKEY_PLAINTEXT_SIZE,
                           appkey_plaintext_hex,
                           sizeof(appkey_plaintext_hex));
@@ -773,14 +777,14 @@ reject:
 }
 
 #if RDX_CFG_RTC_ENABLE
-static void rdx_v23_handle_rtc(const u8 *data, u16 len)
+static void rdx_v23_handle_rtc(const uint8_t *data, uint16_t len)
 {
-    const u16 prefix_len = sizeof(rdx_cmd_rtc) - 1;
-    u8 response[40];
-    u16 value_len;
-    u16 i;
-    u32 timestamp = 0;
-    u8 result = 1;
+    const uint16_t prefix_len = sizeof(rdx_cmd_rtc) - 1;
+    uint8_t response[40];
+    uint16_t value_len;
+    uint16_t i;
+    uint32_t timestamp = 0;
+    uint8_t result = 1;
     int response_len;
     int ret;
 
@@ -839,13 +843,13 @@ void rdx_protocol_v23_management_exit(void)
     rdx_v23_cancel_post_ack_action("protocol_exit");
 }
 
-void rdx_protocol_v23_management_handle_link_change(u8 connected)
+void rdx_protocol_v23_management_handle_link_change(uint8_t connected)
 {
     rdx_v23_cancel_post_ack_action(connected ? "new_connection"
                                              : "link_disconnected");
 }
 
-u8 rdx_protocol_v23_management_handle_command(const u8 *data, u16 len)
+uint8_t rdx_protocol_v23_management_handle_command(const uint8_t *data, uint16_t len)
 {
     if (rdx_protocol_v23_data_equals(
             data, len, rdx_cmd_battery, sizeof(rdx_cmd_battery) - 1)) {

@@ -1,8 +1,9 @@
+#include <stdint.h>
+#include <stdio.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE && RDX_CFG_RTC_ENABLE
-
-#include "system/includes.h"
 #include "rdx/ports/rdx_clock_port.h"
 #include "rdx/rdx_rtc_service.h"
 #include "rdx/ports/rdx_rtc_backup_repository_port.h"

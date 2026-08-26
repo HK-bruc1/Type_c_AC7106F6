@@ -23,7 +23,8 @@ static uint8_t rdx_audio_capture_fake_params_valid(
 void rdx_audio_capture_fake_reset(void)
 {
     memset(&fake_capture, 0, sizeof(fake_capture));
-    fake_capture.probe_result = RDX_AUDIO_CAPTURE_OK;
+    fake_capture.structure_result = RDX_AUDIO_CAPTURE_OK;
+    fake_capture.readiness_result = RDX_AUDIO_CAPTURE_OK;
     fake_capture.open_result = RDX_AUDIO_CAPTURE_OK;
 }
 
@@ -33,10 +34,16 @@ rdx_audio_capture_fake_get_state(void)
     return &fake_capture;
 }
 
-void rdx_audio_capture_fake_set_probe_result(
+void rdx_audio_capture_fake_set_structure_result(
     enum rdx_audio_capture_result result)
 {
-    fake_capture.probe_result = result;
+    fake_capture.structure_result = result;
+}
+
+void rdx_audio_capture_fake_set_readiness_result(
+    enum rdx_audio_capture_result result)
+{
+    fake_capture.readiness_result = result;
 }
 
 void rdx_audio_capture_fake_set_open_result(
@@ -67,7 +74,7 @@ int rdx_audio_capture_fake_emit_fault(enum rdx_record_cause cause)
     return 0;
 }
 
-enum rdx_audio_capture_result rdx_audio_capture_probe(
+static uint8_t rdx_audio_capture_fake_format_supported(
     enum rdx_record_scene scene, enum rdx_record_format_id format_id)
 {
     if ((scene == RDX_RECORD_SCENE_MEETING
@@ -76,9 +83,27 @@ enum rdx_audio_capture_result rdx_audio_capture_probe(
             && format_id != RDX_RECORD_FORMAT_CALL_V1)
         || (scene != RDX_RECORD_SCENE_MEETING
             && scene != RDX_RECORD_SCENE_CALL)) {
+        return 0;
+    }
+    return 1;
+}
+
+enum rdx_audio_capture_result rdx_audio_capture_check_structure(
+    enum rdx_record_scene scene, enum rdx_record_format_id format_id)
+{
+    if (!rdx_audio_capture_fake_format_supported(scene, format_id)) {
         return RDX_AUDIO_CAPTURE_UNSUPPORTED;
     }
-    return fake_capture.probe_result;
+    return fake_capture.structure_result;
+}
+
+enum rdx_audio_capture_result rdx_audio_capture_check_readiness(
+    enum rdx_record_scene scene, enum rdx_record_format_id format_id)
+{
+    if (!rdx_audio_capture_fake_format_supported(scene, format_id)) {
+        return RDX_AUDIO_CAPTURE_UNSUPPORTED;
+    }
+    return fake_capture.readiness_result;
 }
 
 enum rdx_audio_capture_result rdx_audio_capture_open(

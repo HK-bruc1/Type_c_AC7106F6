@@ -1,8 +1,10 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
-
-#include "system/includes.h"
 #include "rdx/ports/rdx_device_identity_port.h"
 #include "rdx/ports/rdx_product_profile_port.h"
 #include "rdx/rdx_device_state_service.h"

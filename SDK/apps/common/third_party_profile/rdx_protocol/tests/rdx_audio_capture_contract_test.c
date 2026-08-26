@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rdx/rdx_capability.h"
 #include "rdx_audio_capture_fake.h"
 
 struct capture_observer {
@@ -61,10 +62,12 @@ static void test_audio_capture_lifecycle(void)
     params.frame_priv = &observer;
 
     rdx_audio_capture_fake_reset();
-    assert(rdx_audio_capture_probe(params.scene, params.format_id)
+    assert(rdx_audio_capture_check_structure(params.scene, params.format_id)
            == RDX_AUDIO_CAPTURE_OK);
-    assert(rdx_audio_capture_probe(params.scene,
-                                   RDX_RECORD_FORMAT_MEETING_V1)
+    assert(rdx_audio_capture_check_readiness(params.scene, params.format_id)
+           == RDX_AUDIO_CAPTURE_OK);
+    assert(rdx_audio_capture_check_structure(
+               params.scene, RDX_RECORD_FORMAT_MEETING_V1)
            == RDX_AUDIO_CAPTURE_UNSUPPORTED);
     assert(rdx_audio_capture_open(NULL) == RDX_AUDIO_CAPTURE_UNSUPPORTED);
     assert(rdx_audio_capture_open(&params) == RDX_AUDIO_CAPTURE_OK);
@@ -109,17 +112,42 @@ static void test_audio_capture_lifecycle(void)
 static void test_audio_capture_failures(void)
 {
     rdx_audio_capture_fake_reset();
-    rdx_audio_capture_fake_set_probe_result(
+    rdx_audio_capture_fake_set_structure_result(
+        RDX_AUDIO_CAPTURE_FAILED);
+    rdx_audio_capture_fake_set_readiness_result(
         RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE);
-    assert(rdx_audio_capture_probe(RDX_RECORD_SCENE_MEETING,
-                                   RDX_RECORD_FORMAT_MEETING_V1)
+    assert(rdx_audio_capture_check_structure(
+               RDX_RECORD_SCENE_MEETING,
+               RDX_RECORD_FORMAT_MEETING_V1)
+           == RDX_AUDIO_CAPTURE_FAILED);
+    assert(rdx_audio_capture_check_readiness(
+               RDX_RECORD_SCENE_MEETING,
+               RDX_RECORD_FORMAT_MEETING_V1)
            == RDX_AUDIO_CAPTURE_SOURCE_UNAVAILABLE);
+}
+
+static void test_capability_mapping(void)
+{
+    unsigned long caps;
+
+    caps = RDX_REQUIRED_CAPS_FROM_ABILITY(RDX_ABILITY_NONE);
+    assert(caps == RDX_REQUIRED_BASE_CAPS);
+    caps = RDX_REQUIRED_CAPS_FROM_ABILITY(
+        RDX_ABILITY_RTC
+        | RDX_ABILITY_CONFERENCE_RECORDING
+        | RDX_ABILITY_CALL_RECORDING);
+    assert((caps & RDX_CAP_RTC) != 0);
+    assert((caps & RDX_CAP_MEETING_CAPTURE) != 0);
+    assert((caps & RDX_CAP_CALL_CAPTURE) != 0);
+    assert((caps & RDX_REQUIRED_BASE_CAPS) == RDX_REQUIRED_BASE_CAPS);
+    assert(RDX_CAP_RTC != RDX_ABILITY_RTC);
 }
 
 int main(void)
 {
     test_audio_capture_lifecycle();
     test_audio_capture_failures();
+    test_capability_mapping();
     puts("RDX audio capture contract tests passed");
     return 0;
 }

@@ -1,29 +1,31 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE && RDX_CFG_RECORD_MARK_ENABLE
-
-#include "system/includes.h"
 #include "rdx/rdx_session_metadata_service.h"
 
 #define RDX_SESSION_MARK_MAX                    20
 #define RDX_SESSION_MARK_DEDUP_WINDOW_MS        6000UL
 
 struct rdx_session_metadata_runtime {
-    u32 session_id;
-    u32 marks[RDX_SESSION_MARK_MAX];
-    u8 mark_count;
+    uint32_t session_id;
+    uint32_t marks[RDX_SESSION_MARK_MAX];
+    uint8_t mark_count;
 };
 
 static struct rdx_session_metadata_runtime rdx_session_metadata;
 
-void rdx_session_metadata_begin(u32 session_id)
+void rdx_session_metadata_begin(uint32_t session_id)
 {
     memset(&rdx_session_metadata, 0, sizeof(rdx_session_metadata));
     rdx_session_metadata.session_id = session_id;
     printf("[RDX][METADATA] begin session=%u\n", (unsigned int)session_id);
 }
 
-void rdx_session_metadata_end(u32 session_id)
+void rdx_session_metadata_end(uint32_t session_id)
 {
     if (session_id != rdx_session_metadata.session_id) {
         return;
@@ -34,11 +36,11 @@ void rdx_session_metadata_end(u32 session_id)
 }
 
 void rdx_session_metadata_apply_mark(
-    u32 session_id, u64 active_pts, u8 source,
+    uint32_t session_id, uint64_t active_pts, uint8_t source,
     enum rdx_record_result engine_result,
     struct rdx_session_mark *mark)
 {
-    u32 offset_ms = (u32)active_pts;
+    uint32_t offset_ms = (uint32_t)active_pts;
 
     memset(mark, 0, sizeof(*mark));
     mark->session_id = session_id;

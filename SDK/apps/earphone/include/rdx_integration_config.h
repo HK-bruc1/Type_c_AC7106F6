@@ -13,6 +13,8 @@
 #if TCFG_THIRD_PARTY_PROTOCOLS_ENABLE && (TCFG_THIRD_PARTY_PROTOCOLS_SEL & RDX_EN)
 
 #include "rdx_protocol/integration/type_c_ac7106f6/rdx_product_compat_profile.h"
+#include "rdx/rdx_capability.h"
+#include "rdx_protocol/adapters/jl_br56/rdx_capabilities_jl_br56.h"
 
 /*
  * Internal compile gates are derived from the product's advertised Ability.
@@ -75,16 +77,52 @@
 #error "RDX BLE TX can-send timeout must be between 20 and 1000 ms"
 #endif
 
-/* Reject advertised abilities that this target integration cannot provide. */
-#define RDX_CFG_IMPLEMENTED_ABILITY            \
+/* Reject product abilities that this Product Integration does not support. */
+#define RDX_PRODUCT_SUPPORTED_ABILITY          \
     (RDX_ABILITY_RTC                          | \
      RDX_ABILITY_CONFERENCE_RECORDING         | \
      RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
      RDX_ABILITY_RECORD_MARK)
 
-#if (RDX_COMPAT_DEVICE_ABILITY & ~RDX_CFG_IMPLEMENTED_ABILITY)
+#if (RDX_COMPAT_DEVICE_ABILITY & ~RDX_PRODUCT_SUPPORTED_ABILITY)
 #error "RDX Device Ability contains a feature not implemented by this target"
+#endif
+
+/*
+ * Required Capability is derived from Product Ability. Compiled Capability
+ * describes the Adapter sources selected into this exact firmware build.
+ */
+#define RDX_REQUIRED_PORT_CAPS                 \
+    RDX_REQUIRED_CAPS_FROM_ABILITY(RDX_COMPAT_DEVICE_ABILITY)
+
+#if RDX_CFG_RTC_ENABLE
+#define RDX_CFG_RTC_COMPILED_CAPS              RDX_CAP_RTC
+#else
+#define RDX_CFG_RTC_COMPILED_CAPS              RDX_CAP_NONE
+#endif
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+#define RDX_CFG_MEETING_COMPILED_CAPS          RDX_CAP_MEETING_CAPTURE
+#else
+#define RDX_CFG_MEETING_COMPILED_CAPS          RDX_CAP_NONE
+#endif
+#if RDX_CFG_CALL_RECORDING_ENABLE
+#define RDX_CFG_CALL_COMPILED_CAPS             RDX_CAP_CALL_CAPTURE
+#else
+#define RDX_CFG_CALL_COMPILED_CAPS             RDX_CAP_NONE
+#endif
+
+#define RDX_PORT_COMPILED_CAPS                 \
+    (RDX_REQUIRED_BASE_CAPS                   | \
+     RDX_CFG_RTC_COMPILED_CAPS                | \
+     RDX_CFG_MEETING_COMPILED_CAPS            | \
+     RDX_CFG_CALL_COMPILED_CAPS)
+
+#if (RDX_REQUIRED_PORT_CAPS & ~RDX_JL_BR56_AVAILABLE_CAPS)
+#error "RDX Product Ability requires a capability unavailable in JL BR56 Adapter"
+#endif
+#if (RDX_REQUIRED_PORT_CAPS & ~RDX_PORT_COMPILED_CAPS)
+#error "RDX required capability source is not selected into this build"
 #endif
 
 #if TCFG_THIRD_PARTY_PROTOCOLS_SEL != RDX_EN
@@ -167,7 +205,9 @@
 #define RDX_CFG_ONLINE_RECORDING_ENABLE        0
 #define RDX_CFG_RECORD_PAUSE_RESUME_ENABLE     0
 #define RDX_CFG_RECORD_MARK_ENABLE             0
-#define RDX_CFG_IMPLEMENTED_ABILITY            0
+#define RDX_PRODUCT_SUPPORTED_ABILITY          0
+#define RDX_REQUIRED_PORT_CAPS                 0
+#define RDX_PORT_COMPILED_CAPS                 0
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             0
 #define RDX_CFG_KEY_DIAG_ENABLE                0
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         0

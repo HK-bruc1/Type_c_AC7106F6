@@ -28,20 +28,38 @@ static enum rdx_audio_capture_result rdx_audio_capture_map_result(int ret)
     return RDX_AUDIO_CAPTURE_FAILED;
 }
 
-enum rdx_audio_capture_result rdx_audio_capture_probe(
+enum rdx_audio_capture_result rdx_audio_capture_check_structure(
     enum rdx_record_scene scene, enum rdx_record_format_id format_id)
 {
-    (void)format_id;
-
     switch (scene) {
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
     case RDX_RECORD_SCENE_MEETING:
-        return RDX_AUDIO_CAPTURE_OK;
+        return rdx_audio_capture_map_result(
+            rdx_meeting_capture_jlstream_check_structure(format_id));
 #endif
 #if RDX_CFG_CALL_RECORDING_ENABLE
     case RDX_RECORD_SCENE_CALL:
         return rdx_audio_capture_map_result(
-            rdx_call_capture_jlstream_probe(format_id));
+            rdx_call_capture_jlstream_check_structure(format_id));
+#endif
+    default:
+        return RDX_AUDIO_CAPTURE_UNSUPPORTED;
+    }
+}
+
+enum rdx_audio_capture_result rdx_audio_capture_check_readiness(
+    enum rdx_record_scene scene, enum rdx_record_format_id format_id)
+{
+    switch (scene) {
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+    case RDX_RECORD_SCENE_MEETING:
+        return format_id == RDX_RECORD_FORMAT_MEETING_V1
+               ? RDX_AUDIO_CAPTURE_OK : RDX_AUDIO_CAPTURE_UNSUPPORTED;
+#endif
+#if RDX_CFG_CALL_RECORDING_ENABLE
+    case RDX_RECORD_SCENE_CALL:
+        return rdx_audio_capture_map_result(
+            rdx_call_capture_jlstream_check_readiness(format_id));
 #endif
     default:
         return RDX_AUDIO_CAPTURE_UNSUPPORTED;

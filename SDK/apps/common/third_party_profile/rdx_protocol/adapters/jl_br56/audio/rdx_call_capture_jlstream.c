@@ -182,7 +182,42 @@ static int rdx_call_audio_ai_tx(u8 *data, u32 len)
                     capture_generation, data, len);
 }
 
-int rdx_call_capture_jlstream_probe(
+int rdx_call_capture_jlstream_check_structure(
+    enum rdx_record_format_id format_id)
+{
+    struct jlstream *stream;
+    u16 pipeline_uuid;
+    int ret;
+
+    if (format_id != RDX_RECORD_FORMAT_CALL_V1) {
+        return -EINVAL;
+    }
+    ret = source_dev1_provider_register(&rdx_call_audio_provider);
+    if (ret) {
+        return ret;
+    }
+    pipeline_uuid = jlstream_event_notify(
+        STREAM_EVENT_GET_PIPELINE_UUID, (int)"user_defined");
+    if (!pipeline_uuid) {
+        ret = -EFAULT;
+        goto done;
+    }
+    stream = jlstream_pipeline_parse(pipeline_uuid, NODE_UUID_SOURCE_DEV1);
+    if (!stream) {
+        ret = -EFAULT;
+        goto done;
+    }
+    jlstream_release(stream);
+    ret = 0;
+
+done:
+    source_dev1_provider_unregister(&rdx_call_audio_provider);
+    printf("[RDX][CALL_AUDIO] structure=%s pipeline=0x%x ret=%d\n",
+           ret ? "failed" : "ok", pipeline_uuid, ret);
+    return ret;
+}
+
+int rdx_call_capture_jlstream_check_readiness(
     enum rdx_record_format_id format_id)
 {
     if (format_id != RDX_RECORD_FORMAT_CALL_V1) {
@@ -239,7 +274,7 @@ int rdx_call_capture_jlstream_open(
         || !params->capture_generation) {
         return -EINVAL;
     }
-    ret = rdx_call_capture_jlstream_probe(params->format_id);
+    ret = rdx_call_capture_jlstream_check_readiness(params->format_id);
     if (ret) {
         return ret;
     }

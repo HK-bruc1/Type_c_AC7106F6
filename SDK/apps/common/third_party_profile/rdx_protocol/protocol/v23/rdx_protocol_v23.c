@@ -1,21 +1,23 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
-
-#include "system/includes.h"
 #include "rdx/ports/rdx_transport_port.h"
 #include "rdx_protocol/protocol/v23/rdx_protocol_session.h"
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23.h"
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23_internal.h"
 
 /* Published diagnostic Wire literals; the internal module name is V23. */
-static const u8 rdx_v23_diagnostic_ping[] = "RDX_MVP0_PING";
-static const u8 rdx_v23_diagnostic_pong[] = "RDX_MVP0_PONG";
+static const uint8_t rdx_v23_diagnostic_ping[] = "RDX_MVP0_PING";
+static const uint8_t rdx_v23_diagnostic_pong[] = "RDX_MVP0_PONG";
 
 static struct rdx_protocol_v23_context rdx_v23_context;
 
 int rdx_protocol_v23_send(struct rdx_protocol_v23_context *context,
-                          const u8 *data, u16 len)
+                          const uint8_t *data, uint16_t len)
 {
     if (!context || !context->initialized
         || !rdx_protocol_session_can_send(&context->session)) {
@@ -26,28 +28,28 @@ int rdx_protocol_v23_send(struct rdx_protocol_v23_context *context,
 
 void rdx_protocol_v23_log_rx(struct rdx_protocol_v23_context *context,
                              const char *command,
-                             const u8 *data, u16 len)
+                             const uint8_t *data, uint16_t len)
 {
     printf("[RDX][RX] cmd=%s wire=%.*s len=%u app_ready=%u\n",
            command, (int)len, (char *)data, len,
            context ? context->session.authenticated : 0);
 }
 
-u8 rdx_protocol_v23_data_equals(const u8 *data, u16 len,
-                                const u8 *expected, u16 expected_len)
+uint8_t rdx_protocol_v23_data_equals(const uint8_t *data, uint16_t len,
+                                const uint8_t *expected, uint16_t expected_len)
 {
     return len == expected_len && !memcmp(data, expected, expected_len);
 }
 
-u8 rdx_protocol_v23_data_starts_with(const u8 *data, u16 len,
-                                     const u8 *prefix, u16 prefix_len)
+uint8_t rdx_protocol_v23_data_starts_with(const uint8_t *data, uint16_t len,
+                                     const uint8_t *prefix, uint16_t prefix_len)
 {
     return len >= prefix_len && !memcmp(data, prefix, prefix_len);
 }
 
-u8 rdx_protocol_v23_query_ready(
+uint8_t rdx_protocol_v23_query_ready(
     const struct rdx_protocol_v23_context *context,
-    const char *command, u16 len)
+    const char *command, uint16_t len)
 {
     if (context && rdx_protocol_session_is_ready(&context->session)) {
         return 1;
@@ -94,7 +96,7 @@ void rdx_protocol_v23_exit(void)
     memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
 }
 
-static void rdx_protocol_v23_handle_link_change(u8 connected)
+static void rdx_protocol_v23_handle_link_change(uint8_t connected)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_handle_link_change(connected);
@@ -114,7 +116,7 @@ static void rdx_protocol_v23_handle_ccc_change(void)
            rdx_v23_context.session.authenticated);
 }
 
-static void rdx_protocol_v23_receive(const u8 *data, u16 len)
+static void rdx_protocol_v23_receive(const uint8_t *data, uint16_t len)
 {
     if (!data || !len) {
         return;

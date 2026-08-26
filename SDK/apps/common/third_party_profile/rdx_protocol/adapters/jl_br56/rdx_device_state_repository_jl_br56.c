@@ -20,7 +20,7 @@ struct rdx_device_state_storage_v2 {
     uint8_t bound;
     uint8_t ble_name_len;
     uint8_t reserved0;
-    char ble_name[RDX_BLE_NAME_MAX_LEN + 1];
+    char ble_name[RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1];
     uint8_t reserved1[3];
 };
 
@@ -29,7 +29,7 @@ struct rdx_device_state_storage_v3 {
     uint8_t bound;
     uint8_t ble_name_len;
     uint8_t reserved0;
-    char ble_name[RDX_BLE_NAME_MAX_LEN + 1];
+    char ble_name[RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1];
     uint8_t mic_gain_override_valid;
     uint8_t mic_gain;
     uint8_t reserved1;
@@ -55,14 +55,14 @@ static uint8_t rdx_device_state_repository_name_valid(
     uint8_t i;
 
     if (!len) {
-        for (i = 0; i < RDX_BLE_NAME_MAX_LEN + 1; i++) {
+        for (i = 0; i < RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1; i++) {
             if (name[i]) {
                 return 0;
             }
         }
         return 1;
     }
-    if (len > RDX_BLE_NAME_MAX_LEN || name[len] != '\0') {
+    if (len > RDX_DEVICE_STATE_BLE_NAME_MAX_LEN || name[len] != '\0') {
         return 0;
     }
     for (i = 0; i < len; i++) {
@@ -77,7 +77,7 @@ static uint8_t rdx_device_state_repository_name_valid(
     if (!has_non_space) {
         return 0;
     }
-    for (i = len + 1; i < RDX_BLE_NAME_MAX_LEN + 1; i++) {
+    for (i = len + 1; i < RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1; i++) {
         if (name[i]) {
             return 0;
         }
@@ -94,7 +94,7 @@ static uint8_t rdx_device_state_repository_data_valid(
                   state->ble_name, state->ble_name_len)
            && state->mic_gain_override_valid <= 1
            && (!state->mic_gain_override_valid
-               || state->mic_gain <= RDX_MIC_GAIN_LEVEL_MAX);
+               || state->mic_gain <= RDX_DEVICE_STATE_MIC_GAIN_MAX);
 }
 
 static void rdx_device_state_repository_encode(
@@ -186,7 +186,7 @@ int rdx_device_state_repository_load(struct rdx_device_state_data *out)
     memcpy(out->ble_name, stored.ble_name, sizeof(out->ble_name));
     if (stored.mic_gain_override_valid > 1
         || (stored.mic_gain_override_valid
-            && stored.mic_gain > RDX_MIC_GAIN_LEVEL_MAX)) {
+            && stored.mic_gain > RDX_DEVICE_STATE_MIC_GAIN_MAX)) {
         printf("[RDX][STATE_REPO] load=v3 reason=gain_sanitized vm_id=%u bound=%u name_len=%u stored_valid=%u stored_gain=%u repair=deferred\n",
                CFG_RDX_DEVICE_STATE, out->bound, out->ble_name_len,
                stored.mic_gain_override_valid, stored.mic_gain);

@@ -1,6 +1,8 @@
 #ifndef RDX_WIRE_DEFS_H
 #define RDX_WIRE_DEFS_H
 
+#include "rdx/domain/rdx_device_state_model.h"
+
 /* APP -> device management commands. */
 #define RDX_CMD_DL_AUTH_SN                      "*APP#authsn#"
 #define RDX_CMD_DL_OFFTIME_CHECK                "*APP#cofftime#"
@@ -24,10 +26,12 @@
 #define RDX_CMD_UP_MIC_GAIN_SET                 "*DEV#micgain#"
 
 /* BLE name wire/storage contract: printable ASCII, excluding '#'. */
-#define RDX_BLE_NAME_MAX_LEN                    24
+#define RDX_BLE_NAME_MAX_LEN                    \
+    RDX_DEVICE_STATE_BLE_NAME_MAX_LEN
 
 /* RDX wire/VM range; ADC conversion stays in the selected adapter. */
-#define RDX_MIC_GAIN_LEVEL_MAX                  19
+#define RDX_MIC_GAIN_LEVEL_MAX                  \
+    RDX_DEVICE_STATE_MIC_GAIN_MAX
 
 /* Fixed-width text fields used by the auth/SN response. */
 #define RDX_AUTH_KEY_STRING_SIZE                24

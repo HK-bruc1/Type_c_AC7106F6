@@ -1,13 +1,16 @@
+#include <stdint.h>
+#include <stdio.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE && RDX_CFG_CONFERENCE_RECORDING_ENABLE
-
-#include "system/includes.h"
+#include "generic/errno-base.h"
+#include "rdx/domain/rdx_device_state_model.h"
 #include "rdx/rdx_device_state_service.h"
 #include "rdx/rdx_mic_gain_service.h"
 #include "rdx/ports/rdx_mic_settings_port.h"
 
-int rdx_mic_gain_get_override(u8 mode, u8 *valid, u8 *gain)
+int rdx_mic_gain_get_override(uint8_t mode, uint8_t *valid, uint8_t *gain)
 {
     if (!valid || !gain || mode != RDX_MIC_GAIN_MODE_CONFERENCE) {
         return -EINVAL;
@@ -20,10 +23,10 @@ int rdx_mic_gain_get_override(u8 mode, u8 *valid, u8 *gain)
     return 0;
 }
 
-int rdx_mic_gain_get_configured(u8 mode, u8 *gain)
+int rdx_mic_gain_get_configured(uint8_t mode, uint8_t *gain)
 {
-    u8 configured_gain;
-    u8 override_valid;
+    uint8_t configured_gain;
+    uint8_t override_valid;
     int ret;
 
     if (!gain || mode != RDX_MIC_GAIN_MODE_CONFERENCE) {
@@ -57,13 +60,13 @@ int rdx_mic_gain_get_configured(u8 mode, u8 *gain)
     return 0;
 }
 
-int rdx_mic_gain_set_configured(u8 mode, u8 requested, u8 *effective)
+int rdx_mic_gain_set_configured(uint8_t mode, uint8_t requested, uint8_t *effective)
 {
-    u8 old_gain = 0;
+    uint8_t old_gain = 0;
     int ret;
 
     if (!effective || mode != RDX_MIC_GAIN_MODE_CONFERENCE
-        || requested > RDX_MIC_GAIN_LEVEL_MAX) {
+        || requested > RDX_DEVICE_STATE_MIC_GAIN_MAX) {
         printf("[RDX][MIC_GAIN] set result=failed reason=invalid mode=%u requested=%u\n",
                mode, requested);
         return -EINVAL;

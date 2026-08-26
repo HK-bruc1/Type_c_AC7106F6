@@ -1,8 +1,13 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
 
-#include "system/includes.h"
+#include "generic/jiffies.h"
+#include "task.h"
 #include "spinlock.h"
 #include "audio_capture_lease.h"
 #include "rdx/domain/rdx_record_session.h"
@@ -16,33 +21,33 @@
 #define RDX_RECORD_TASK_WAKE                    0x52445801
 
 struct rdx_record_candidate {
-    u32 engine_generation;
-    u32 session_id;
-    u32 capture_generation;
-    u16 len;
-    u8 payload[RDX_RECORD_CANDIDATE_MAX_SIZE];
+    uint32_t engine_generation;
+    uint32_t session_id;
+    uint32_t capture_generation;
+    uint16_t len;
+    uint8_t payload[RDX_RECORD_CANDIDATE_MAX_SIZE];
 };
 
 struct rdx_record_system_latch {
-    u8 pending;
+    uint8_t pending;
     enum rdx_record_system_event_source source;
     enum rdx_record_system_event_type type;
     enum rdx_record_cause cause;
 };
 
 struct rdx_record_stop_latch {
-    u8 pending;
-    u32 request_id;
-    u32 last_request_id;
-    u16 duplicate_count;
+    uint8_t pending;
+    uint32_t request_id;
+    uint32_t last_request_id;
+    uint16_t duplicate_count;
     enum rdx_record_controller_id controller_id;
     enum rdx_record_cause cause;
 };
 
 struct rdx_record_destination_latch {
-    u8 pending;
-    u32 session_id;
-    u32 capture_generation;
+    uint8_t pending;
+    uint32_t session_id;
+    uint32_t capture_generation;
 };
 
 struct rdx_record_engine_runtime {
@@ -59,41 +64,41 @@ struct rdx_record_engine_runtime {
     rdx_record_engine_event_callback_t event_callback;
     void *event_priv;
     struct rdx_record_session session;
-    volatile u8 initialized;
-    volatile u8 accepting;
-    volatile u8 frame_gate;
-    volatile u8 worker_created;
-    volatile u8 task_running;
-    u8 request_head;
-    u8 request_tail;
-    u8 request_count;
-    u8 candidate_head;
-    u8 candidate_tail;
-    u8 candidate_count;
-    u8 session_mic_gain_override_valid;
-    u8 session_mic_gain;
-    u32 engine_generation;
-    u32 session_frame_seq;
-    u32 capture_frame_seq;
-    u32 warmup_count;
-    u32 warmup_discard_count;
-    u32 produced_count;
-    u32 enqueued_count;
-    u32 overflow_count;
-    u32 stale_count;
-    u32 stop_discarded;
-    u32 format_mismatch_count;
+    volatile uint8_t initialized;
+    volatile uint8_t accepting;
+    volatile uint8_t frame_gate;
+    volatile uint8_t worker_created;
+    volatile uint8_t task_running;
+    uint8_t request_head;
+    uint8_t request_tail;
+    uint8_t request_count;
+    uint8_t candidate_head;
+    uint8_t candidate_tail;
+    uint8_t candidate_count;
+    uint8_t session_mic_gain_override_valid;
+    uint8_t session_mic_gain;
+    uint32_t engine_generation;
+    uint32_t session_frame_seq;
+    uint32_t capture_frame_seq;
+    uint32_t warmup_count;
+    uint32_t warmup_discard_count;
+    uint32_t produced_count;
+    uint32_t enqueued_count;
+    uint32_t overflow_count;
+    uint32_t stale_count;
+    uint32_t stop_discarded;
+    uint32_t format_mismatch_count;
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
-    u8 first_frame_after_resume;
+    uint8_t first_frame_after_resume;
 #endif
 };
 
 static struct rdx_record_engine_runtime rdx_record_engine;
 
 struct rdx_record_format_spec {
-    u16 payload_size;
-    u16 frame_ms;
-    u8 warmup_frames;
+    uint16_t payload_size;
+    uint16_t frame_ms;
+    uint8_t warmup_frames;
 };
 
 static const struct rdx_record_format_spec *
@@ -120,7 +125,7 @@ rdx_record_engine_format_spec(enum rdx_record_format_id format_id)
     }
 }
 
-static u32 rdx_record_engine_next_generation(u32 generation)
+static uint32_t rdx_record_engine_next_generation(uint32_t generation)
 {
     generation++;
     return generation ? generation : 1;
@@ -135,7 +140,7 @@ static void rdx_record_engine_wake(void)
 
 static void rdx_record_engine_emit(
     enum rdx_record_engine_event_type type,
-    u32 request_id,
+    uint32_t request_id,
     enum rdx_record_result result,
     enum rdx_record_termination_mode termination_mode,
     enum rdx_record_cause cause)
@@ -176,7 +181,7 @@ static void rdx_record_engine_emit_mark(
         .result = result,
         .termination_mode = RDX_RECORD_TERMINATION_NONE,
         .cause = RDX_RECORD_CAUSE_NONE,
-        .active_pts = (u64)rdx_record_engine.session_frame_seq
+        .active_pts = (uint64_t)rdx_record_engine.session_frame_seq
                       * (format ? format->frame_ms : 0),
         .source = request->source,
     };
@@ -198,9 +203,9 @@ static void rdx_record_engine_clear_queues(void)
     spin_unlock(&rdx_record_engine.lock);
 }
 
-static u32 rdx_record_engine_discard_candidates(void)
+static uint32_t rdx_record_engine_discard_candidates(void)
 {
-    u32 count;
+    uint32_t count;
 
     spin_lock(&rdx_record_engine.lock);
     count = rdx_record_engine.candidate_count;
@@ -214,14 +219,14 @@ static u32 rdx_record_engine_discard_candidates(void)
 }
 
 static int rdx_record_engine_audio_frame(void *priv,
-                                         u32 engine_generation,
-                                         u32 session_id,
-                                         u32 capture_generation,
-                                         const u8 *data,
-                                         u32 len)
+                                         uint32_t engine_generation,
+                                         uint32_t session_id,
+                                         uint32_t capture_generation,
+                                         const uint8_t *data,
+                                         uint32_t len)
 {
     struct rdx_record_candidate *candidate;
-    u8 tail;
+    uint8_t tail;
 
     if (priv != &rdx_record_engine) {
         return 0;
@@ -280,7 +285,7 @@ static int rdx_record_engine_audio_frame(void *priv,
     return 0;
 }
 
-static u8 rdx_record_engine_format_supported(
+static uint8_t rdx_record_engine_format_supported(
     enum rdx_record_scene scene, enum rdx_record_format_id format_id)
 {
     switch (scene) {
@@ -297,25 +302,26 @@ static u8 rdx_record_engine_format_supported(
     }
 }
 
-static u8 rdx_record_engine_uses_capture_lease(void)
+static uint8_t rdx_record_engine_uses_capture_lease(void)
 {
     return rdx_record_engine.session.scene == RDX_RECORD_SCENE_MEETING;
 }
 
-static enum rdx_audio_capture_result rdx_record_engine_capture_probe(void)
+static enum rdx_audio_capture_result rdx_record_engine_capture_readiness(void)
 {
-    return rdx_audio_capture_probe(rdx_record_engine.session.scene,
-                                   rdx_record_engine.session.format_id);
+    return rdx_audio_capture_check_readiness(
+        rdx_record_engine.session.scene,
+        rdx_record_engine.session.format_id);
 }
 
 static enum rdx_audio_capture_result rdx_record_engine_capture_open(
-    const struct rdx_audio_capture_open_params *params, u8 resume)
+    const struct rdx_audio_capture_open_params *params, uint8_t resume)
 {
     return resume ? rdx_audio_capture_resume(params)
                   : rdx_audio_capture_open(params);
 }
 
-static void rdx_record_engine_capture_close(u8 pause)
+static void rdx_record_engine_capture_close(uint8_t pause)
 {
     if (pause) {
         rdx_audio_capture_pause(rdx_record_engine.session.scene);
@@ -349,10 +355,10 @@ static void rdx_record_engine_audio_fault(
 
 static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
                                    enum rdx_record_cause cause,
-                                   u32 request_id,
+                                   uint32_t request_id,
                                    enum rdx_record_result result)
 {
-    u8 was_running = rdx_record_engine.session.state != RDX_RECORD_STATE_IDLE;
+    uint8_t was_running = rdx_record_engine.session.state != RDX_RECORD_STATE_IDLE;
 
     if (mode == RDX_RECORD_TERMINATION_FORCED) {
         spin_lock(&rdx_record_engine.lock);
@@ -421,8 +427,8 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     rdx_record_engine.session_mic_gain = 0;
 }
 
-static void rdx_record_engine_revoke(void *priv, u32 preempt_token,
-                                     u32 lease_generation)
+static void rdx_record_engine_revoke(void *priv, uint32_t preempt_token,
+                                     uint32_t lease_generation)
 {
     struct rdx_record_engine_runtime *engine = priv;
 
@@ -457,9 +463,9 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
         RDX_RECORD_TERMINATION_FORCED;
     enum rdx_record_cause failure_cause = RDX_RECORD_CAUSE_START_FAILED;
     enum rdx_record_result validation_result;
-    u8 cancelled;
-    u8 destination_attached = 0;
-    u8 recorder_open_attempted = 0;
+    uint8_t cancelled;
+    uint8_t destination_attached = 0;
+    uint8_t recorder_open_attempted = 0;
     int ret;
 
     validation_result = rdx_record_session_validate_start(
@@ -515,7 +521,7 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
            rdx_record_engine.session_mic_gain_override_valid,
            rdx_record_engine.session_mic_gain);
 
-    capture_result = rdx_record_engine_capture_probe();
+    capture_result = rdx_record_engine_capture_readiness();
     if (capture_result != RDX_AUDIO_CAPTURE_OK) {
         failure_result = RDX_RECORD_RESULT_SOURCE_LOST;
         failure_cause = RDX_RECORD_CAUSE_SOURCE_LOST;
@@ -645,10 +651,10 @@ rollback:
     rdx_record_engine.session_mic_gain = 0;
 }
 
-static u8 rdx_record_engine_take_system(
+static uint8_t rdx_record_engine_take_system(
     struct rdx_record_system_latch *event)
 {
-    u8 taken = 0;
+    uint8_t taken = 0;
 
     spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.system_latch.pending) {
@@ -661,9 +667,9 @@ static u8 rdx_record_engine_take_system(
     return taken;
 }
 
-static u8 rdx_record_engine_take_stop(struct rdx_record_stop_latch *stop)
+static uint8_t rdx_record_engine_take_stop(struct rdx_record_stop_latch *stop)
 {
-    u8 taken = 0;
+    uint8_t taken = 0;
 
     spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.stop_latch.pending) {
@@ -676,9 +682,9 @@ static u8 rdx_record_engine_take_stop(struct rdx_record_stop_latch *stop)
     return taken;
 }
 
-static u8 rdx_record_engine_take_request(struct rdx_record_request *request)
+static uint8_t rdx_record_engine_take_request(struct rdx_record_request *request)
 {
-    u8 taken = 0;
+    uint8_t taken = 0;
 
     spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.request_count) {
@@ -693,10 +699,10 @@ static u8 rdx_record_engine_take_request(struct rdx_record_request *request)
     return taken;
 }
 
-static u8 rdx_record_engine_take_destination_ready(
+static uint8_t rdx_record_engine_take_destination_ready(
     struct rdx_record_destination_latch *ready)
 {
-    u8 taken = 0;
+    uint8_t taken = 0;
 
     spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.destination_latch.pending) {
@@ -744,10 +750,10 @@ static void rdx_record_engine_cancel_requests(
     }
 }
 
-static u8 rdx_record_engine_take_candidate(
+static uint8_t rdx_record_engine_take_candidate(
     struct rdx_record_candidate *candidate)
 {
-    u8 taken = 0;
+    uint8_t taken = 0;
 
     spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.candidate_count) {
@@ -803,7 +809,7 @@ static void rdx_record_engine_process_candidate(
     frame.capture_generation = rdx_record_engine.session.capture_generation;
     frame.session_frame_seq = rdx_record_engine.session_frame_seq++;
     frame.capture_frame_seq = rdx_record_engine.capture_frame_seq++;
-    frame.active_pts = (u64)frame.session_frame_seq * format->frame_ms;
+    frame.active_pts = (uint64_t)frame.session_frame_seq * format->frame_ms;
     frame.duration = format->frame_ms;
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
     if (rdx_record_engine.first_frame_after_resume) {
@@ -878,7 +884,7 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     struct rdx_audio_capture_open_params audio_params;
     enum rdx_audio_capture_result capture_result;
     enum rdx_record_result validation_result;
-    u8 recorder_open_attempted = 0;
+    uint8_t recorder_open_attempted = 0;
     int ret;
 
     validation_result = rdx_record_session_validate_control(
@@ -898,7 +904,7 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     rdx_record_engine.warmup_count = 0;
     rdx_record_engine_clear_queues();
 
-    capture_result = rdx_record_engine_capture_probe();
+    capture_result = rdx_record_engine_capture_readiness();
     if (capture_result != RDX_AUDIO_CAPTURE_OK) {
         ret = capture_result;
         goto resume_failed;
@@ -1003,7 +1009,7 @@ static void rdx_record_engine_mark(const struct rdx_record_request *request)
 }
 #endif
 
-static u8 rdx_record_engine_process_one(void)
+static uint8_t rdx_record_engine_process_one(void)
 {
     struct rdx_record_system_latch system_event;
     struct rdx_record_stop_latch stop;
@@ -1125,7 +1131,7 @@ static void rdx_record_engine_task(void *priv)
 int rdx_record_engine_init(rdx_record_engine_event_callback_t callback,
                            void *callback_priv)
 {
-    u32 generation;
+    uint32_t generation;
     int ret;
 
     if (rdx_record_engine.initialized) {
@@ -1153,7 +1159,7 @@ int rdx_record_engine_init(rdx_record_engine_event_callback_t callback,
 
 int rdx_record_engine_submit(const struct rdx_record_request *request)
 {
-    u8 tail;
+    uint8_t tail;
 
     if (!request || !request->request_id) {
         return RDX_RECORD_RESULT_BAD_STATE;
@@ -1238,9 +1244,9 @@ int rdx_record_engine_submit_system_event(
 }
 
 int rdx_record_engine_notify_destination_ready(
-    u32 session_id, u32 capture_generation)
+    uint32_t session_id, uint32_t capture_generation)
 {
-    u8 wake = 0;
+    uint8_t wake = 0;
     int result = RDX_RECORD_RESULT_BAD_STATE;
 
     if (!rdx_record_engine.initialized) {
@@ -1269,9 +1275,9 @@ int rdx_record_engine_notify_destination_ready(
     return result;
 }
 
-int rdx_record_engine_shutdown(u16 timeout_ms)
+int rdx_record_engine_shutdown(uint16_t timeout_ms)
 {
-    u16 timeout_ticks;
+    uint16_t timeout_ticks;
     int ret;
 
     if (!rdx_record_engine.initialized) {
@@ -1280,7 +1286,7 @@ int rdx_record_engine_shutdown(u16 timeout_ms)
     if (!timeout_ms) {
         return RDX_RECORD_RESULT_BAD_STATE;
     }
-    timeout_ticks = msecs_to_jiffies((u32)timeout_ms - 1) + 1;
+    timeout_ticks = msecs_to_jiffies((uint32_t)timeout_ms - 1) + 1;
     spin_lock(&rdx_record_engine.lock);
     rdx_record_engine.accepting = 0;
     rdx_record_engine.system_latch.pending = 1;

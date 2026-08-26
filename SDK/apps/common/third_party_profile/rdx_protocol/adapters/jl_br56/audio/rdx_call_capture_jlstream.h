@@ -3,7 +3,9 @@
 
 #include "rdx_protocol/adapters/jl_br56/audio/rdx_meeting_capture_jlstream.h"
 
-int rdx_call_capture_jlstream_probe(
+int rdx_call_capture_jlstream_check_structure(
+    enum rdx_record_format_id format_id);
+int rdx_call_capture_jlstream_check_readiness(
     enum rdx_record_format_id format_id);
 int rdx_call_capture_jlstream_get_format(
     enum rdx_record_format_id *format_id);

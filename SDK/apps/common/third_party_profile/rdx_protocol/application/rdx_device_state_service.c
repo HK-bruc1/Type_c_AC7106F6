@@ -1,8 +1,10 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
-
-#include "system/includes.h"
 #include "rdx/rdx_device_state_service.h"
 #include "rdx/ports/rdx_device_state_repository_port.h"
 
@@ -21,7 +23,7 @@ static uint8_t rdx_device_state_name_bytes_valid(const uint8_t *name,
     uint8_t has_non_space = 0;
     uint16_t i;
 
-    if (!name || !len || len > RDX_BLE_NAME_MAX_LEN) {
+    if (!name || !len || len > RDX_DEVICE_STATE_BLE_NAME_MAX_LEN) {
         return 0;
     }
 
@@ -42,7 +44,7 @@ static uint8_t rdx_device_state_name_override_valid(
     uint16_t i;
 
     if (!len) {
-        for (i = 0; i < RDX_BLE_NAME_MAX_LEN + 1; i++) {
+        for (i = 0; i < RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1; i++) {
             if (name[i]) {
                 return 0;
             }
@@ -54,7 +56,7 @@ static uint8_t rdx_device_state_name_override_valid(
         || name[len] != '\0') {
         return 0;
     }
-    for (i = len + 1; i < RDX_BLE_NAME_MAX_LEN + 1; i++) {
+    for (i = len + 1; i < RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1; i++) {
         if (name[i]) {
             return 0;
         }
@@ -71,7 +73,7 @@ static uint8_t rdx_device_state_data_valid(
                   state->ble_name, state->ble_name_len)
            && state->mic_gain_override_valid <= 1
            && (!state->mic_gain_override_valid
-               || state->mic_gain <= RDX_MIC_GAIN_LEVEL_MAX);
+               || state->mic_gain <= RDX_DEVICE_STATE_MIC_GAIN_MAX);
 }
 
 int rdx_device_state_init(void)
@@ -178,7 +180,7 @@ int rdx_device_state_set_ble_name_override(const uint8_t *name,
 
     if (!rdx_device_state_initialized
         || (len && !rdx_device_state_name_bytes_valid(name, len))
-        || len > RDX_BLE_NAME_MAX_LEN) {
+        || len > RDX_DEVICE_STATE_BLE_NAME_MAX_LEN) {
         printf("[RDX][DROP] cmd=state_name reason=invalid initialized=%u target_len=%u\n",
                rdx_device_state_initialized, len);
         return -1;
@@ -230,7 +232,7 @@ int rdx_device_state_set_mic_gain_override(uint8_t gain)
     int ret;
 
     if (!rdx_device_state_initialized
-        || gain > RDX_MIC_GAIN_LEVEL_MAX) {
+        || gain > RDX_DEVICE_STATE_MIC_GAIN_MAX) {
         printf("[RDX][DROP] cmd=state_mic_gain reason=invalid initialized=%u target_gain=%u\n",
                rdx_device_state_initialized, gain);
         return -1;

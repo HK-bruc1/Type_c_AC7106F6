@@ -1,21 +1,23 @@
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
-
-#include "system/includes.h"
 #include "rdx/ports/rdx_product_profile_port.h"
+#include "rdx/domain/rdx_device_state_model.h"
 #include "rdx/rdx_ble_name_service.h"
 #include "rdx/rdx_device_state_service.h"
-#include "rdx/rdx_wire_defs.h"
 
-static u8 rdx_ble_name_initialized;
+static uint8_t rdx_ble_name_initialized;
 
-static u8 rdx_ble_name_valid(const u8 *name, u16 len)
+static uint8_t rdx_ble_name_valid(const uint8_t *name, uint16_t len)
 {
-    u8 has_non_space = 0;
-    u16 i;
+    uint8_t has_non_space = 0;
+    uint16_t i;
 
-    if (!name || !len || len > RDX_BLE_NAME_MAX_LEN) {
+    if (!name || !len || len > RDX_DEVICE_STATE_BLE_NAME_MAX_LEN) {
         return 0;
     }
 
@@ -34,11 +36,11 @@ int rdx_ble_name_init(void)
 {
     const char *default_name = rdx_product_profile_get()->local_name;
     const char *override_name;
-    u8 override_len;
-    const u16 default_len = strlen(default_name);
+    uint8_t override_len;
+    const uint16_t default_len = strlen(default_name);
 
     rdx_ble_name_initialized = 0;
-    if (!rdx_ble_name_valid((const u8 *)default_name, default_len)) {
+    if (!rdx_ble_name_valid((const uint8_t *)default_name, default_len)) {
         printf("[RDX][DROP] cmd=ble_name_init reason=invalid_default len=%u\n",
                default_len);
         return -1;
@@ -46,7 +48,7 @@ int rdx_ble_name_init(void)
 
     override_len = rdx_device_state_get_ble_name_override(&override_name);
     if (override_len
-        && !rdx_ble_name_valid((const u8 *)override_name, override_len)) {
+        && !rdx_ble_name_valid((const uint8_t *)override_name, override_len)) {
         printf("[RDX][DROP] cmd=ble_name_init reason=invalid_state len=%u\n",
                override_len);
         return -2;
@@ -69,13 +71,13 @@ const char *rdx_ble_name_get(void)
     return rdx_product_profile_get()->local_name;
 }
 
-int rdx_ble_name_set(const u8 *name, u16 len, u8 *changed)
+int rdx_ble_name_set(const uint8_t *name, uint16_t len, uint8_t *changed)
 {
     const char *default_name = rdx_product_profile_get()->local_name;
-    char old_name[RDX_BLE_NAME_MAX_LEN + 1];
-    const u16 default_len = strlen(default_name);
-    u16 old_len;
-    u16 target_len;
+    char old_name[RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1];
+    const uint16_t default_len = strlen(default_name);
+    uint16_t old_len;
+    uint16_t target_len;
     int ret;
 
     if (changed) {
