@@ -2214,9 +2214,14 @@ c_SRC_FILES += \
 
 // *INDENT-OFF*
 
+#if TCFG_DEV_MANAGER_ENABLE
+c_SRC_FILES += \
+	apps/common/dev_manager/dev_reg.c
+
+#endif
+
 #if TCFG_APP_MUSIC_EN || TCFG_MIX_RECORD_ENABLE
 c_SRC_FILES += \
-	apps/common/dev_manager/dev_reg.c \
 	apps/earphone/mode/common/dev_status.c \
 
 #endif

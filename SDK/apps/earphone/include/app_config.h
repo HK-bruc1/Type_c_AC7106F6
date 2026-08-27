@@ -237,7 +237,7 @@
 #define TCFG_MIX_RECORD_ENABLE     0
 #endif
 
-#if TCFG_APP_MUSIC_EN || TCFG_MIX_RECORD_ENABLE
+#if TCFG_APP_MUSIC_EN || TCFG_MIX_RECORD_ENABLE || TCFG_SD0_ENABLE
 #define TCFG_DEV_MANAGER_ENABLE					  			1
 #elif TCFG_APP_PC_EN || TCFG_APP_LINEIN_EN
 #define TCFG_DEV_MANAGER_ENABLE					  			0
@@ -1380,6 +1380,12 @@
 #else
 #define TCFG_TYPEC_EARPHONE_CASE            0
 #endif
+
+/* The product uses soldered SD NAND, so JL mounts SD0 during dev_manager init. */
+#if TCFG_TYPEC_EARPHONE_CASE && TCFG_SD0_ENABLE
+#define TCFG_SD_ALWAY_ONLINE_ENABLE          1
+#endif
+
 #if TCFG_TYPEC_EARPHONE_CASE && (TCFG_EARPHONE_TYPE == 0)
 //四线耳机,audio_setup时初始化dac电源
 #undef TCFG_AUDIO_DAC_POWER_ON_AT_SETUP
