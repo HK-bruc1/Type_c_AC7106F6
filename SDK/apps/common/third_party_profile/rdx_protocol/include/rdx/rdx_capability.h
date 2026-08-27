@@ -12,14 +12,16 @@
 #define RDX_CAP_TRANSPORT                       (1UL << 0)
 #define RDX_CAP_DEVICE_STATE_REPOSITORY         (1UL << 1)
 #define RDX_CAP_DEVICE_IDENTITY                 (1UL << 2)
-#define RDX_CAP_RTC                             (1UL << 3)
-#define RDX_CAP_MEETING_CAPTURE                 (1UL << 4)
-#define RDX_CAP_CALL_CAPTURE                    (1UL << 5)
+#define RDX_CAP_FACTORY_IDENTITY                (1UL << 3)
+#define RDX_CAP_RTC                             (1UL << 4)
+#define RDX_CAP_MEETING_CAPTURE                 (1UL << 5)
+#define RDX_CAP_CALL_CAPTURE                    (1UL << 6)
 
 #define RDX_REQUIRED_BASE_CAPS                  \
     (RDX_CAP_TRANSPORT                         | \
      RDX_CAP_DEVICE_STATE_REPOSITORY           | \
-     RDX_CAP_DEVICE_IDENTITY)
+     RDX_CAP_DEVICE_IDENTITY                    | \
+     RDX_CAP_FACTORY_IDENTITY)
 
 #define RDX_REQUIRED_CAPS_FROM_ABILITY(ability) \
     (RDX_REQUIRED_BASE_CAPS                    | \

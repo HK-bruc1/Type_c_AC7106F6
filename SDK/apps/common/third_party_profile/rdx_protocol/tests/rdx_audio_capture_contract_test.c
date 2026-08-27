@@ -140,6 +140,7 @@ static void test_capability_mapping(void)
     assert((caps & RDX_CAP_MEETING_CAPTURE) != 0);
     assert((caps & RDX_CAP_CALL_CAPTURE) != 0);
     assert((caps & RDX_REQUIRED_BASE_CAPS) == RDX_REQUIRED_BASE_CAPS);
+    assert((RDX_REQUIRED_BASE_CAPS & RDX_CAP_FACTORY_IDENTITY) != 0);
     assert(RDX_CAP_RTC != RDX_ABILITY_RTC);
 }
 

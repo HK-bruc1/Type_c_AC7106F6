@@ -1064,6 +1064,8 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/application/rdx_device_management_service.c \
     apps/common/third_party_profile/rdx_protocol/application/rdx_device_state_service.c \
     apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_state_repository_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_factory_identity.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_factory_identity_jl_br56.c \
     apps/common/third_party_profile/rdx_protocol/application/rdx_identity_service.c \
     apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_identity_jl_br56.c \
     apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_system_action_type_c.c \

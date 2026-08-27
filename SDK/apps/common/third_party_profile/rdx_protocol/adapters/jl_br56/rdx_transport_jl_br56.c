@@ -600,6 +600,7 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
 int rdx_transport_init(rdx_transport_event_callback_t event_callback,
                        void *context)
 {
+    const uint8_t *ble_mac;
     int ret;
 
     if (!event_callback) {
@@ -616,14 +617,27 @@ int rdx_transport_init(rdx_transport_event_callback_t event_callback,
     rdx_ble.event_callback = event_callback;
     rdx_ble.event_context = context;
 
+    ble_mac = rdx_identity_get_ble_mac();
+    ret = le_controller_set_mac((void *)ble_mac);
+    if (ret) {
+        printf("[RDX][BLE] controller_mac_set_failed ret=%d\n", ret);
+        return RDX_TRANSPORT_ERR_CONTROLLER_MAC;
+    }
+
     rdx_ble.hdl = app_ble_hdl_alloc();
     if (!rdx_ble.hdl) {
         printf("[RDX] BLE handle alloc failed\n");
-        return -1;
+        return RDX_TRANSPORT_ERR_HANDLE_ALLOC;
     }
 
     app_ble_hdl_uuid_set(rdx_ble.hdl, RDX_BLE_HANDLE_UUID);
-    app_ble_set_mac_addr(rdx_ble.hdl, (void *)rdx_identity_get_ble_mac());
+    ret = app_ble_set_mac_addr(rdx_ble.hdl, (void *)ble_mac);
+    if (ret) {
+        printf("[RDX][BLE] handle_mac_set_failed ret=%d\n", ret);
+        app_ble_hdl_free(rdx_ble.hdl);
+        rdx_ble.hdl = NULL;
+        return RDX_TRANSPORT_ERR_HANDLE_MAC;
+    }
     app_ble_profile_set(rdx_ble.hdl, rdx_profile_data);
     app_ble_att_read_callback_register(rdx_ble.hdl, rdx_ble_att_read_callback);
     app_ble_att_write_callback_register(rdx_ble.hdl, rdx_ble_att_write_callback);
@@ -637,7 +651,8 @@ int rdx_transport_init(rdx_transport_event_callback_t event_callback,
         rdx_ble.initialized = 0;
         app_ble_hdl_free(rdx_ble.hdl);
         rdx_ble.hdl = NULL;
-        return ret;
+        printf("[RDX][BLE] advertising_start_failed ret=%d\n", ret);
+        return RDX_TRANSPORT_ERR_ADVERTISING;
     }
     return 0;
 }

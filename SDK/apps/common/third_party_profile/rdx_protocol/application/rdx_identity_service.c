@@ -5,18 +5,34 @@
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
-#include "rdx/ports/rdx_device_identity_port.h"
+#include "rdx/ports/rdx_factory_identity_port.h"
 #include "rdx/ports/rdx_product_profile_port.h"
 #include "rdx/rdx_device_state_service.h"
+#include "rdx/rdx_factory_identity.h"
 #include "rdx/rdx_identity_service.h"
-#include "rdx/rdx_wire_defs.h"
 
 #define RDX_CASE_IDENTITY_SIZE              95
 
-static uint8_t rdx_ble_mac[RDX_DEVICE_IDENTITY_BLE_MAC_SIZE];
-static char rdx_ble_mac_string[RDX_MAC_STRING_SIZE + 1];
+static uint8_t rdx_ble_mac[RDX_FACTORY_IDENTITY_BLE_MAC_LEN];
+static char rdx_ble_mac_string[RDX_FACTORY_IDENTITY_MAC_TEXT_LEN + 1];
+static char rdx_auth_key[RDX_FACTORY_IDENTITY_AUTH_KEY_LEN + 1];
+static char rdx_label_sn[RDX_FACTORY_IDENTITY_LABEL_SN_LEN + 1];
 static uint8_t rdx_read_value[RDX_CASE_IDENTITY_SIZE + 1];
 static uint16_t rdx_read_value_len;
+
+static void rdx_identity_build_read_value(void);
+
+static void rdx_identity_set_zero_factory_identity(void)
+{
+    memset(rdx_ble_mac, 0, sizeof(rdx_ble_mac));
+    memset(rdx_ble_mac_string, '0', sizeof(rdx_ble_mac_string) - 1);
+    rdx_ble_mac_string[sizeof(rdx_ble_mac_string) - 1] = '\0';
+    memset(rdx_auth_key, '0', sizeof(rdx_auth_key) - 1);
+    rdx_auth_key[sizeof(rdx_auth_key) - 1] = '\0';
+    memset(rdx_label_sn, '0', sizeof(rdx_label_sn) - 1);
+    rdx_label_sn[sizeof(rdx_label_sn) - 1] = '\0';
+    rdx_identity_build_read_value();
+}
 
 static void rdx_identity_build_read_value(void)
 {
@@ -29,7 +45,7 @@ static void rdx_identity_build_read_value(void)
                        "C,000000000000,000000000000,%02X%02X%02X%02X%02X%02X,%s,%s,000000000000",
                        rdx_ble_mac[5], rdx_ble_mac[4], rdx_ble_mac[3],
                        rdx_ble_mac[2], rdx_ble_mac[1], rdx_ble_mac[0],
-                       profile->auth_key, profile->label_sn);
+                       rdx_auth_key, rdx_label_sn);
         if (len < 0) {
             rdx_read_value_len = 0;
         } else if (len > RDX_CASE_IDENTITY_SIZE) {
@@ -39,8 +55,8 @@ static void rdx_identity_build_read_value(void)
         }
         break;
     case RDX_PRODUCT_IDENTITY_FORMAT_AUTH_KEY_ONLY:
-        rdx_read_value_len = strlen(profile->auth_key);
-        memcpy(rdx_read_value, profile->auth_key, rdx_read_value_len);
+        rdx_read_value_len = strlen(rdx_auth_key);
+        memcpy(rdx_read_value, rdx_auth_key, rdx_read_value_len);
         break;
     default:
         rdx_read_value_len = 0;
@@ -52,20 +68,54 @@ static void rdx_identity_build_read_value(void)
 
 int rdx_identity_init(void)
 {
+    uint8_t auth_code[RDX_AUTH_CODE_MAX_PAYLOAD_LEN];
+    uint16_t auth_code_len = 0;
+    struct rdx_factory_identity factory_identity;
     int ret;
 
     memset(rdx_ble_mac, 0, sizeof(rdx_ble_mac));
-    ret = rdx_device_identity_read_ble_mac(rdx_ble_mac);
+    memset(rdx_ble_mac_string, 0, sizeof(rdx_ble_mac_string));
+    memset(rdx_auth_key, 0, sizeof(rdx_auth_key));
+    memset(rdx_label_sn, 0, sizeof(rdx_label_sn));
+    memset(rdx_read_value, 0, sizeof(rdx_read_value));
+    rdx_read_value_len = 0;
+
+    ret = rdx_platform_read_auth_code(auth_code, sizeof(auth_code),
+                                      &auth_code_len);
     if (ret) {
-        printf("[RDX] read BLE MAC failed=%d\n", ret);
+        if (ret == RDX_AUTH_CODE_ERR_NOT_PRESENT) {
+            rdx_identity_set_zero_factory_identity();
+            printf("[RDX][WARN] factory identity not present; using zero identity\n");
+#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
+            printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
+            printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
+            printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
+#endif
+            return 0;
+        }
+        printf("[RDX] factory identity invalid stage=block code=%d\n", ret);
         return ret;
     }
-    snprintf(rdx_ble_mac_string, sizeof(rdx_ble_mac_string),
-             "%02X%02X%02X%02X%02X%02X",
-             rdx_ble_mac[5], rdx_ble_mac[4], rdx_ble_mac[3],
-             rdx_ble_mac[2], rdx_ble_mac[1], rdx_ble_mac[0]);
-    memset(rdx_read_value, 0, sizeof(rdx_read_value));
+    ret = rdx_factory_identity_parse(auth_code, auth_code_len,
+                                     &factory_identity);
+    if (ret) {
+        printf("[RDX] factory identity invalid stage=record code=%d\n", ret);
+        return ret;
+    }
+
+    memcpy(rdx_ble_mac, factory_identity.ble_mac, sizeof(rdx_ble_mac));
+    memcpy(rdx_ble_mac_string, factory_identity.ble_mac_string,
+           sizeof(rdx_ble_mac_string));
+    memcpy(rdx_auth_key, factory_identity.auth_key, sizeof(rdx_auth_key));
+    memcpy(rdx_label_sn, factory_identity.label_sn, sizeof(rdx_label_sn));
     rdx_identity_build_read_value();
+
+#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
+    printf("[RDX] factory identity loaded\n");
+    printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
+    printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
+    printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
+#endif
     return 0;
 }
 
@@ -76,7 +126,7 @@ const uint8_t *rdx_identity_get_ble_mac(void)
 
 const char *rdx_identity_get_auth_key(void)
 {
-    return rdx_product_profile_get()->auth_key;
+    return rdx_auth_key;
 }
 
 const char *rdx_identity_get_ble_mac_string(void)
@@ -91,7 +141,7 @@ const char *rdx_identity_get_wifi_mac_string(void)
 
 const char *rdx_identity_get_label_sn(void)
 {
-    return rdx_product_profile_get()->label_sn;
+    return rdx_label_sn;
 }
 
 uint16_t rdx_identity_get_read_value(const uint8_t **data)
@@ -111,7 +161,7 @@ uint8_t rdx_identity_fill_manufacturer_data(uint8_t *buffer,
     const uint16_t product_type_len = strlen(profile->product_type);
     const uint16_t self_mark_len = strlen(profile->self_mark);
     const uint16_t required = product_code_len
-                              + RDX_DEVICE_IDENTITY_BLE_MAC_SIZE
+                              + RDX_FACTORY_IDENTITY_BLE_MAC_LEN
                               + factory_code_len + 1 + 4
                               + (profile->include_protocol_version ? 1 : 0)
                               + product_type_len + self_mark_len;
@@ -127,9 +177,9 @@ uint8_t rdx_identity_fill_manufacturer_data(uint8_t *buffer,
     memcpy(buffer + offset, profile->product_code, product_code_len);
     offset += product_code_len;
 
-    for (i = 0; i < RDX_DEVICE_IDENTITY_BLE_MAC_SIZE; i++) {
+    for (i = 0; i < RDX_FACTORY_IDENTITY_BLE_MAC_LEN; i++) {
         buffer[offset++] =
-            rdx_ble_mac[RDX_DEVICE_IDENTITY_BLE_MAC_SIZE - 1 - i];
+            rdx_ble_mac[RDX_FACTORY_IDENTITY_BLE_MAC_LEN - 1 - i];
     }
 
     memcpy(buffer + offset, profile->factory_code, factory_code_len);

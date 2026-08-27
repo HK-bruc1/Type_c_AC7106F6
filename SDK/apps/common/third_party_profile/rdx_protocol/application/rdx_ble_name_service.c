@@ -9,8 +9,21 @@
 #include "rdx/domain/rdx_device_state_model.h"
 #include "rdx/rdx_ble_name_service.h"
 #include "rdx/rdx_device_state_service.h"
+#include "rdx/rdx_identity_service.h"
 
 static uint8_t rdx_ble_name_initialized;
+static char rdx_ble_default_name[RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1];
+
+static int rdx_ble_name_build_default(void)
+{
+    const char *auth_key = rdx_identity_get_auth_key();
+
+    if (!auth_key) {
+        return -1;
+    }
+    return rdx_product_profile_build_default_ble_name(
+        auth_key, rdx_ble_default_name, sizeof(rdx_ble_default_name));
+}
 
 static uint8_t rdx_ble_name_valid(const uint8_t *name, uint16_t len)
 {
@@ -34,12 +47,19 @@ static uint8_t rdx_ble_name_valid(const uint8_t *name, uint16_t len)
 
 int rdx_ble_name_init(void)
 {
-    const char *default_name = rdx_product_profile_get()->local_name;
+    const char *default_name;
     const char *override_name;
     uint8_t override_len;
-    const uint16_t default_len = strlen(default_name);
+    uint16_t default_len;
 
     rdx_ble_name_initialized = 0;
+    memset(rdx_ble_default_name, 0, sizeof(rdx_ble_default_name));
+    if (rdx_ble_name_build_default()) {
+        printf("[RDX][DROP] cmd=ble_name_init reason=default_build_failed\n");
+        return -1;
+    }
+    default_name = rdx_ble_default_name;
+    default_len = strlen(default_name);
     if (!rdx_ble_name_valid((const uint8_t *)default_name, default_len)) {
         printf("[RDX][DROP] cmd=ble_name_init reason=invalid_default len=%u\n",
                default_len);
@@ -68,12 +88,12 @@ const char *rdx_ble_name_get(void)
     if (rdx_device_state_get_ble_name_override(&override_name)) {
         return override_name;
     }
-    return rdx_product_profile_get()->local_name;
+    return rdx_ble_default_name;
 }
 
 int rdx_ble_name_set(const uint8_t *name, uint16_t len, uint8_t *changed)
 {
-    const char *default_name = rdx_product_profile_get()->local_name;
+    const char *default_name = rdx_ble_default_name;
     char old_name[RDX_DEVICE_STATE_BLE_NAME_MAX_LEN + 1];
     const uint16_t default_len = strlen(default_name);
     uint16_t old_len;

@@ -14,6 +14,12 @@ enum rdx_transport_result {
     RDX_TRANSPORT_UNAVAILABLE,
 };
 
+/* Startup failures are kept distinct from send-queue results. */
+#define RDX_TRANSPORT_ERR_CONTROLLER_MAC       (-301)
+#define RDX_TRANSPORT_ERR_HANDLE_ALLOC         (-302)
+#define RDX_TRANSPORT_ERR_HANDLE_MAC           (-303)
+#define RDX_TRANSPORT_ERR_ADVERTISING          (-304)
+
 enum rdx_transport_event_type {
     RDX_TRANSPORT_EVENT_CONNECTED = 0,
     RDX_TRANSPORT_EVENT_LINK_LOST,

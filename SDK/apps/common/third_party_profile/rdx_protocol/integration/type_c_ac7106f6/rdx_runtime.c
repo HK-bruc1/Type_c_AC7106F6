@@ -67,21 +67,25 @@ int rdx_runtime_start(void)
         return ret;
     }
     rdx_boot_structural_caps |= RDX_CAP_DEVICE_STATE_REPOSITORY;
-    ret = rdx_ble_name_init();
-    if (ret) {
-        rdx_device_state_exit();
-        return ret;
-    }
     ret = rdx_identity_init();
     if (ret) {
         rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
         return ret;
     }
+    rdx_boot_structural_caps |= RDX_CAP_FACTORY_IDENTITY;
     rdx_boot_structural_caps |= RDX_CAP_DEVICE_IDENTITY;
+    ret = rdx_ble_name_init();
+    if (ret) {
+        rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
+        return ret;
+    }
 #if RDX_CFG_RTC_ENABLE
     ret = rdx_rtc_init();
     if (ret) {
         rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
         return ret;
     }
     rdx_boot_structural_caps |= RDX_CAP_RTC;
@@ -97,6 +101,7 @@ int rdx_runtime_start(void)
     ret = rdx_protocol_v23_init();
     if (ret) {
         rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
         return ret;
     }
     ret = rdx_transport_init(rdx_protocol_v23_handle_transport_event,

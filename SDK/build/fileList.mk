@@ -31,11 +31,13 @@
 
 
 c_SRC_FILES += audio/framework/plugs/source/a2dp_file.c audio/framework/plugs/source/a2dp_streamctrl.c audio/framework/plugs/source/esco_file.c audio/framework/plugs/source/adc_file.c audio/framework/nodes/esco_tx_node.c audio/framework/nodes/plc_node.c audio/framework/nodes/volume_node.c audio/framework/node_list.c
+c_SRC_FILES += audio/framework/nodes/sink_dev0_node.c
+
+
+
+c_SRC_FILES += audio/framework/nodes/sink_dev1_node.c
+c_SRC_FILES += audio/framework/plugs/source/source_dev1_file.c
 c_SRC_FILES += audio/framework/nodes/agc_node.c
-c_SRC_FILES += audio/framework/nodes/cvp_sms_node.c
-
-
-
 c_SRC_FILES += audio/framework/nodes/cvp_dms_node.c
 c_SRC_FILES += audio/framework/nodes/ai_tx_node.c
 c_SRC_FILES += audio/common/audio_node_config.c audio/common/audio_dvol.c audio/common/audio_general.c audio/common/audio_build_needed.c audio/common/audio_plc.c audio/common/audio_noise_gate.c audio/common/audio_ns.c audio/common/audio_utils.c audio/common/amplitude_statistic.c audio/common/frame_length_adaptive.c audio/common/bt_audio_energy_detection.c audio/common/audio_event_handler.c audio/common/debug/audio_debug.c audio/common/power/mic_power_manager.c audio/common/audio_volume_mixer.c audio/common/audio_effect_verify.c audio/common/pcm_data/sine_pcm.c
@@ -84,24 +86,39 @@ c_SRC_FILES += apps/common/debug/memory_debug.c
 
 c_SRC_FILES += apps/common/debug/resource_monitor.c
 c_SRC_FILES += apps/common/third_party_profile/multi_protocol_main.c apps/common/third_party_profile/multi_protocol_common.c apps/common/third_party_profile/multi_protocol_event.c
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_protocol_entry.c apps/common/third_party_profile/rdx_protocol/rdx_ble_name.c apps/common/third_party_profile/rdx_protocol/rdx_ble_transport_br56.c apps/common/third_party_profile/rdx_protocol/rdx_device_management.c apps/common/third_party_profile/rdx_protocol/rdx_device_state.c apps/common/third_party_profile/rdx_protocol/rdx_identity.c apps/common/third_party_profile/rdx_protocol/rdx_platform_br56.c apps/common/third_party_profile/rdx_protocol/rdx_mvp0_protocol.c apps/common/third_party_profile/rdx_protocol/rdx_appkey_verifier.c
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_rtc.c
-
-
-
-
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_mic_gain_service.c apps/common/third_party_profile/rdx_protocol/rdx_record_audio_br56.c apps/common/third_party_profile/rdx_protocol/rdx_record_engine.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_runtime.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_profile_type_c.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_key_routing.c apps/common/third_party_profile/rdx_protocol/application/rdx_ble_name_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_transport_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_device_management_service.c apps/common/third_party_profile/rdx_protocol/application/rdx_device_state_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_state_repository_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_factory_identity.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_factory_identity_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_identity_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_identity_jl_br56.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_system_action_type_c.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_session.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_management.c apps/common/third_party_profile/rdx_protocol/providers/appkey/rdx_appkey_verifier.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_rtc_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_clock_jl_br56.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_rtc_backup_repository_jl_br56.c
 
 
 
 
 
 
-c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/rdx_session_metadata_service.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_audio_capture_jl_br56.c apps/common/third_party_profile/rdx_protocol/domain/rdx_record_session.c apps/common/third_party_profile/rdx_protocol/application/rdx_record_engine.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_record.c
 
 
 
-THIRD_PARTY_LIBS += apps/common/third_party_profile/rdx_protocol/librdxApp.a
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_mic_gain_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_mic_settings_jl_br56.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/audio/rdx_meeting_capture_jlstream.c
+
+
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/audio/rdx_call_capture_jlstream.c
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_session_metadata_service.c
+
+
+
+THIRD_PARTY_LIBS += apps/common/third_party_profile/rdx_protocol/providers/appkey/librdxApp.a
 c_SRC_FILES += apps/common/jldtp/uart_transport.c apps/common/jldtp/jldtp_manager.c
 c_SRC_FILES += apps/common/device/key/key_driver.c
 c_SRC_FILES += apps/common/device/key/mickey.c

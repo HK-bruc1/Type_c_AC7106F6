@@ -143,8 +143,8 @@ static void rdx_v23_send_auth_sn(void)
     }
 
     ret = rdx_protocol_v23_send(rdx_v23_management.context, response, len);
-    printf("[RDX][TX] cmd=authsn wire=%s len=%d ret=%d\n",
-           (char *)response, len, ret);
+    /* AuthKey is part of this response; never echo the complete wire packet. */
+    printf("[RDX][TX] cmd=authsn len=%d ret=%d\n", len, ret);
 }
 
 static void rdx_v23_send_offtime_check(void)

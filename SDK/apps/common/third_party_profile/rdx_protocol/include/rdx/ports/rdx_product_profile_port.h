@@ -22,13 +22,20 @@ struct rdx_product_profile {
     uint16_t ble_adv_interval;
     const char *firmware_version;
     const char *hardware_version;
-    const char *auth_key;
     const char *wifi_mac;
-    const char *label_sn;
     const char *const *app_keys;
     uint8_t app_key_count;
 };
 
 const struct rdx_product_profile *rdx_product_profile_get(void);
+
+/*
+ * Build the product's factory-derived default BLE name.  The application
+ * service supplies the validated AuthKey; the product integration owns the
+ * naming policy (including any serial suffix and separators).
+ */
+int rdx_product_profile_build_default_ble_name(const char *auth_key,
+                                               char *buffer,
+                                               uint16_t buffer_size);
 
 #endif

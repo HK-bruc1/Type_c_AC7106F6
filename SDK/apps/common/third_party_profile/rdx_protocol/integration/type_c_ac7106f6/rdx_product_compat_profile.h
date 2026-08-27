@@ -115,9 +115,7 @@
     RDX_COMPAT_APP_KEY_PRIMARY,                \
     RDX_COMPAT_APP_KEY_2
 
-/* 仅供开发阶段使用的身份占位值，严禁在此填写量产密钥。 */
-#define RDX_COMPAT_AUTH_KEY                    "000000000000000000000000"
+/* Wi-Fi 身份暂未接入认证码 Provider，按协议合同保留全零字段。 */
 #define RDX_COMPAT_WIFI_MAC                    "000000000000"
-#define RDX_COMPAT_LABEL_SN                    "0000000000000000"
 
 #endif

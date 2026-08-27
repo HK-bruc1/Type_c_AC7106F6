@@ -8,6 +8,7 @@
     (RDX_CAP_TRANSPORT                         | \
      RDX_CAP_DEVICE_STATE_REPOSITORY           | \
      RDX_CAP_DEVICE_IDENTITY                   | \
+     RDX_CAP_FACTORY_IDENTITY                  | \
      RDX_CAP_RTC                               | \
      RDX_CAP_MEETING_CAPTURE                   | \
      RDX_CAP_CALL_CAPTURE)
