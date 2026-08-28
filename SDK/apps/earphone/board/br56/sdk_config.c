@@ -92,22 +92,19 @@ const struct adkey_res_value adkey_res_table [] =  {
     },
     {
         .key_value = KEY_AD_NUM1,
-        .res_value = 62
-    },
-    {
-        .key_value = KEY_AD_NUM2,
-        .res_value = 150
-    },
-    {
-        .key_value = KEY_AD_NUM3,
-        .res_value = 330
+        .res_value = 200
     }
 };
 
 const struct adkey_info g_adkey_data =  {
     .key_io = IO_PORTB_04,
-    .pull_up_type = 1,
-    .pull_up_value = 220,
+    /* R12 is marked NC/10K on the schematic.  With the default NC
+     * population there is no external bias, so let the BR56 provide its
+     * internal 10K pull-up.  Keep 100 here as the nominal value used by the
+     * ADC threshold calculation (100 == 10K, in 100-ohm units).
+     */
+    .pull_up_type = 0,
+    .pull_up_value = 100,
     .max_ad_value = 1023,
     .long_press_reset_enable = 0,
     .long_press_reset_time = 8,

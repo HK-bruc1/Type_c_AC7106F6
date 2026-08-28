@@ -38,11 +38,39 @@ static const int rdx_mic_num2_map[KEY_ACTION_MAX] = {
     [KEY_ACTION_CLICK]           = APP_MSG_DOWN_KEY_LIFT,
     [KEY_ACTION_UP]              = APP_MSG_DOWN_KEY_LIFT,
 };
+#endif
+
+#if TCFG_ADKEY_ENABLE
+/*
+ * Keep the current PC-mode ADKEY semantics while routing the messages
+ * through the product-owned interception layer.  The two physical keys on
+ * T2622 are KEY_AD_NUM0 (S3, 0 ohm) and KEY_AD_NUM1 (S1, 20 kohm).
+ */
+static const int rdx_ad_num0_map[KEY_ACTION_MAX] = {
+    [KEY_ACTION_CLICK]         = APP_MSG_GOTO_NEXT_MODE,
+    [KEY_ACTION_LONG]          = APP_MSG_KEY_POWER_OFF,
+    [KEY_ACTION_DOUBLE_CLICK]  = APP_MSG_GOTO_NEXT_MODE,
+};
+
+static const int rdx_ad_num1_map[KEY_ACTION_MAX] = {
+    [KEY_ACTION_CLICK]         = APP_MSG_MUSIC_PP,
+    [KEY_ACTION_LONG]          = APP_MSG_VOL_UP,
+    [KEY_ACTION_HOLD]          = APP_MSG_VOL_UP,
+};
+#endif
+
+#if TCFG_MICKEY_ENABLE || TCFG_ADKEY_ENABLE
 
 static const struct rdx_key_route rdx_key_routes[] = {
+#if TCFG_ADKEY_ENABLE
+    { KEY_AD_NUM0, rdx_ad_num0_map },
+    { KEY_AD_NUM1, rdx_ad_num1_map },
+#endif
+#if TCFG_MICKEY_ENABLE
     { KEY_MIC_NUM0, rdx_mic_num0_map },
     { KEY_MIC_NUM1, rdx_mic_num1_map },
     { KEY_MIC_NUM2, rdx_mic_num2_map },
+#endif
 };
 #endif
 
@@ -53,6 +81,11 @@ static bool rdx_key_is_owned(u8 key_value)
     }
 
     switch (key_value) {
+#if TCFG_ADKEY_ENABLE
+    case KEY_AD_NUM0:
+    case KEY_AD_NUM1:
+        return true;
+#endif
 #if TCFG_MICKEY_ENABLE
     case KEY_MIC_NUM0:
     case KEY_MIC_NUM1:
@@ -67,7 +100,7 @@ static bool rdx_key_is_owned(u8 key_value)
 
 static const struct rdx_key_route *rdx_key_find_route(u8 key_value)
 {
-#if TCFG_MICKEY_ENABLE
+#if TCFG_MICKEY_ENABLE || TCFG_ADKEY_ENABLE
     u8 i;
 
     for (i = 0; i < ARRAY_SIZE(rdx_key_routes); i++) {

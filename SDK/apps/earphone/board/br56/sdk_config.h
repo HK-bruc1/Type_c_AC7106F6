@@ -163,7 +163,7 @@
 
 #define TCFG_IOKEY_ENABLE                         0                // IO按键配置
 
-#define TCFG_ADKEY_ENABLE                         0                // AD按键配置
+#define TCFG_ADKEY_ENABLE                         1                // AD按键配置
 
 #define TCFG_MICKEY_ENABLE                        1                // MIC按键配置
 
