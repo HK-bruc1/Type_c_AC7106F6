@@ -123,11 +123,9 @@ static void rdx_identity_use_fallback_identity(const char *reason)
     rdx_identity_set_fallback_identity();
     printf("[RDX][WARN] factory identity %s; using default BLE MAC and zero identity\n",
            reason);
-#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
     printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
     printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
     printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
-#endif
 }
 
 static void rdx_identity_build_read_value(void)
@@ -221,12 +219,10 @@ int rdx_identity_init(void)
     memcpy(rdx_label_sn, factory_identity.label_sn, sizeof(rdx_label_sn));
     rdx_identity_build_read_value();
 
-#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
     printf("[RDX] factory identity loaded\n");
     printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
     printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
     printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
-#endif
     return 0;
 }
 
