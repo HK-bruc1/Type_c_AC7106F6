@@ -1089,6 +1089,23 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_record.c
 #endif
 
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/domain/rdx_artifact.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_local_storage_service.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_record_local_destination.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_record_composite_destination.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_record_coordinator.c
+#if RDX_STORAGE_BACKEND_NATIVE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_sd0_jl_br56.c
+#endif
+#if RDX_STORAGE_BACKEND_LEGACY_UXFILE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_legacy_uxfile.c
+#endif
+#endif
+
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/application/rdx_mic_gain_service.c \

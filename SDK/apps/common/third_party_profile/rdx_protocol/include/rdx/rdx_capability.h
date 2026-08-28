@@ -16,6 +16,10 @@
 #define RDX_CAP_RTC                             (1UL << 4)
 #define RDX_CAP_MEETING_CAPTURE                 (1UL << 5)
 #define RDX_CAP_CALL_CAPTURE                    (1UL << 6)
+#define RDX_CAP_LOCAL_STORAGE                   (1UL << 7)
+#define RDX_CAP_STORAGE_BACKEND_NATIVE         (1UL << 8)
+#define RDX_CAP_STORAGE_BACKEND_LEGACY_UXFILE  (1UL << 9)
+#define RDX_CAP_STORAGE_SERVICE                 (1UL << 10)
 
 #define RDX_REQUIRED_BASE_CAPS                  \
     (RDX_CAP_TRANSPORT                         | \
@@ -30,6 +34,8 @@
      (((ability) & RDX_ABILITY_CONFERENCE_RECORDING) \
           ? RDX_CAP_MEETING_CAPTURE : RDX_CAP_NONE)  | \
      (((ability) & RDX_ABILITY_CALL_RECORDING) \
-          ? RDX_CAP_CALL_CAPTURE : RDX_CAP_NONE))
+          ? RDX_CAP_CALL_CAPTURE : RDX_CAP_NONE) | \
+     (((ability) & RDX_ABILITY_LOCAL_STORAGE) \
+          ? RDX_CAP_LOCAL_STORAGE : RDX_CAP_NONE))
 
 #endif /* RDX_CAPABILITY_H */

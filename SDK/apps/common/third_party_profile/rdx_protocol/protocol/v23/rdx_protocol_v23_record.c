@@ -385,6 +385,7 @@ static const struct rdx_record_destination_ops rdx_v23_record_destination = {
 #endif
     .cancel = rdx_v23_record_destination_cancel,
     .detach = rdx_v23_record_destination_detach,
+    .requirement = RDX_RECORD_DESTINATION_OPTIONAL,
 };
 
 static void rdx_v23_record_engine_event(

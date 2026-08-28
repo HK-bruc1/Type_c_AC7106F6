@@ -104,7 +104,9 @@ const u32 CONFIG_TIMER_DUMP_TASK_STACK = 0;
 //================================================//
 //                  FS功能控制 					  //
 //================================================//
-#if TCFG_MIX_RECORD_ENABLE
+#if TCFG_MIX_RECORD_ENABLE || \
+    (defined(RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE) && \
+     RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE)
 const int FATFS_WRITE = 1; // 控制fatfs写功能开关。
 #else
 const int FATFS_WRITE = 0; // 控制fatfs写功能开关。

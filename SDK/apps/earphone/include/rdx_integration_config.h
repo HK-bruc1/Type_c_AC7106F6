@@ -38,6 +38,63 @@
 #define RDX_CFG_RECORD_MARK_ENABLE             \
     ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_RECORD_MARK) != 0)
 
+/* Local storage is intentionally disabled in the current Product Profile.
+ * Build-only work may opt in explicitly, but a backend must then be selected
+ * by that profile; the shared integration header never picks one silently. */
+#define RDX_CFG_LOCAL_STORAGE_ENABLE            \
+    ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_LOCAL_STORAGE) != 0)
+#ifndef RDX_LOCAL_STORAGE_DEV_TEST_ENABLE
+#define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
+#endif
+#define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      \
+    (RDX_CFG_LOCAL_STORAGE_ENABLE || RDX_LOCAL_STORAGE_DEV_TEST_ENABLE)
+#define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       RDX_CFG_LOCAL_STORAGE_ENABLE
+
+#ifndef RDX_STORAGE_BACKEND_NATIVE
+#define RDX_STORAGE_BACKEND_NATIVE              0
+#endif
+#ifndef RDX_STORAGE_BACKEND_LEGACY_UXFILE
+#define RDX_STORAGE_BACKEND_LEGACY_UXFILE       0
+#endif
+#ifndef RDX_LIBRDX_UXFILE_LINKED
+#define RDX_LIBRDX_UXFILE_LINKED                0
+#endif
+#ifndef RDX_LEGACY_UXFILE_ABI_READY
+#define RDX_LEGACY_UXFILE_ABI_READY             0
+#endif
+#ifndef RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED
+#define RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED   0
+#endif
+
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
+    ((RDX_STORAGE_BACKEND_NATIVE + RDX_STORAGE_BACKEND_LEGACY_UXFILE) != 1)
+#error "RDX local storage requires exactly one storage backend"
+#endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
+    RDX_STORAGE_BACKEND_LEGACY_UXFILE && !RDX_LIBRDX_UXFILE_LINKED
+#error "Legacy UXFILE backend requires an audited librdxApp UXFILE link"
+#endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
+    RDX_STORAGE_BACKEND_LEGACY_UXFILE && !RDX_LEGACY_UXFILE_ABI_READY
+#error "Legacy UXFILE backend requires an audited ABI adapter"
+#endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
+    RDX_STORAGE_BACKEND_LEGACY_UXFILE && !RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED
+#error "Legacy UXFILE backend adapter is not implemented for this target"
+#endif
+
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#if !TCFG_SD0_ENABLE
+#error "RDX local storage requires the JL sd0 device"
+#endif
+#if !TCFG_DEV_MANAGER_ENABLE
+#error "RDX local storage requires JL dev_manager"
+#endif
+#if !CONFIG_FATFS_ENABLE
+#error "RDX local storage requires JL FAT/VFS"
+#endif
+#endif
+
 /* Stage diagnostics can be disabled after BLE TX tuning is complete. */
 #ifndef RDX_CFG_BLE_TX_DIAG_ENABLE
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             1
@@ -83,7 +140,8 @@
      RDX_ABILITY_CONFERENCE_RECORDING         | \
      RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
-     RDX_ABILITY_RECORD_MARK)
+     RDX_ABILITY_RECORD_MARK                   | \
+     RDX_ABILITY_LOCAL_STORAGE)
 
 #if (RDX_COMPAT_DEVICE_ABILITY & ~RDX_PRODUCT_SUPPORTED_ABILITY)
 #error "RDX Device Ability contains a feature not implemented by this target"
@@ -111,12 +169,24 @@
 #else
 #define RDX_CFG_CALL_COMPILED_CAPS             RDX_CAP_NONE
 #endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS    \
+    (RDX_CAP_LOCAL_STORAGE | RDX_CAP_STORAGE_BACKEND_NATIVE | \
+     RDX_CAP_STORAGE_SERVICE)
+#elif RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && RDX_STORAGE_BACKEND_LEGACY_UXFILE
+#define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS    \
+    (RDX_CAP_LOCAL_STORAGE | RDX_CAP_STORAGE_BACKEND_LEGACY_UXFILE | \
+     RDX_CAP_STORAGE_SERVICE)
+#else
+#define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS    RDX_CAP_NONE
+#endif
 
 #define RDX_PORT_COMPILED_CAPS                 \
     (RDX_REQUIRED_BASE_CAPS                   | \
      RDX_CFG_RTC_COMPILED_CAPS                | \
      RDX_CFG_MEETING_COMPILED_CAPS            | \
-     RDX_CFG_CALL_COMPILED_CAPS)
+     RDX_CFG_CALL_COMPILED_CAPS                | \
+     RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS)
 
 #if (RDX_REQUIRED_PORT_CAPS & ~RDX_JL_BR56_AVAILABLE_CAPS)
 #error "RDX Product Ability requires a capability unavailable in JL BR56 Adapter"
@@ -205,6 +275,16 @@
 #define RDX_CFG_ONLINE_RECORDING_ENABLE        0
 #define RDX_CFG_RECORD_PAUSE_RESUME_ENABLE     0
 #define RDX_CFG_RECORD_MARK_ENABLE             0
+#define RDX_CFG_LOCAL_STORAGE_ENABLE            0
+#define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      0
+#define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       0
+#define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
+#define RDX_STORAGE_BACKEND_NATIVE              0
+#define RDX_STORAGE_BACKEND_LEGACY_UXFILE       0
+#define RDX_LIBRDX_UXFILE_LINKED                0
+#define RDX_LEGACY_UXFILE_ABI_READY             0
+#define RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED   0
+#define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS     0
 #define RDX_PRODUCT_SUPPORTED_ABILITY          0
 #define RDX_REQUIRED_PORT_CAPS                 0
 #define RDX_PORT_COMPILED_CAPS                 0

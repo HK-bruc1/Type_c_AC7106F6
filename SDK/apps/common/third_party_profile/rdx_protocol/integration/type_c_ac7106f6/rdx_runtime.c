@@ -18,11 +18,75 @@
 #if RDX_CFG_RTC_ENABLE
 #include "rdx/rdx_rtc_service.h"
 #endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#include "rdx/rdx_local_storage_service.h"
+#if RDX_STORAGE_BACKEND_NATIVE
+#include "rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_sd0_jl_br56.h"
+#elif RDX_STORAGE_BACKEND_LEGACY_UXFILE
+#include "rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_legacy_uxfile.h"
+#endif
+#endif
 
 #define RDX_RECORD_SHUTDOWN_TIMEOUT_MS          1000
 
 static u8 rdx_runtime_started;
 static u32 rdx_boot_structural_caps;
+
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+static struct rdx_local_storage_service rdx_local_storage;
+
+static int rdx_runtime_check_storage_structure(void)
+{
+    int backend_ready = 0;
+#if RDX_STORAGE_BACKEND_NATIVE
+    backend_ready = rdx_storage_backend_sd0_jl_br56_init() == 0;
+    if (!backend_ready) {
+        /* sd0 is a runtime readiness condition, not a prerequisite for the
+         * rest of RDX.  Keep the service registered so callers can report
+         * Local Readiness=UNAVAILABLE and retry after media recovery. */
+        printf("[RDX][CAP] local_storage=unavailable reason=sd0\n");
+    }
+    if (rdx_local_storage_service_init(
+            &rdx_local_storage, RDX_LOCAL_STORAGE_BACKEND_NATIVE,
+            rdx_storage_backend_sd0_jl_br56_media_ops(),
+            rdx_storage_backend_sd0_jl_br56_native_ops(), NULL, NULL,
+            NULL)) {
+        printf("[RDX][CAP] boot=failed cap=local_storage reason=service\n");
+        return -1;
+    }
+#elif RDX_STORAGE_BACKEND_LEGACY_UXFILE
+    backend_ready = rdx_storage_backend_legacy_uxfile_init() == 0;
+    if (!backend_ready) {
+        printf("[RDX][CAP] local_storage=unavailable reason=legacy\n");
+    }
+    if (rdx_local_storage_service_init(
+            &rdx_local_storage, RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE,
+            rdx_storage_backend_legacy_uxfile_media_ops(), NULL,
+            rdx_storage_backend_legacy_uxfile_ops(), NULL, NULL)) {
+        printf("[RDX][CAP] boot=failed cap=local_storage reason=service\n");
+        return -1;
+    }
+#endif
+    if (!backend_ready) {
+        rdx_local_storage.readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
+    }
+#if RDX_STORAGE_BACKEND_NATIVE || RDX_STORAGE_BACKEND_LEGACY_UXFILE
+    rdx_boot_structural_caps |= RDX_CAP_LOCAL_STORAGE
+#if RDX_STORAGE_BACKEND_NATIVE
+                               | RDX_CAP_STORAGE_BACKEND_NATIVE
+#else
+                               | RDX_CAP_STORAGE_BACKEND_LEGACY_UXFILE
+#endif
+                               | RDX_CAP_STORAGE_SERVICE;
+    return 0;
+#else
+    /* The integration header normally rejects this combination.  Keep this
+     * branch defensive for build-system probes and do not take RDX down. */
+    printf("[RDX][CAP] local_storage=unavailable reason=no_backend\n");
+    return 0;
+#endif
+}
+#endif
 
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 static int rdx_runtime_check_audio_structure(void)
@@ -98,8 +162,22 @@ int rdx_runtime_start(void)
         return ret;
     }
 #endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+    ret = rdx_runtime_check_storage_structure();
+    if (ret) {
+        rdx_local_storage_service_shutdown(
+            &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
+        rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
+        return ret;
+    }
+#endif
     ret = rdx_protocol_v23_init();
     if (ret) {
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+        rdx_local_storage_service_shutdown(
+            &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
+#endif
         rdx_device_state_exit();
         rdx_boot_structural_caps = RDX_CAP_NONE;
         return ret;
@@ -110,6 +188,10 @@ int rdx_runtime_start(void)
         rdx_protocol_v23_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
         rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
+#endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+        rdx_local_storage_service_shutdown(
+            &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
         rdx_device_state_exit();
         rdx_boot_structural_caps = RDX_CAP_NONE;
@@ -125,6 +207,10 @@ int rdx_runtime_start(void)
         rdx_protocol_v23_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
         rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
+#endif
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+        rdx_local_storage_service_shutdown(
+            &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
         rdx_transport_exit();
         rdx_device_state_exit();
@@ -150,11 +236,21 @@ void rdx_runtime_stop(void)
 #if RDX_CFG_RTC_ENABLE
     rdx_rtc_store_backup();
 #endif
-    rdx_protocol_v23_exit();
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     if (rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS)) {
         printf("[RDX] record engine shutdown incomplete\n");
+        /* Keep Protocol/Transport objects alive: the Engine callback may
+         * still reference them until its worker reaches IDLE. */
         return;
+    }
+#endif
+    /* Protocol record_exit only marks STOP_PENDING; the Engine must be
+     * stopped while its callback context is still valid. */
+    rdx_protocol_v23_exit();
+#if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+    if (rdx_local_storage_service_shutdown(
+            &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS)) {
+        printf("[RDX] local storage shutdown incomplete\n");
     }
 #endif
     rdx_transport_exit();

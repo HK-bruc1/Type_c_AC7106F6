@@ -11,6 +11,9 @@
      RDX_CAP_FACTORY_IDENTITY                  | \
      RDX_CAP_RTC                               | \
      RDX_CAP_MEETING_CAPTURE                   | \
-     RDX_CAP_CALL_CAPTURE)
+     RDX_CAP_CALL_CAPTURE                       | \
+     RDX_CAP_LOCAL_STORAGE                      | \
+     RDX_CAP_STORAGE_BACKEND_NATIVE             | \
+     RDX_CAP_STORAGE_SERVICE)
 
 #endif /* RDX_CAPABILITIES_JL_BR56_H */

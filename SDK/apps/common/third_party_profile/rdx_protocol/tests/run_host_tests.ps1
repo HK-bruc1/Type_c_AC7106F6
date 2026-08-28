@@ -95,6 +95,28 @@ $specs = @(
             (Join-Path $testDir 'rdx_record_session_test.c'),
             (Join-Path $moduleDir 'domain\rdx_record_session.c')
         )),
+    (New-RdxTestSpec -Name 'artifact' `
+        -Includes @($publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_artifact_test.c'),
+            (Join-Path $moduleDir 'domain\rdx_artifact.c')
+        )),
+    (New-RdxTestSpec -Name 'composite_destination' `
+        -Includes @($publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_record_composite_destination_test.c'),
+            (Join-Path $applicationDir 'rdx_record_composite_destination.c')
+        )),
+    (New-RdxTestSpec -Name 'local_storage_service' `
+        -Includes @($publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_local_storage_service_test.c'),
+            (Join-Path $moduleDir 'domain\rdx_artifact.c'),
+            (Join-Path $applicationDir 'rdx_local_storage_service.c'),
+            (Join-Path $applicationDir 'rdx_record_local_destination.c'),
+            (Join-Path $applicationDir 'rdx_record_composite_destination.c'),
+            (Join-Path $applicationDir 'rdx_record_coordinator.c')
+        )),
     (New-RdxTestSpec -Name 'rtc_service' `
         -Defines @('RDX_CFG_RTC_ENABLE=1') `
         -Includes @($testInclude, $publicInclude, $profileRoot) `

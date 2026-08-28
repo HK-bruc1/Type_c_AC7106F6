@@ -95,6 +95,11 @@ struct rdx_record_engine_runtime {
 
 static struct rdx_record_engine_runtime rdx_record_engine;
 
+static void rdx_record_engine_process_candidate(
+    const struct rdx_record_candidate *candidate);
+static uint8_t rdx_record_engine_take_candidate(
+    struct rdx_record_candidate *candidate);
+
 struct rdx_record_format_spec {
     uint16_t payload_size;
     uint16_t frame_ms;
@@ -259,6 +264,24 @@ static int rdx_record_engine_audio_frame(void *priv,
         return 0;
     }
     if (rdx_record_engine.candidate_count >= RDX_RECORD_CANDIDATE_QUEUE_DEPTH) {
+        if (rdx_record_engine.destination_ops
+            && rdx_record_engine.destination_ops->requirement
+               == RDX_RECORD_DESTINATION_REQUIRED) {
+            /* Local storage is REQUIRED in Composite mode. Do not overwrite
+             * an older candidate: that would make the Artifact appear
+             * complete while its frame counts are no longer recoverable. */
+            rdx_record_engine.overflow_count++;
+            rdx_record_engine.system_latch.pending = 1;
+            rdx_record_engine.system_latch.source =
+                RDX_RECORD_SYSTEM_SOURCE_ENGINE;
+            rdx_record_engine.system_latch.type =
+                RDX_RECORD_SYSTEM_ENGINE_FAULT;
+            rdx_record_engine.system_latch.cause = RDX_RECORD_CAUSE_QUEUE_FULL;
+            rdx_record_engine.frame_gate = 0;
+            spin_unlock(&rdx_record_engine.lock);
+            rdx_record_engine_wake();
+            return 0;
+        }
         /* Keep capture aligned with the newest audio.  A temporary
          * destination/transport stall may drop an encoded frame, but must
          * not stop the USB call recording session. */
@@ -359,6 +382,9 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
                                    enum rdx_record_result result)
 {
     uint8_t was_running = rdx_record_engine.session.state != RDX_RECORD_STATE_IDLE;
+    enum rdx_record_cause completion_cause = cause;
+    enum rdx_record_result completion_result = result;
+    int destination_ret = 0;
 
     if (mode == RDX_RECORD_TERMINATION_FORCED) {
         spin_lock(&rdx_record_engine.lock);
@@ -377,17 +403,71 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     rdx_record_engine.frame_gate = 0;
     rdx_record_session_begin_stop(&rdx_record_engine.session);
     rdx_record_engine_capture_close(0);
-    rdx_record_engine.stop_discarded +=
-        rdx_record_engine_discard_candidates();
-    if (rdx_record_engine.destination_ops
-        && rdx_record_engine.destination_ops->cancel) {
+    if (mode == RDX_RECORD_TERMINATION_NORMAL
+        && rdx_record_engine.destination_ops
+        && rdx_record_engine.destination_ops->seal) {
+        struct rdx_record_candidate candidate;
+
+        /* A destination that advertises seal owns the STOP cut.  Legacy
+         * online destinations retain their old discard-on-stop path. */
+        while (rdx_record_engine_take_candidate(&candidate)) {
+            rdx_record_engine_process_candidate(&candidate);
+            if (rdx_record_engine.session.state == RDX_RECORD_STATE_IDLE) {
+                return;
+            }
+        }
+        destination_ret = rdx_record_engine.destination_ops->seal(
+            rdx_record_engine.destination_priv,
+            rdx_record_engine.session.session_id,
+            rdx_record_engine.session.capture_generation);
+        if (destination_ret) {
+            /* seal() runs after the candidate queue has been drained.  A
+             * failure here is an IO/commit error, never a capture queue
+             * overflow; preserve that distinction for the APP contract. */
+            completion_result = RDX_RECORD_RESULT_STORAGE_ERROR;
+            completion_cause = RDX_RECORD_CAUSE_STORAGE_ERROR;
+        }
+    } else {
+        rdx_record_engine.stop_discarded +=
+            rdx_record_engine_discard_candidates();
+    }
+
+    if (mode == RDX_RECORD_TERMINATION_FORCED
+        && rdx_record_engine.destination_ops
+        && rdx_record_engine.destination_ops->abort) {
+        rdx_record_engine.destination_ops->abort(
+            rdx_record_engine.destination_priv,
+            rdx_record_engine.session.session_id,
+            rdx_record_engine.session.capture_generation,
+            cause);
+    } else if (mode == RDX_RECORD_TERMINATION_NORMAL && destination_ret
+               && rdx_record_engine.destination_ops
+               && rdx_record_engine.destination_ops->abort) {
+        rdx_record_engine.destination_ops->abort(
+            rdx_record_engine.destination_priv,
+            rdx_record_engine.session.session_id,
+            rdx_record_engine.session.capture_generation,
+            completion_cause);
+    } else if ((!rdx_record_engine.destination_ops
+                || !rdx_record_engine.destination_ops->seal
+                || mode == RDX_RECORD_TERMINATION_FORCED
+                || destination_ret)
+               && rdx_record_engine.destination_ops
+               && rdx_record_engine.destination_ops->cancel) {
+        /* Compatibility path for the current Online destination. */
         rdx_record_engine.destination_ops->cancel(
             rdx_record_engine.destination_priv,
             rdx_record_engine.session.session_id,
             rdx_record_engine.session.capture_generation);
     }
     if (rdx_record_engine.destination_ops
-        && rdx_record_engine.destination_ops->detach) {
+        && rdx_record_engine.destination_ops->detach_capture) {
+        rdx_record_engine.destination_ops->detach_capture(
+            rdx_record_engine.destination_priv,
+            rdx_record_engine.session.session_id,
+            rdx_record_engine.session.capture_generation);
+    } else if (rdx_record_engine.destination_ops
+               && rdx_record_engine.destination_ops->detach) {
         rdx_record_engine.destination_ops->detach(
             rdx_record_engine.destination_priv,
             rdx_record_engine.session.session_id,
@@ -395,7 +475,7 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
     }
     rdx_record_engine_release_capture_lease();
     rdx_record_session_complete_stop(&rdx_record_engine.session,
-                                     mode, cause);
+                                     mode, completion_cause);
 
     printf("[RDX][ENGINE] stopped session=%u capture=%u scene=%u gain_override=%u mic_gain=%u mode=%u cause=%u"
            " produced=%u enqueued=%u overflow=%u mismatch=%u stale=%u"
@@ -404,7 +484,7 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
            (unsigned int)rdx_record_engine.session.capture_generation,
            rdx_record_engine.session.scene,
            rdx_record_engine.session_mic_gain_override_valid,
-           rdx_record_engine.session_mic_gain, mode, cause,
+           rdx_record_engine.session_mic_gain, mode, completion_cause,
            (unsigned int)rdx_record_engine.produced_count,
            (unsigned int)rdx_record_engine.enqueued_count,
            (unsigned int)rdx_record_engine.overflow_count,
@@ -418,7 +498,8 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
            (unsigned int)rdx_record_engine.warmup_discard_count,
            (unsigned int)rdx_record_engine.session_frame_seq);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_SESSION_STOPPED,
-                           request_id, result, mode, cause);
+                           request_id, completion_result, mode,
+                           completion_cause);
 
     rdx_record_engine.destination_ops = NULL;
     rdx_record_engine.destination_priv = NULL;
@@ -631,12 +712,24 @@ rollback:
     }
     rdx_record_engine_clear_queues();
     rdx_record_engine_release_capture_lease();
-    if (destination_attached && rdx_record_engine.destination_ops
-        && rdx_record_engine.destination_ops->detach) {
-        rdx_record_engine.destination_ops->detach(
+    if (rdx_record_engine.destination_ops
+        && rdx_record_engine.destination_ops->requirement
+        == RDX_RECORD_DESTINATION_REQUIRED
+        && rdx_record_engine.destination_ops->abort) {
+        /* A REQUIRED destination may have allocated persistent state before
+         * capture open completed.  Abort it even when attach was reached only
+         * partially, so a failed START cannot strand an active artifact. */
+        rdx_record_engine.destination_ops->abort(
             rdx_record_engine.destination_priv,
             rdx_record_engine.session.session_id,
-            rdx_record_engine.session.capture_generation);
+            rdx_record_engine.session.capture_generation,
+            failure_cause);
+    } else if (destination_attached && rdx_record_engine.destination_ops
+               && rdx_record_engine.destination_ops->detach) {
+        rdx_record_engine.destination_ops->detach(
+                rdx_record_engine.destination_priv,
+                rdx_record_engine.session.session_id,
+                rdx_record_engine.session.capture_generation);
     }
     rdx_record_session_abort_start(&rdx_record_engine.session);
     rdx_record_engine_emit(RDX_RECORD_ENGINE_START_COMPLETE,
@@ -786,6 +879,7 @@ static void rdx_record_engine_process_candidate(
             && rdx_record_engine.session.state
             != RDX_RECORD_STATE_PAUSING_BY_USER
 #endif
+            && rdx_record_engine.session.state != RDX_RECORD_STATE_STOPPING
             )) {
         rdx_record_engine.stale_count++;
         return;
@@ -826,9 +920,15 @@ static void rdx_record_engine_process_candidate(
     ret = rdx_record_engine.destination_ops->consume(
         rdx_record_engine.destination_priv, &frame);
     if (ret) {
-        rdx_record_engine_stop(RDX_RECORD_TERMINATION_FORCED,
-                               RDX_RECORD_CAUSE_QUEUE_FULL, 0,
-                               RDX_RECORD_RESULT_QUEUE_FULL);
+        if (ret == RDX_RECORD_DESTINATION_ERROR_STORAGE) {
+            rdx_record_engine_stop(RDX_RECORD_TERMINATION_FORCED,
+                                   RDX_RECORD_CAUSE_STORAGE_ERROR, 0,
+                                   RDX_RECORD_RESULT_STORAGE_ERROR);
+        } else {
+            rdx_record_engine_stop(RDX_RECORD_TERMINATION_FORCED,
+                                   RDX_RECORD_CAUSE_QUEUE_FULL, 0,
+                                   RDX_RECORD_RESULT_QUEUE_FULL);
+        }
     }
 }
 

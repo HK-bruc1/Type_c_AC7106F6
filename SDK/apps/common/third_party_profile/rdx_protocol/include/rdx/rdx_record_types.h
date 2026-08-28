@@ -18,6 +18,13 @@
 #define RDX_RECORD_CANDIDATE_MAX_SIZE           96
 #define RDX_RECORD_CANDIDATE_QUEUE_DEPTH        16
 #define RDX_RECORD_CONTROL_QUEUE_DEPTH          4
+#define RDX_RECORD_DESTINATION_OPTIONAL         0
+#define RDX_RECORD_DESTINATION_REQUIRED         1
+/* Negative values are reserved for destinations that want Engine to retain
+ * the failure class.  Existing online destinations return positive/nonzero
+ * values and keep their legacy queue-full handling. */
+#define RDX_RECORD_DESTINATION_ERROR_QUEUE_FULL (-1)
+#define RDX_RECORD_DESTINATION_ERROR_STORAGE   (-2)
 
 #define RDX_RECORD_FRAME_FIRST_AFTER_RESUME     (1u << 0)
 
@@ -73,6 +80,9 @@ enum rdx_record_result {
     RDX_RECORD_RESULT_CANCELLED,
     RDX_RECORD_RESULT_SOURCE_LOST,
     RDX_RECORD_RESULT_SHUTDOWN_TIMEOUT,
+    /* Destination seal failed after capture stopped.  This is distinct from
+     * a capture-side queue overflow so APP can retry/report storage faults. */
+    RDX_RECORD_RESULT_STORAGE_ERROR,
 };
 
 enum rdx_record_termination_mode {
@@ -92,6 +102,7 @@ enum rdx_record_cause {
     RDX_RECORD_CAUSE_SOURCE_LOST,
     RDX_RECORD_CAUSE_START_FAILED,
     RDX_RECORD_CAUSE_SHUTDOWN,
+    RDX_RECORD_CAUSE_STORAGE_ERROR,
 };
 
 enum rdx_record_system_event_source {
@@ -141,10 +152,19 @@ struct rdx_record_destination_ops {
     int (*consume)(void *priv, const struct rdx_record_frame *frame);
     void (*poll)(void *priv, uint32_t session_id,
                  uint32_t capture_generation);
+    /* Migration contract: normal STOP uses seal/detach_capture. */
+    int (*seal)(void *priv, uint32_t session_id,
+                uint32_t capture_generation);
+    int (*abort)(void *priv, uint32_t session_id,
+                 uint32_t capture_generation, enum rdx_record_cause cause);
     void (*cancel)(void *priv, uint32_t session_id,
                    uint32_t capture_generation);
     void (*detach)(void *priv, uint32_t session_id,
                    uint32_t capture_generation);
+    void (*detach_capture)(void *priv, uint32_t session_id,
+                           uint32_t capture_generation);
+    /* A required destination must never be silently overrun by Engine. */
+    uint8_t requirement;
 };
 
 struct rdx_record_request {
