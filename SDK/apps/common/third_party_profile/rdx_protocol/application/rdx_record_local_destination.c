@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "rdx/rdx_local_storage_service.h"
 #include "rdx/rdx_record_local_destination.h"
 
 static int local_attach(void *priv, uint32_t session_id,

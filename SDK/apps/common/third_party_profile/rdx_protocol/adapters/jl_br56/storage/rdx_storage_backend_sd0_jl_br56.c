@@ -10,9 +10,11 @@
 
 #define RDX_SD0_PATH_MAX       160
 #define RDX_SD0_INDEX_MAGIC    0x30584452UL /* RDX0 */
-#define RDX_SD0_INDEX_VERSION  1
+#define RDX_SD0_INDEX_VERSION_V1  1u
+#define RDX_SD0_INDEX_VERSION     2u
 #define RDX_SD0_INDEX_MAX_ENTRIES  32u
-#define RDX_SD0_INDEX_HEADER_SIZE  16u
+#define RDX_SD0_INDEX_V1_HEADER_SIZE  16u
+#define RDX_SD0_INDEX_HEADER_SIZE     20u
 #define RDX_SD0_INDEX_ENTRY_SIZE   \
     (8u + 4u + 4u + 8u + 4u + 4u + RDX_STORAGE_NAME_MAX)
 #define RDX_SD0_INDEX_TRAILER_SIZE 4u
@@ -22,7 +24,7 @@
      + RDX_SD0_INDEX_TRAILER_SIZE)
 #define RDX_SD0_MARKER_DATA_SIZE   \
     (2u * 8u + 14u * 4u + 2u * RDX_STORAGE_NAME_MAX + 4u)
-#define RDX_SD0_LAYOUT_DIR_COUNT   3u
+#define RDX_SD0_LAYOUT_DIR_COUNT   2u
 
 struct rdx_sd0_open_file {
     FILE *file;
@@ -130,7 +132,7 @@ static enum rdx_storage_result sd0_file_size(
 static enum rdx_storage_result sd0_ensure_layout(void)
 {
     static const char *const names[RDX_SD0_LAYOUT_DIR_COUNT] = {
-        "RDXREC", "RDXTMP", "RDXBAD",
+        "RDXTMP", "RDXBAD",
     };
     uint32_t i;
 
@@ -513,12 +515,48 @@ static enum rdx_storage_result sd0_truncate(void *handle, uint64_t size)
                                             : RDX_STORAGE_RESULT_READY;
 }
 
+static int sd0_move_file(FILE *source_file, const char *destination_name)
+{
+    char destination_path[RDX_SD0_PATH_MAX];
+    FILE *moved_file = NULL;
+    int path_len;
+    int ret;
+
+    if (!source_file || !destination_name || !destination_name[0]
+        || destination_name[0] == '/' || strstr(destination_name, "..")) {
+        if (source_file) {
+            fclose(source_file);
+        }
+        return -1;
+    }
+    path_len = snprintf(destination_path, sizeof(destination_path), "/%s",
+                        destination_name);
+    if (path_len <= 1 || (uint32_t)path_len >= sizeof(destination_path)) {
+        fclose(source_file);
+        return -1;
+    }
+
+    /* Unlike fopen(), the JL VFS fmove() wrapper does not remove the mount
+     * prefix before forwarding path_dst to FAT.  FAT therefore needs a
+     * volume-relative path (for example, /name.raw), not a VFS path such as
+     * storage/sd0/C/name.raw.  path_len is the number of
+     * valid path bytes that FAT scans while splitting directory/name. */
+    ret = fmove(source_file, destination_path, &moved_file, 0, path_len);
+    if (ret) {
+        fclose(source_file);
+    } else if (moved_file) {
+        fclose(moved_file);
+    }
+    return ret;
+}
+
 static enum rdx_storage_result sd0_publish(const char *temp_name,
                                            const char *final_name)
 {
     struct rdx_sd0_open_file *open = &rdx_sd0.open;
     char temp_path[RDX_SD0_PATH_MAX];
     char final_path[RDX_SD0_PATH_MAX];
+    FILE *source_file;
     int ret;
 
     if (!open->pending_rename || !temp_name || !final_name
@@ -534,9 +572,17 @@ static enum rdx_storage_result sd0_publish(const char *temp_name,
     if (!open->file) {
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    ret = frename(open->file, final_path);
-    fclose(open->file);
+    source_file = open->file;
+    /* JL frename() only renames within the current directory.  Native
+     * publish crosses RDXTMP -> volume root, so use the SDK's fmove() primitive;
+     * it closes source_file on success and optionally returns the moved
+     * handle for the caller to close. */
+    ret = sd0_move_file(source_file, final_name);
     open->file = NULL;
+    printf("[RDX][LOCAL] publish temp=%s final=%s fat_path=/%s"
+           " path_len=%u ret=%d\n",
+           temp_name, final_name, final_name,
+           (unsigned int)(strlen(final_name) + 1), ret);
     if (!ret) {
         open->pending_rename = 0;
     }
@@ -748,6 +794,8 @@ static enum rdx_storage_result sd0_load_index(
     uint8_t *data = rdx_sd0.index_data;
     uint32_t best_generation = 0;
     uint32_t best_count = 0;
+    uint32_t best_schema_version = 0;
+    uint32_t best_serial_high_water = 0;
     uint32_t slot;
     uint8_t best_found = 0;
     uint8_t saw_index_file = 0;
@@ -756,6 +804,8 @@ static enum rdx_storage_result sd0_load_index(
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     snapshot->generation = 0;
+    snapshot->schema_version = 0;
+    snapshot->serial_high_water = 0;
     snapshot->count = 0;
     for (slot = 0; slot < 2; slot++) {
         char path[RDX_SD0_PATH_MAX];
@@ -766,6 +816,8 @@ static enum rdx_storage_result sd0_load_index(
         uint32_t version;
         uint32_t generation;
         uint32_t count;
+        uint32_t header_size;
+        uint32_t serial_high_water = 0;
         uint32_t expected_len;
         uint32_t stored_crc;
         uint32_t i;
@@ -793,12 +845,20 @@ static enum rdx_storage_result sd0_load_index(
         version = sd0_get_u32(data, &offset);
         generation = sd0_get_u32(data, &offset);
         count = sd0_get_u32(data, &offset);
-        if (magic != RDX_SD0_INDEX_MAGIC || version != RDX_SD0_INDEX_VERSION
+        if (magic != RDX_SD0_INDEX_MAGIC
+            || (version != RDX_SD0_INDEX_VERSION_V1
+                && version != RDX_SD0_INDEX_VERSION)
             || count > RDX_SD0_INDEX_MAX_ENTRIES
             || count > snapshot->capacity) {
             continue;
         }
-        expected_len = RDX_SD0_INDEX_HEADER_SIZE
+        if (version == RDX_SD0_INDEX_VERSION) {
+            serial_high_water = sd0_get_u32(data, &offset);
+            header_size = RDX_SD0_INDEX_HEADER_SIZE;
+        } else {
+            header_size = RDX_SD0_INDEX_V1_HEADER_SIZE;
+        }
+        expected_len = header_size
                        + count * RDX_SD0_INDEX_ENTRY_SIZE
                        + RDX_SD0_INDEX_TRAILER_SIZE;
         if (expected_len != len) {
@@ -811,7 +871,7 @@ static enum rdx_storage_result sd0_load_index(
             || (best_found && generation <= best_generation)) {
             continue;
         }
-        offset = RDX_SD0_INDEX_HEADER_SIZE;
+        offset = header_size;
         for (i = 0; i < count; i++) {
             struct rdx_storage_file_info *entry =
                 &snapshot->entries[i].file;
@@ -819,6 +879,10 @@ static enum rdx_storage_result sd0_load_index(
             memset(entry, 0, sizeof(*entry));
             entry->file_id.artifact_id.value = sd0_get_u64(data, &offset);
             entry->file_id.serial_number = sd0_get_u32(data, &offset);
+            if (version == RDX_SD0_INDEX_VERSION_V1
+                && entry->file_id.serial_number > serial_high_water) {
+                serial_high_water = entry->file_id.serial_number;
+            }
             entry->state = sd0_get_u32(data, &offset);
             entry->file_size = sd0_get_u64(data, &offset);
             entry->frame_count = sd0_get_u32(data, &offset);
@@ -827,11 +891,27 @@ static enum rdx_storage_result sd0_load_index(
                    sizeof(entry->file_id.name));
             offset += sizeof(entry->file_id.name);
         }
+        if (version == RDX_SD0_INDEX_VERSION) {
+            for (i = 0; i < count; i++) {
+                if (!snapshot->entries[i].file.file_id.serial_number
+                    || snapshot->entries[i].file.file_id.serial_number
+                       > serial_high_water) {
+                    break;
+                }
+            }
+            if (i != count) {
+                continue;
+            }
+        }
         best_generation = generation;
         best_count = count;
+        best_schema_version = version;
+        best_serial_high_water = serial_high_water;
         best_found = 1;
     }
+    snapshot->schema_version = best_schema_version;
     snapshot->generation = best_generation;
+    snapshot->serial_high_water = best_serial_high_water;
     snapshot->count = best_count;
     if (saw_index_file && !best_found) {
         return RDX_STORAGE_RESULT_CORRUPT;
@@ -864,6 +944,8 @@ static enum rdx_storage_result sd0_recover(void)
         if (sd0_commit_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
             return RDX_STORAGE_RESULT_IO_ERROR;
         }
+        printf("[RDX][LOCAL] index_init schema=%u generation=1"
+               " count=0 high_water=0\n", RDX_SD0_INDEX_VERSION);
         return RDX_STORAGE_RESULT_READY;
     }
     /* Recovery is deliberately bounded by the index size.  It never scans
@@ -911,6 +993,28 @@ static enum rdx_storage_result sd0_recover(void)
             }
         }
     }
+    if (snapshot.schema_version < RDX_SD0_INDEX_VERSION) {
+        /* v1 did not persist the serial high-water separately.  The loader
+         * derives it from existing entries, then this bounded A/B commit
+         * upgrades the header before any new Artifact can be reserved. */
+        if (sd0_commit_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
+            return RDX_STORAGE_RESULT_IO_ERROR;
+        }
+        printf("[RDX][LOCAL] index_upgrade from=%u to=%u generation=%u"
+               " count=%u high_water=%u\n",
+               (unsigned int)snapshot.schema_version,
+               RDX_SD0_INDEX_VERSION,
+               (unsigned int)(snapshot.generation + 1),
+               (unsigned int)snapshot.count,
+               (unsigned int)snapshot.serial_high_water);
+    } else {
+        printf("[RDX][LOCAL] index_ready schema=%u generation=%u"
+               " count=%u high_water=%u\n",
+               (unsigned int)snapshot.schema_version,
+               (unsigned int)snapshot.generation,
+               (unsigned int)snapshot.count,
+               (unsigned int)snapshot.serial_high_water);
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -933,6 +1037,13 @@ static enum rdx_storage_result sd0_commit_index(
     if (snapshot->generation == UINT32_MAX) {
         return RDX_STORAGE_RESULT_CORRUPT;
     }
+    for (i = 0; i < snapshot->count; i++) {
+        if (!snapshot->entries[i].file.file_id.serial_number
+            || snapshot->entries[i].file.file_id.serial_number
+               > snapshot->serial_high_water) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+    }
     if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
         return RDX_STORAGE_RESULT_NOT_READY;
     }
@@ -941,6 +1052,7 @@ static enum rdx_storage_result sd0_commit_index(
     expected_generation = snapshot->generation + 1;
     sd0_put_u32(data, &offset, expected_generation);
     sd0_put_u32(data, &offset, snapshot->count);
+    sd0_put_u32(data, &offset, snapshot->serial_high_water);
     for (i = 0; i < snapshot->count; i++) {
         const struct rdx_storage_file_info *entry =
             &snapshot->entries[i].file;
@@ -973,7 +1085,9 @@ static enum rdx_storage_result sd0_commit_index(
     verify.entries = rdx_sd0.enumerate_entries;
     verify.capacity = RDX_SD0_INDEX_MAX_ENTRIES;
     if (sd0_load_index(&verify) != RDX_STORAGE_RESULT_READY
+        || verify.schema_version != RDX_SD0_INDEX_VERSION
         || verify.generation != expected_generation
+        || verify.serial_high_water != snapshot->serial_high_water
         || verify.count != snapshot->count) {
         return RDX_STORAGE_RESULT_CORRUPT;
     }
@@ -983,9 +1097,10 @@ static enum rdx_storage_result sd0_commit_index(
 static enum rdx_storage_result sd0_quarantine(
     const struct rdx_artifact_id *artifact_id, const char *reason)
 {
-    char bad_path[RDX_SD0_PATH_MAX];
+    char bad_name[RDX_SD0_PATH_MAX];
     const char *base;
     FILE *file;
+    int ret;
 
     (void)reason;
     if (!artifact_id || artifact_id->value != rdx_sd0.open.artifact_id.value) {
@@ -1008,19 +1123,18 @@ static enum rdx_storage_result sd0_quarantine(
      * layout; a missing directory is an IO error and remains recoverable. */
     base = rdx_sd0.open.final_path[0]
            ? strrchr(rdx_sd0.open.final_path, '/') : NULL;
-    if (!base || snprintf(bad_path, sizeof(bad_path), "%sRDXBAD/%s",
-                          rdx_sd0.root, base + 1) >= sizeof(bad_path)) {
+    if (!base || snprintf(bad_name, sizeof(bad_name), "RDXBAD/%s",
+                          base + 1) >= sizeof(bad_name)) {
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     file = fopen(rdx_sd0.open.final_path, "r");
     if (!file) {
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    if (frename(file, bad_path)) {
-        fclose(file);
+    ret = sd0_move_file(file, bad_name);
+    if (ret) {
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    fclose(file);
     rdx_sd0.open.pending_rename = 0;
     rdx_sd0.open.artifact_id.value = 0;
     return RDX_STORAGE_RESULT_READY;

@@ -1,8 +1,9 @@
 #ifndef RDX_RECORD_LOCAL_DESTINATION_H
 #define RDX_RECORD_LOCAL_DESTINATION_H
 
-#include "rdx/rdx_local_storage_service.h"
 #include "rdx/rdx_record_types.h"
+
+struct rdx_local_storage_service;
 
 struct rdx_record_local_destination {
     struct rdx_local_storage_service *service;

@@ -148,9 +148,9 @@ const struct task_info task_info_table[] = {
     {"app_proto",           2,     0,   768,   64  },
 #endif
 #if TCFG_RDX_ENABLE
-    {"rdx_record",          4,     0,   512,   128 },
+    {"rdx_record",          4,     0,  1024,   128 },
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
-    {"rdx_storage",         5,     0,   512,   128 },
+    {"rdx_storage",         5,     0,  1024,   128 },
 #endif
 #endif
     //{"ui",                  3,     0,   384 - 64,  128  },

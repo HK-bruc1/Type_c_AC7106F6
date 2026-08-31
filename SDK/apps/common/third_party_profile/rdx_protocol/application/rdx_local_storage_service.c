@@ -1,15 +1,21 @@
 #include <stddef.h>
+#if !CONFIG_CPU_BR56
+#include <stdio.h>
+#endif
 #include <string.h>
 
 #include "rdx/rdx_local_storage_service.h"
 
 #if CONFIG_CPU_BR56
 #include "task.h"
+#include "user_cfg.h"
 #define RDX_LOCAL_STORAGE_TASK_NAME       "rdx_storage"
 #define RDX_LOCAL_STORAGE_TASK_WAKE       0x52445802
 #define RDX_LOCAL_STORAGE_PUMP_BUDGET     4
 #define RDX_LOCAL_STORAGE_SEAL_WAIT_TICKS 100
 #endif
+
+#define RDX_COMPAT_FILENAME_ATTEMPTS      64
 
 /* CRC32/IEEE is part of the Native Artifact checkpoint contract.  Keep the
  * serialized value in the Artifact (rather than a backend-private running
@@ -127,6 +133,18 @@ static void service_emit(struct rdx_local_storage_service *service,
     completion.generation = service->artifact.generation;
     completion.serial_number = service->artifact.spec.serial_number;
     completion.frame_count = service->artifact.persisted_frame_count;
+    completion.produced_frame_count =
+        service->artifact.produced_frame_count;
+    completion.destination_accepted_count =
+        service->artifact.destination_accepted_count;
+    completion.local_accepted_count =
+        service->artifact.local_accepted_count;
+    completion.persisted_frame_count =
+        service->artifact.persisted_frame_count;
+    completion.rejected_frame_count =
+        service->artifact.rejected_frame_count;
+    completion.dropped_frame_count =
+        service->artifact.dropped_frame_count;
     completion.file_size = service->artifact.audio_bytes;
     completion.audio_crc = service->artifact.audio_crc;
     completion.cause = cause;
@@ -222,6 +240,7 @@ static enum rdx_storage_result service_fail(
     service->queue_head = 0;
     service->queue_tail = 0;
     service->queue_count = 0;
+    service->checkpoint_persisted_frame_count = 0;
     service->active = 0;
     service->capture_detached = 1;
     service->readiness =
@@ -347,6 +366,223 @@ enum rdx_storage_result rdx_local_storage_service_recover(
     return result;
 }
 
+static const char *service_filename_basename(const char *name)
+{
+    const char *slash;
+
+    if (!name) {
+        return "";
+    }
+    slash = strrchr(name, '/');
+    return slash ? slash + 1 : name;
+}
+
+static uint8_t service_filename_exists(
+    const struct rdx_storage_index_snapshot *snapshot,
+    const char *filename)
+{
+    uint32_t i;
+
+    if (!snapshot || !filename || !filename[0]) {
+        return 0;
+    }
+    for (i = 0; i < snapshot->count; i++) {
+        const char *existing = service_filename_basename(
+            snapshot->entries[i].file.file_id.name);
+
+        if (!strcmp(existing, filename)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void service_filename_random_bytes(uint32_t serial_number,
+                                          uint32_t attempt,
+                                          uint8_t random_bytes[3])
+{
+#if CONFIG_CPU_BR56
+    (void)serial_number;
+    (void)attempt;
+    get_random_number(random_bytes, 3);
+#else
+    /* Host tests need repeatable names while the target follows the reference
+     * implementation and draws three bytes from JL's random provider. */
+    uint32_t value = serial_number ^ ((attempt + 1) * 0x9e3779b9UL);
+
+    value ^= value >> 16;
+    value *= 0x7feb352dUL;
+    value ^= value >> 15;
+    random_bytes[0] = (uint8_t)value;
+    random_bytes[1] = (uint8_t)(value >> 8);
+    random_bytes[2] = (uint8_t)(value >> 16);
+#endif
+}
+
+static int service_generate_compat_filename(
+    const struct rdx_storage_index_snapshot *snapshot,
+    uint32_t serial_number, char *filename, uint32_t capacity)
+{
+    uint32_t attempt;
+
+    if (!snapshot || !serial_number || !filename || !capacity) {
+        return -1;
+    }
+    for (attempt = 0; attempt < RDX_COMPAT_FILENAME_ATTEMPTS; attempt++) {
+        uint8_t random_bytes[3];
+        int len;
+
+        service_filename_random_bytes(serial_number, attempt, random_bytes);
+        len = snprintf(filename, capacity, "%x%x%x.raw",
+                       random_bytes[0], random_bytes[1], random_bytes[2]);
+        if (len <= 0 || (uint32_t)len >= capacity) {
+            return -1;
+        }
+        if (!service_filename_exists(snapshot, filename)) {
+            return 0;
+        }
+    }
+    filename[0] = 0;
+    return -1;
+}
+
+static int service_fill_reserved_spec(
+    enum rdx_record_format_id format_id, uint32_t serial_number,
+    const struct rdx_storage_index_snapshot *snapshot,
+    struct rdx_storage_artifact_spec *spec)
+{
+    char filename[RDX_STORAGE_NAME_MAX];
+    int temp_len;
+    int final_len;
+
+    if (!spec || !serial_number || !snapshot) {
+        return -1;
+    }
+    memset(spec, 0, sizeof(*spec));
+    spec->artifact_id.value = serial_number;
+    spec->serial_number = serial_number;
+    spec->format_id = format_id;
+    switch (format_id) {
+    case RDX_RECORD_FORMAT_MEETING_V1:
+        spec->sample_rate = RDX_RECORD_MEETING_V1_SAMPLE_RATE;
+        spec->channels = RDX_RECORD_MEETING_V1_CHANNELS;
+        spec->frame_ms = RDX_RECORD_MEETING_V1_FRAME_MS;
+        spec->payload_size = RDX_RECORD_MEETING_V1_PAYLOAD_SIZE;
+        break;
+    case RDX_RECORD_FORMAT_CALL_V1:
+        spec->sample_rate = RDX_RECORD_CALL_V1_SAMPLE_RATE;
+        spec->channels = RDX_RECORD_CALL_V1_CHANNELS;
+        spec->frame_ms = RDX_RECORD_CALL_V1_FRAME_MS;
+        spec->payload_size = RDX_RECORD_CALL_V1_PAYLOAD_SIZE;
+        break;
+    default:
+        return -1;
+    }
+    if (service_generate_compat_filename(snapshot, serial_number,
+                                         filename, sizeof(filename))) {
+        memset(spec, 0, sizeof(*spec));
+        return -1;
+    }
+    temp_len = snprintf(spec->temp_name, sizeof(spec->temp_name),
+                        "RDXTMP/T%08X.OPU", (unsigned int)serial_number);
+    /* Legacy UXFILE and the APP file commands address recordings by a bare
+     * filename below storage/sd0/C/.  Keep the published Artifact in that
+     * root so list/read/delete remain wire-compatible with the reference
+     * implementation; only transactional files live in internal folders. */
+    final_len = snprintf(spec->final_name, sizeof(spec->final_name),
+                         "%s", filename);
+    if (temp_len <= 0 || temp_len >= sizeof(spec->temp_name)
+        || final_len <= 0 || final_len >= sizeof(spec->final_name)) {
+        memset(spec, 0, sizeof(*spec));
+        return -1;
+    }
+    return 0;
+}
+
+enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
+    struct rdx_local_storage_service *service,
+    enum rdx_record_format_id format_id,
+    struct rdx_storage_artifact_spec *spec)
+{
+    struct rdx_storage_index_snapshot snapshot;
+    enum rdx_storage_result result;
+    uint32_t serial_number;
+
+    if (!service || !spec) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    if (service->backend != RDX_LOCAL_STORAGE_BACKEND_NATIVE
+        || !service->native_ops || !service->native_ops->load_index
+        || !service->native_ops->commit_index) {
+        return RDX_STORAGE_RESULT_UNSUPPORTED;
+    }
+    service_lock(service);
+    if (service->active) {
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_BUSY;
+    }
+    if ((service->native_ops->recover && !service->recovery_checked)
+        || service->readiness == RDX_STORAGE_READINESS_RECOVERY_REQUIRED
+        || service->readiness == RDX_STORAGE_READINESS_HOST_OWNED
+        || service->readiness == RDX_STORAGE_READINESS_QUIESCING) {
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_BAD_STATE;
+    }
+    result = service->media_ops->ensure_ready();
+    if (result != RDX_STORAGE_RESULT_READY) {
+        service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
+        service->recovery_checked = 0;
+        service_unlock(service);
+        return result;
+    }
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.entries = service->index_entries;
+    snapshot.capacity = sizeof(service->index_entries)
+                        / sizeof(service->index_entries[0]);
+    result = service->native_ops->load_index(&snapshot);
+    if (result != RDX_STORAGE_RESULT_READY) {
+        service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
+        service->recovery_checked = 0;
+        service_unlock(service);
+        return result;
+    }
+    if (snapshot.count >= snapshot.capacity) {
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_NO_SPACE;
+    }
+    if (snapshot.serial_high_water == UINT32_MAX) {
+        service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
+        service->recovery_checked = 0;
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    serial_number = snapshot.serial_high_water + 1;
+    if (service_fill_reserved_spec(format_id, serial_number, &snapshot,
+                                   spec)) {
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    snapshot.serial_high_water = serial_number;
+    result = service->native_ops->commit_index(&snapshot);
+    if (result != RDX_STORAGE_RESULT_READY) {
+        memset(spec, 0, sizeof(*spec));
+        if (result == RDX_STORAGE_RESULT_CORRUPT
+            || result == RDX_STORAGE_RESULT_CHECKSUM) {
+            service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
+            service->recovery_checked = 0;
+        }
+        service_unlock(service);
+        return result;
+    }
+    service_unlock(service);
+    printf("[RDX][LOCAL] reserved artifact=%08X sn=%u format=%u"
+           " temp=%s final=%s\n",
+           (unsigned int)spec->artifact_id.value,
+           (unsigned int)spec->serial_number, spec->format_id,
+           spec->temp_name, spec->final_name);
+    return RDX_STORAGE_RESULT_READY;
+}
+
 enum rdx_storage_result rdx_local_storage_service_start(
     struct rdx_local_storage_service *service,
     const struct rdx_storage_artifact_spec *spec)
@@ -354,7 +590,7 @@ enum rdx_storage_result rdx_local_storage_service_start(
     enum rdx_storage_result result;
 
     if (!service || !spec || !spec->artifact_id.value
-        || !spec->serial_number || !spec->payload_size
+        || !spec->serial_number || !spec->frame_ms || !spec->payload_size
         || spec->payload_size > RDX_RECORD_CANDIDATE_MAX_SIZE
         || !spec->temp_name[0] || !spec->final_name[0]) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
@@ -401,6 +637,7 @@ enum rdx_storage_result rdx_local_storage_service_start(
     service->queue_head = 0;
     service->queue_tail = 0;
     service->queue_count = 0;
+    service->checkpoint_persisted_frame_count = 0;
     rdx_artifact_init(&service->artifact);
     if (rdx_artifact_begin(&service->artifact, spec)) {
         service->readiness = RDX_STORAGE_READINESS_READY;
@@ -606,7 +843,11 @@ static enum rdx_storage_result service_pump_locked(
         pumped++;
     }
     if (pumped && service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
-        && service->native_ops->store_marker) {
+        && service->native_ops->store_marker
+        && ((uint64_t)(service->artifact.persisted_frame_count
+                       - service->checkpoint_persisted_frame_count)
+            * service->artifact.spec.frame_ms
+            >= RDX_LOCAL_STORAGE_CHECKPOINT_INTERVAL_MS)) {
         struct rdx_storage_marker marker;
 
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_WRITING,
@@ -616,6 +857,8 @@ static enum rdx_storage_result service_pump_locked(
             return service_fail(service, RDX_STORAGE_RESULT_IO_ERROR,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
+        service->checkpoint_persisted_frame_count =
+            service->artifact.persisted_frame_count;
     }
     return RDX_STORAGE_RESULT_READY;
 }
@@ -693,6 +936,10 @@ enum rdx_storage_result rdx_local_storage_service_seal(
     if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE) {
         result = service->native_ops->close(service->artifact_handle,
                                             &file_size, &audio_crc);
+        printf("[RDX][LOCAL] seal stage=close result=%u"
+               " bytes_hi=%u bytes_lo=%u crc=%08X\n",
+               result, (unsigned int)(file_size >> 32),
+               (unsigned int)file_size, (unsigned int)audio_crc);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
@@ -701,6 +948,13 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         if (file_size != service->artifact.audio_bytes
             || (service->artifact.persisted_frame_count
                 && audio_crc != service->artifact.audio_crc)) {
+            printf("[RDX][LOCAL] seal stage=verify result=%u"
+                   " expected_bytes_hi=%u expected_bytes_lo=%u"
+                   " expected_crc=%08X\n",
+                   RDX_STORAGE_RESULT_CORRUPT,
+                   (unsigned int)(service->artifact.audio_bytes >> 32),
+                   (unsigned int)service->artifact.audio_bytes,
+                   (unsigned int)service->artifact.audio_crc);
             return service_fail(service, RDX_STORAGE_RESULT_CORRUPT,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
@@ -708,12 +962,15 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_SEALED,
                             &marker);
         result = service->native_ops->store_marker(&marker);
+        printf("[RDX][LOCAL] seal stage=sealed_marker result=%u\n",
+               result);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         result = service->native_ops->publish(
             service->artifact.spec.temp_name, service->artifact.spec.final_name);
+        printf("[RDX][LOCAL] seal stage=publish result=%u\n", result);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
@@ -721,6 +978,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_PUBLISHED,
                             &marker);
         result = service->native_ops->store_marker(&marker);
+        printf("[RDX][LOCAL] seal stage=published_marker result=%u\n",
+               result);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
@@ -730,6 +989,11 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         snapshot.capacity = sizeof(service->index_entries)
                             / sizeof(service->index_entries[0]);
         result = service->native_ops->load_index(&snapshot);
+        printf("[RDX][LOCAL] seal stage=load_index result=%u"
+               " generation=%u count=%u high_water=%u\n",
+               result, (unsigned int)snapshot.generation,
+               (unsigned int)snapshot.count,
+               (unsigned int)snapshot.serial_high_water);
         if (result != RDX_STORAGE_RESULT_READY
             || snapshot.count >= snapshot.capacity) {
             return service_fail(service,
@@ -746,6 +1010,11 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         snapshot.entries[snapshot.count].file.audio_crc = audio_crc;
         snapshot.count++;
         result = service->native_ops->commit_index(&snapshot);
+        printf("[RDX][LOCAL] seal stage=commit_index result=%u"
+               " generation=%u count=%u high_water=%u\n",
+               result, (unsigned int)(snapshot.generation + 1),
+               (unsigned int)snapshot.count,
+               (unsigned int)snapshot.serial_high_water);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
@@ -753,6 +1022,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_INDEXED,
                             &marker);
         result = service->native_ops->store_marker(&marker);
+        printf("[RDX][LOCAL] seal stage=indexed_marker result=%u\n",
+               result);
         if (result != RDX_STORAGE_RESULT_READY) {
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);

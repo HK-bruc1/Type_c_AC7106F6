@@ -124,7 +124,9 @@ struct rdx_storage_index_entry {
 
 /* The service owns the entry buffer; the port never allocates it. */
 struct rdx_storage_index_snapshot {
+    uint32_t schema_version;
     uint32_t generation;
+    uint32_t serial_high_water;
     struct rdx_storage_index_entry *entries;
     uint32_t count;
     uint32_t capacity;

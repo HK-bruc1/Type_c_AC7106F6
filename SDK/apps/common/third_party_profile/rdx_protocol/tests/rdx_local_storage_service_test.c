@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "rdx/rdx_local_storage_service.h"
 #include "rdx/rdx_record_coordinator.h"
 #include "rdx/rdx_record_local_destination.h"
 
@@ -25,6 +26,8 @@ struct fake_native {
     int recover_calls;
     enum rdx_storage_result recover_result;
     uint32_t index_count;
+    uint32_t index_generation;
+    uint32_t serial_high_water;
 };
 
 struct fake_completion {
@@ -130,13 +133,17 @@ static enum rdx_storage_result fake_marker(
 static enum rdx_storage_result fake_load_index(
     struct rdx_storage_index_snapshot *snapshot)
 {
+    snapshot->schema_version = 2;
+    snapshot->generation = g_native->index_generation;
+    snapshot->serial_high_water = g_native->serial_high_water
+                                      ? g_native->serial_high_water : 2;
     snapshot->count = g_native->index_count;
     if (snapshot->count) {
         assert(snapshot->capacity >= 1);
         memset(&snapshot->entries[0], 0, sizeof(snapshot->entries[0]));
         snapshot->entries[0].file.file_id.artifact_id.value = 0x321;
         snapshot->entries[0].file.file_id.serial_number = 2;
-        strcpy(snapshot->entries[0].file.file_id.name, "RDXREC/R0002.OPU");
+        strcpy(snapshot->entries[0].file.file_id.name, "R0002.OPU");
     }
     return RDX_STORAGE_RESULT_READY;
 }
@@ -146,7 +153,9 @@ static enum rdx_storage_result fake_commit_index(
 {
     assert(snapshot->count <= 1);
     g_native->index_commit_calls++;
+    g_native->index_generation++;
     g_native->index_count = snapshot->count;
+    g_native->serial_high_water = snapshot->serial_high_water;
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -181,7 +190,7 @@ static struct rdx_storage_artifact_spec test_spec(void)
     spec.frame_ms = RDX_RECORD_MEETING_V1_FRAME_MS;
     spec.payload_size = 4;
     strcpy(spec.temp_name, "RDXTMP/T0002.OPU");
-    strcpy(spec.final_name, "RDXREC/R0002.OPU");
+    strcpy(spec.final_name, "R0002.OPU");
     return spec;
 }
 
@@ -240,19 +249,80 @@ static void test_native_commit(void)
     assert(events.calls == 1);
     assert(events.last.type == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_COMMITTED);
     assert(events.last.frame_count == 1);
+    assert(events.last.produced_frame_count == 1);
+    assert(events.last.destination_accepted_count == 1);
+    assert(events.last.local_accepted_count == 1);
+    assert(events.last.persisted_frame_count == 1);
     assert(events.last.file_size == 4);
     assert(events.last.audio_crc == 0xb63cfbcdUL);
     assert(events.last.audio_crc == native.audio_crc);
     assert(service.artifact.audio_crc == native.audio_crc);
     assert(media.ready_calls == 1);
     assert(native.append_calls == 1 && native.publish_calls == 1);
-    assert(native.index_commit_calls == 1 && native.marker_calls == 6);
+    assert(native.index_commit_calls == 1 && native.marker_calls == 5);
     assert(native.marker_states[0] == 0);
     assert(native.marker_states[1] == 1);
-    assert(native.marker_states[2] == 1);
-    assert(native.marker_states[3] == 2);
-    assert(native.marker_states[4] == 3);
-    assert(native.marker_states[5] == 4);
+    assert(native.marker_states[2] == 2);
+    assert(native.marker_states[3] == 3);
+    assert(native.marker_states[4] == 4);
+}
+
+static void test_native_checkpoint_cadence(void)
+{
+    struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
+    struct fake_native native = { 0 };
+    struct fake_completion events = { 0 };
+    struct rdx_storage_media_ops media_ops = { 0 };
+    struct rdx_native_artifact_ops native_ops = { 0 };
+    struct rdx_local_storage_service service;
+    struct rdx_record_local_destination destination;
+    struct rdx_storage_artifact_spec spec = test_spec();
+    const uint8_t payload[4] = { 1, 2, 3, 4 };
+    uint32_t checkpoint_frames =
+        RDX_LOCAL_STORAGE_CHECKPOINT_INTERVAL_MS / spec.frame_ms;
+    uint32_t i;
+
+    assert(checkpoint_frames > 1);
+    media_ops.ensure_ready = fake_ready;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_media = &media;
+    g_native = &native;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, completion, &events) == 0);
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_READY);
+    assert(rdx_record_local_destination_init(&destination, &service) == 0);
+    assert(rdx_record_local_destination_ops()->attach(
+               &destination, 8, 4) == 0);
+    for (i = 0; i < checkpoint_frames - 1; i++) {
+        struct rdx_record_frame frame = test_frame(i, payload);
+
+        assert(rdx_record_local_destination_ops()->consume(
+                   &destination, &frame) == 0);
+        assert(rdx_local_storage_service_pump(&service, 0)
+               == RDX_STORAGE_RESULT_READY);
+    }
+    assert(native.marker_calls == 2);
+    {
+        struct rdx_record_frame frame = test_frame(i, payload);
+
+        assert(rdx_record_local_destination_ops()->consume(
+                   &destination, &frame) == 0);
+        assert(rdx_local_storage_service_pump(&service, 0)
+               == RDX_STORAGE_RESULT_READY);
+    }
+    assert(native.marker_calls == 3);
+    assert(native.marker_states[2] == RDX_STORAGE_MARKER_STATE_WRITING);
+    assert(rdx_record_local_destination_ops()->abort(
+               &destination, 8, 4, RDX_RECORD_CAUSE_USER_REQUEST) != 0);
 }
 
 static void test_required_queue_failure(void)
@@ -495,6 +565,81 @@ static void test_coordinator_binds_runtime_session(void)
     assert(events.last.type == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_FAILED);
 }
 
+static void test_coordinator_reserves_persistent_identity(void)
+{
+    struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
+    struct fake_native native = { 0 };
+    struct fake_completion events = { 0 };
+    struct rdx_storage_media_ops media_ops = { 0 };
+    struct rdx_native_artifact_ops native_ops = { 0 };
+    struct rdx_local_storage_service service;
+    struct rdx_record_coordinator coordinator;
+    struct rdx_record_request request;
+    uint32_t wire_serial_number;
+    char wire_filename[RDX_STORAGE_NAME_MAX];
+    const char *final_basename;
+
+    media_ops.ensure_ready = fake_ready;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_media = &media;
+    g_native = &native;
+    memset(&request, 0, sizeof(request));
+    request.request_id = 7;
+    request.type = RDX_RECORD_REQUEST_START;
+    request.format_id = RDX_RECORD_FORMAT_MEETING_V1;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, completion, &events) == 0);
+    assert(rdx_record_coordinator_init(&coordinator, &service, NULL, NULL)
+           == 0);
+    assert(rdx_record_coordinator_prepare_engine_start(
+               &coordinator, &request) == RDX_RECORD_RESULT_OK);
+    assert(service.artifact.spec.artifact_id.value == 3);
+    assert(service.artifact.spec.serial_number == 3);
+    assert(service.artifact.spec.session_id == 0);
+    assert(service.artifact.spec.payload_size
+           == RDX_RECORD_MEETING_V1_PAYLOAD_SIZE);
+    assert(!strcmp(service.artifact.spec.temp_name,
+                   "RDXTMP/T00000003.OPU"));
+    final_basename = service.artifact.spec.final_name;
+    assert(strlen(final_basename) >= sizeof("000.raw") - 1);
+    assert(!strcmp(final_basename + strlen(final_basename) - 4, ".raw"));
+    assert(rdx_record_coordinator_get_record_identity(
+               &coordinator, &wire_serial_number, wire_filename,
+               sizeof(wire_filename)) == 0);
+    assert(wire_serial_number == 3);
+    assert(!strcmp(wire_filename, final_basename));
+    assert(native.serial_high_water == 3);
+    assert(native.index_commit_calls == 1);
+    assert(request.destination_ops
+           == rdx_record_composite_destination_ops());
+    assert(rdx_record_coordinator_cancel_start(
+               &coordinator, RDX_RECORD_CAUSE_START_FAILED)
+           != RDX_STORAGE_RESULT_READY);
+
+    memset(&request, 0, sizeof(request));
+    request.request_id = 8;
+    request.type = RDX_RECORD_REQUEST_START;
+    request.format_id = RDX_RECORD_FORMAT_CALL_V1;
+    assert(rdx_record_coordinator_prepare_recording(&coordinator, &request)
+           == RDX_STORAGE_RESULT_READY);
+    assert(service.artifact.spec.artifact_id.value == 4);
+    assert(service.artifact.spec.serial_number == 4);
+    assert(service.artifact.spec.format_id == RDX_RECORD_FORMAT_CALL_V1);
+    assert(native.serial_high_water == 4);
+    assert(native.index_commit_calls == 2);
+    assert(rdx_record_coordinator_cancel_start(
+               &coordinator, RDX_RECORD_CAUSE_START_FAILED)
+           != RDX_STORAGE_RESULT_READY);
+}
+
 static void test_recovery_failure_gates_start(void)
 {
     struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
@@ -574,11 +719,13 @@ static void test_media_outage_invalidates_recovery(void)
 int main(void)
 {
     test_native_commit();
+    test_native_checkpoint_cadence();
     test_required_queue_failure();
     test_short_write_is_failed();
     test_close_size_mismatch_is_not_published();
     test_indexed_marker_failure_is_not_committed();
     test_coordinator_binds_runtime_session();
+    test_coordinator_reserves_persistent_identity();
     test_recovery_failure_gates_start();
     test_media_outage_invalidates_recovery();
     return 0;

@@ -3,9 +3,11 @@
 
 #include <stdint.h>
 
-#include "rdx/rdx_local_storage_service.h"
 #include "rdx/rdx_record_composite_destination.h"
 #include "rdx/rdx_record_local_destination.h"
+#include "rdx/rdx_storage_types.h"
+
+struct rdx_local_storage_service;
 
 /*
  * Composition root for a Local REQUIRED + Online OPTIONAL recording.  The
@@ -37,9 +39,28 @@ enum rdx_storage_result rdx_record_coordinator_prepare_start(
     const struct rdx_storage_artifact_spec *spec,
     struct rdx_record_request *request);
 
+/* Application-facing START preparation: Storage reserves the persistent
+ * identity and naming policy; Protocol supplies only the Engine request. */
+enum rdx_storage_result rdx_record_coordinator_prepare_recording(
+    struct rdx_record_coordinator *coordinator,
+    struct rdx_record_request *request);
+
+/* Engine-facing adapter for deferred START preparation.  This function is
+ * invoked on the Record Engine worker, never from the BLE protocol callback
+ * stack, and maps Storage results into the Engine result contract. */
+enum rdx_record_result rdx_record_coordinator_prepare_engine_start(
+    void *priv, struct rdx_record_request *request);
+
 /* Roll back a prepared artifact when Engine START could not be submitted. */
 enum rdx_storage_result rdx_record_coordinator_cancel_start(
     struct rdx_record_coordinator *coordinator,
     enum rdx_record_cause cause);
+
+/* Return the current persistent identity using the reference Wire filename
+ * shape (basename only).  It is available after Local START preparation and
+ * remains valid through the synchronous normal STOP indication. */
+int rdx_record_coordinator_get_record_identity(
+    const struct rdx_record_coordinator *coordinator,
+    uint32_t *serial_number, char *filename, uint32_t filename_capacity);
 
 #endif /* RDX_RECORD_COORDINATOR_H */

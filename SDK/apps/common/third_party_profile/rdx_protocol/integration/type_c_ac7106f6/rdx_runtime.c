@@ -20,6 +20,10 @@
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
 #include "rdx/rdx_local_storage_service.h"
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
+    RDX_CFG_ONLINE_RECORDING_ENABLE
+#include "rdx/rdx_record_coordinator.h"
+#endif
 #if RDX_STORAGE_BACKEND_NATIVE
 #include "rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_sd0_jl_br56.h"
 #elif RDX_STORAGE_BACKEND_LEGACY_UXFILE
@@ -34,6 +38,54 @@ static u32 rdx_boot_structural_caps;
 
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
 static struct rdx_local_storage_service rdx_local_storage;
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
+    RDX_CFG_ONLINE_RECORDING_ENABLE
+static struct rdx_record_coordinator rdx_record_coordinator;
+#endif
+
+static void rdx_runtime_local_storage_completion(
+    void *priv, const struct rdx_local_storage_completion *completion)
+{
+    uint32_t artifact_high;
+    uint32_t artifact_low;
+
+    (void)priv;
+    if (!completion) {
+        return;
+    }
+    artifact_high = (uint32_t)(completion->artifact_id.value >> 32);
+    artifact_low = (uint32_t)completion->artifact_id.value;
+    if (completion->type
+            == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_COMMITTED
+        || completion->type
+            == RDX_LOCAL_STORAGE_COMPLETION_LEGACY_FILE_COMMITTED) {
+        printf("[RDX][LOCAL] committed artifact=%08X%08X sn=%u"
+               " produced=%u accepted=%u local=%u persisted=%u"
+               " bytes_hi=%u bytes_lo=%u crc=%08X generation=%u\n",
+               (unsigned int)artifact_high, (unsigned int)artifact_low,
+               (unsigned int)completion->serial_number,
+               (unsigned int)completion->produced_frame_count,
+               (unsigned int)completion->destination_accepted_count,
+               (unsigned int)completion->local_accepted_count,
+               (unsigned int)completion->persisted_frame_count,
+               (unsigned int)(completion->file_size >> 32),
+               (unsigned int)completion->file_size,
+               (unsigned int)completion->audio_crc,
+               (unsigned int)completion->generation);
+    } else {
+        printf("[RDX][LOCAL] failed artifact=%08X%08X sn=%u"
+               " result=%u cause=%u produced=%u local=%u persisted=%u"
+               " rejected=%u dropped=%u\n",
+               (unsigned int)artifact_high, (unsigned int)artifact_low,
+               (unsigned int)completion->serial_number,
+               completion->result, completion->cause,
+               (unsigned int)completion->produced_frame_count,
+               (unsigned int)completion->local_accepted_count,
+               (unsigned int)completion->persisted_frame_count,
+               (unsigned int)completion->rejected_frame_count,
+               (unsigned int)completion->dropped_frame_count);
+    }
+}
 
 static int rdx_runtime_check_storage_structure(void)
 {
@@ -49,8 +101,8 @@ static int rdx_runtime_check_storage_structure(void)
     if (rdx_local_storage_service_init(
             &rdx_local_storage, RDX_LOCAL_STORAGE_BACKEND_NATIVE,
             rdx_storage_backend_sd0_jl_br56_media_ops(),
-            rdx_storage_backend_sd0_jl_br56_native_ops(), NULL, NULL,
-            NULL)) {
+            rdx_storage_backend_sd0_jl_br56_native_ops(), NULL,
+            rdx_runtime_local_storage_completion, NULL)) {
         printf("[RDX][CAP] boot=failed cap=local_storage reason=service\n");
         return -1;
     }
@@ -62,7 +114,8 @@ static int rdx_runtime_check_storage_structure(void)
     if (rdx_local_storage_service_init(
             &rdx_local_storage, RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE,
             rdx_storage_backend_legacy_uxfile_media_ops(), NULL,
-            rdx_storage_backend_legacy_uxfile_ops(), NULL, NULL)) {
+            rdx_storage_backend_legacy_uxfile_ops(),
+            rdx_runtime_local_storage_completion, NULL)) {
         printf("[RDX][CAP] boot=failed cap=local_storage reason=service\n");
         return -1;
     }
@@ -81,6 +134,18 @@ static int rdx_runtime_check_storage_structure(void)
             printf("[RDX][CAP] local_storage=recovery_required result=%u\n",
                    recovery_result);
         }
+    }
+#endif
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
+    RDX_CFG_ONLINE_RECORDING_ENABLE
+    if (rdx_record_coordinator_init(
+            &rdx_record_coordinator, &rdx_local_storage,
+            rdx_protocol_v23_record_online_destination_ops(), NULL)
+        || rdx_protocol_v23_record_bind_coordinator(
+               &rdx_record_coordinator)) {
+        printf("[RDX][CAP] boot=failed cap=local_recording"
+               " reason=coordinator\n");
+        return -1;
     }
 #endif
     rdx_boot_structural_caps |= RDX_CAP_LOCAL_STORAGE
@@ -186,6 +251,10 @@ int rdx_runtime_start(void)
 #endif
     ret = rdx_protocol_v23_init();
     if (ret) {
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
+    RDX_CFG_ONLINE_RECORDING_ENABLE
+        rdx_protocol_v23_record_bind_coordinator(NULL);
+#endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
         rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
@@ -259,6 +328,10 @@ void rdx_runtime_stop(void)
     /* Protocol record_exit only marks STOP_PENDING; the Engine must be
      * stopped while its callback context is still valid. */
     rdx_protocol_v23_exit();
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
+    RDX_CFG_ONLINE_RECORDING_ENABLE
+    rdx_protocol_v23_record_bind_coordinator(NULL);
+#endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
     if (rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS)) {

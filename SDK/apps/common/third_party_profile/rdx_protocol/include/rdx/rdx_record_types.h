@@ -85,6 +85,14 @@ enum rdx_record_result {
     RDX_RECORD_RESULT_STORAGE_ERROR,
 };
 
+struct rdx_record_request;
+
+/* START preparation may involve filesystem work.  Protocol adapters only
+ * enqueue this hook; Record Engine invokes it from its application worker
+ * before allocating the runtime Session and attaching the Destination. */
+typedef enum rdx_record_result (*rdx_record_start_prepare_callback_t)(
+    void *priv, struct rdx_record_request *request);
+
 enum rdx_record_termination_mode {
     RDX_RECORD_TERMINATION_NONE = 0,
     RDX_RECORD_TERMINATION_NORMAL,
@@ -175,6 +183,8 @@ struct rdx_record_request {
     enum rdx_record_scene scene;
     enum rdx_record_format_id format_id;
     uint8_t source;
+    rdx_record_start_prepare_callback_t prepare_start;
+    void *prepare_priv;
     const struct rdx_record_destination_ops *destination_ops;
     void *destination_priv;
 };

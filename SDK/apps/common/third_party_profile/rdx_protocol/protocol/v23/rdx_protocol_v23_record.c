@@ -8,11 +8,15 @@
 #include "rdx/rdx_record_engine.h"
 #include "rdx/rdx_session_metadata_service.h"
 #include "rdx/ports/rdx_transport_port.h"
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#include "rdx/rdx_record_coordinator.h"
+#endif
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23_internal.h"
 
 #define RDX_RECORD_STREAM_PACKET_SIZE           128
 #define RDX_RECORD_TX_QUEUE_DEPTH                RDX_CFG_BLE_TX_QUEUE_DEPTH
 #define RDX_RECORD_TX_INLINE_BUDGET               1
+#define RDX_RECORD_COMPAT_FILENAME_SIZE          64
 
 static const uint8_t rdx_cmd_record[] = "*APP#record#";
 #if RDX_CFG_RECORD_MARK_ENABLE
@@ -20,6 +24,9 @@ static const uint8_t rdx_cmd_recmark[] = "*APP#recmark#";
 #endif
 
 static struct rdx_protocol_v23_context *rdx_v23_record_context;
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+static struct rdx_record_coordinator *rdx_v23_record_coordinator;
+#endif
 typedef enum {
     RDX_ONLINE_RECORD_IDLE = 0,
     RDX_ONLINE_RECORD_START_PENDING,
@@ -54,28 +61,67 @@ typedef struct {
     uint8_t scene;
     uint8_t final_stats_logged;
     uint8_t burst_peak;
+    uint32_t serial_number;
+    char filename[RDX_RECORD_COMPAT_FILENAME_SIZE];
     uint16_t tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
     uint8_t tx_packet[RDX_RECORD_TX_QUEUE_DEPTH][RDX_RECORD_STREAM_PACKET_SIZE];
 } rdx_online_record_runtime_t;
 
 static rdx_online_record_runtime_t rdx_online_record;
 
-static int rdx_v23_record_send_state(uint8_t wire_state)
+static void rdx_v23_record_load_identity(void)
 {
-    uint8_t response[32];
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+    rdx_online_record.serial_number = 0;
+    rdx_online_record.filename[0] = 0;
+    if (rdx_v23_record_coordinator) {
+        (void)rdx_record_coordinator_get_record_identity(
+            rdx_v23_record_coordinator,
+            &rdx_online_record.serial_number,
+            rdx_online_record.filename,
+            sizeof(rdx_online_record.filename));
+    }
+#endif
+}
+
+static void rdx_v23_record_clear_identity(void)
+{
+    rdx_online_record.serial_number = 0;
+    rdx_online_record.filename[0] = 0;
+}
+
+static int rdx_v23_record_send_state(uint8_t wire_state,
+                                     uint8_t include_identity)
+{
+    uint8_t response[128];
     int len;
     int ret;
 
-    len = snprintf((char *)response, sizeof(response),
-                   "*DEV#record#%u#%u#1#0#1#0#", wire_state,
-                   rdx_online_record.scene);
+    if (include_identity && rdx_online_record.serial_number
+        && rdx_online_record.filename[0]) {
+        /* Reference V23 long form:
+         * state#scene#sample#record_mode#orig_mode#duration#sn#filename# */
+        len = snprintf((char *)response, sizeof(response),
+                       "*DEV#record#%u#%u#1#0#1#0#%u#%s#",
+                       wire_state, rdx_online_record.scene,
+                       (unsigned int)rdx_online_record.serial_number,
+                       rdx_online_record.filename);
+    } else {
+        len = snprintf((char *)response, sizeof(response),
+                       "*DEV#record#%u#%u#1#0#1#0#", wire_state,
+                       rdx_online_record.scene);
+    }
     if (len <= 0 || len >= sizeof(response)) {
         return -1;
     }
     ret = rdx_protocol_v23_send(rdx_v23_record_context, response, len);
 
-    printf("[RDX][TX] cmd=record state=%u wire=%s len=%u ret=%d\n",
-           wire_state, (char *)response, (unsigned int)len, ret);
+    printf("[RDX][TX] cmd=record state=%u sn=%u filename=%s"
+           " wire=%s len=%u ret=%d\n",
+           wire_state,
+           include_identity ? (unsigned int)rdx_online_record.serial_number : 0,
+           include_identity ? rdx_online_record.filename : "",
+           (char *)response, (unsigned int)len, ret);
     return ret;
 }
 
@@ -388,6 +434,24 @@ static const struct rdx_record_destination_ops rdx_v23_record_destination = {
     .requirement = RDX_RECORD_DESTINATION_OPTIONAL,
 };
 
+const struct rdx_record_destination_ops *
+rdx_protocol_v23_record_online_destination_ops(void)
+{
+    return &rdx_v23_record_destination;
+}
+
+int rdx_protocol_v23_record_bind_coordinator(
+    struct rdx_record_coordinator *coordinator)
+{
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+    rdx_v23_record_coordinator = coordinator;
+    return 0;
+#else
+    (void)coordinator;
+    return -1;
+#endif
+}
+
 static void rdx_v23_record_engine_event(
     void *priv, const struct rdx_record_engine_event *event)
 {
@@ -409,6 +473,15 @@ static void rdx_v23_record_engine_event(
                 || event->cause == RDX_RECORD_CAUSE_CCC_OFF
                 || event->cause == RDX_RECORD_CAUSE_SHUTDOWN;
 
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+            if (rdx_v23_record_coordinator) {
+                (void)rdx_record_coordinator_cancel_start(
+                    rdx_v23_record_coordinator,
+                    event->cause == RDX_RECORD_CAUSE_NONE
+                        ? RDX_RECORD_CAUSE_START_FAILED : event->cause);
+            }
+#endif
+
             if (!wait_for_stop) {
                 rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
             }
@@ -416,7 +489,7 @@ static void rdx_v23_record_engine_event(
             if (!wait_for_stop && !connection_invalid
                 && rdx_protocol_session_can_send(
                     &rdx_v23_record_context->session)) {
-                rdx_v23_record_send_state(0);
+                rdx_v23_record_send_state(0, 0);
             }
             printf("[RDX][ONLINE] start_failed request=%u result=%u\n",
                    (unsigned int)event->request_id, event->result);
@@ -425,11 +498,12 @@ static void rdx_v23_record_engine_event(
         rdx_online_record.session_id = event->session_id;
         rdx_online_record.scene = event->scene;
         rdx_online_record.capture_generation = event->capture_generation;
+        rdx_v23_record_load_identity();
 #if RDX_CFG_RECORD_MARK_ENABLE
         rdx_session_metadata_begin(event->session_id);
 #endif
         rdx_transport_set_record_streaming(1);
-        ret = rdx_v23_record_send_state(1);
+        ret = rdx_v23_record_send_state(1, 1);
         if (ret) {
             rdx_record_engine_submit_system_event(
                 RDX_RECORD_SYSTEM_SOURCE_ENGINE,
@@ -451,7 +525,7 @@ static void rdx_v23_record_engine_event(
         }
         if (event->result) {
             rdx_online_record.state = RDX_ONLINE_RECORD_STREAMING;
-            rdx_v23_record_send_state(rdx_online_record.wire_state);
+            rdx_v23_record_send_state(rdx_online_record.wire_state, 1);
             printf("[RDX][ONLINE] pause_failed request=%u result=%u\n",
                    (unsigned int)event->request_id, event->result);
             return;
@@ -464,7 +538,7 @@ static void rdx_v23_record_engine_event(
         rdx_online_record.tx_count = 0;
         rdx_online_record.state = RDX_ONLINE_RECORD_PAUSED;
         rdx_online_record.wire_state = 2;
-        rdx_v23_record_send_state(2);
+        rdx_v23_record_send_state(2, 1);
         printf("[RDX][ONLINE] paused session=%u capture=%u"
                " tx_discard=%u\n",
                (unsigned int)event->session_id,
@@ -479,7 +553,7 @@ static void rdx_v23_record_engine_event(
         }
         if (event->result) {
             rdx_online_record.state = RDX_ONLINE_RECORD_PAUSED;
-            rdx_v23_record_send_state(2);
+            rdx_v23_record_send_state(2, 1);
             printf("[RDX][ONLINE] resume_failed request=%u result=%u\n",
                    (unsigned int)event->request_id, event->result);
             return;
@@ -488,7 +562,7 @@ static void rdx_v23_record_engine_event(
         rdx_transport_set_record_streaming(1);
         rdx_online_record.state = RDX_ONLINE_RECORD_STREAMING;
         rdx_online_record.wire_state = 3;
-        rdx_v23_record_send_state(3);
+        rdx_v23_record_send_state(3, 1);
         printf("[RDX][ONLINE] resumed session=%u capture=%u\n",
                (unsigned int)event->session_id,
                (unsigned int)event->capture_generation);
@@ -522,8 +596,11 @@ static void rdx_v23_record_engine_event(
 #endif
         if (notify && rdx_protocol_session_can_send(
                 &rdx_v23_record_context->session)) {
-            rdx_v23_record_send_state(0);
+            rdx_v23_record_send_state(
+                0, event->result == RDX_RECORD_RESULT_OK
+                   && event->termination_mode == RDX_RECORD_TERMINATION_NORMAL);
         }
+        rdx_v23_record_clear_identity();
         printf("[RDX][ONLINE] stopped session=%u mode=%u cause=%u"
                " result=%u notify=%u\n",
                (unsigned int)event->session_id,
@@ -546,7 +623,7 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
     int ret;
 
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STREAMING) {
-        rdx_v23_record_send_state(rdx_online_record.wire_state);
+        rdx_v23_record_send_state(rdx_online_record.wire_state, 1);
         return;
     }
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
@@ -556,20 +633,26 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
     }
 
     memset(&request, 0, sizeof(request));
+    rdx_v23_record_clear_identity();
     request.request_id = rdx_v23_record_next_request_id();
     request.type = RDX_RECORD_REQUEST_START;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
     request.scene = scene;
     request.format_id = rdx_v23_record_format_for_scene(scene);
-    request.destination_ops = &rdx_v23_record_destination;
     rdx_online_record.scene = scene;
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+    request.prepare_start = rdx_record_coordinator_prepare_engine_start;
+    request.prepare_priv = rdx_v23_record_coordinator;
+#else
+    request.destination_ops = &rdx_v23_record_destination;
+#endif
     rdx_online_record.state = RDX_ONLINE_RECORD_START_PENDING;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
         rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
         printf("[RDX][ONLINE] start_submit_failed request=%u ret=%d\n",
                (unsigned int)request.request_id, ret);
-        rdx_v23_record_send_state(0);
+        rdx_v23_record_send_state(0, 0);
     }
 }
 
@@ -586,7 +669,7 @@ static void rdx_v23_record_control(enum rdx_record_request_type type)
 
     if (type == RDX_RECORD_REQUEST_PAUSE) {
         if (rdx_online_record.state == RDX_ONLINE_RECORD_PAUSED) {
-            rdx_v23_record_send_state(2);
+            rdx_v23_record_send_state(2, 1);
             return;
         }
         if (rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING) {
@@ -598,7 +681,7 @@ static void rdx_v23_record_control(enum rdx_record_request_type type)
     } else {
         if (rdx_online_record.state == RDX_ONLINE_RECORD_STREAMING
             && rdx_online_record.wire_state == 3) {
-            rdx_v23_record_send_state(3);
+            rdx_v23_record_send_state(3, 1);
             return;
         }
         if (rdx_online_record.state != RDX_ONLINE_RECORD_PAUSED) {
@@ -667,7 +750,7 @@ static void rdx_v23_record_stop(void)
     int ret;
 
     if (rdx_online_record.state == RDX_ONLINE_RECORD_IDLE) {
-        rdx_v23_record_send_state(0);
+        rdx_v23_record_send_state(0, 0);
         return;
     }
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
@@ -771,6 +854,11 @@ int rdx_protocol_v23_record_init(
     if (!context) {
         return -1;
     }
+#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+    if (!rdx_v23_record_coordinator) {
+        return -1;
+    }
+#endif
     rdx_v23_record_context = context;
     memset(&rdx_online_record, 0, sizeof(rdx_online_record));
     ret = rdx_record_engine_init(rdx_v23_record_engine_event, NULL);
@@ -783,6 +871,7 @@ void rdx_protocol_v23_record_exit(void)
         rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
         rdx_transport_set_record_streaming(0);
     }
+    rdx_v23_record_context = NULL;
 }
 
 void rdx_protocol_v23_record_handle_link_change(uint8_t connected)

@@ -535,7 +535,7 @@ static const struct audio_capture_lease_client rdx_record_capture_client = {
     .priv = &rdx_record_engine,
 };
 
-static void rdx_record_engine_start(const struct rdx_record_request *request)
+static void rdx_record_engine_start(struct rdx_record_request *request)
 {
     struct rdx_audio_capture_open_params audio_params;
     enum rdx_audio_capture_result capture_result;
@@ -560,6 +560,24 @@ static void rdx_record_engine_start(const struct rdx_record_request *request)
                                RDX_RECORD_TERMINATION_NONE,
                                RDX_RECORD_CAUSE_NONE);
         return;
+    }
+
+    if (request->prepare_start) {
+        printf("[RDX][ENGINE] start_prepare request=%u\n",
+               (unsigned int)request->request_id);
+        validation_result = request->prepare_start(request->prepare_priv,
+                                                   request);
+        if (validation_result != RDX_RECORD_RESULT_OK) {
+            printf("[RDX][ENGINE] start_prepare_failed request=%u result=%u\n",
+                   (unsigned int)request->request_id,
+                   validation_result);
+            rdx_record_engine_emit(RDX_RECORD_ENGINE_START_COMPLETE,
+                                   request->request_id,
+                                   validation_result,
+                                   RDX_RECORD_TERMINATION_NONE,
+                                   RDX_RECORD_CAUSE_STORAGE_ERROR);
+            return;
+        }
     }
 
     rdx_record_session_begin_start(&rdx_record_engine.session, request);

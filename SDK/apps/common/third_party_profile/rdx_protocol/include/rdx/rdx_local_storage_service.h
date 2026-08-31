@@ -18,6 +18,14 @@
 #define RDX_LOCAL_STORAGE_QUEUE_DEPTH 16
 #endif
 
+/* Persist WRITING progress at a bounded cadence.  A marker transaction opens,
+ * closes and reads the marker back on BR56 FAT, so doing it for every audio
+ * frame would block the REQUIRED destination long enough to overflow Engine's
+ * candidate queue.  Normal SEAL still persists the exact final boundary. */
+#ifndef RDX_LOCAL_STORAGE_CHECKPOINT_INTERVAL_MS
+#define RDX_LOCAL_STORAGE_CHECKPOINT_INTERVAL_MS 1000
+#endif
+
 enum rdx_local_storage_backend {
     RDX_LOCAL_STORAGE_BACKEND_NATIVE = 1,
     RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE = 2,
@@ -38,6 +46,12 @@ struct rdx_local_storage_completion {
     uint32_t generation;
     uint32_t serial_number;
     uint32_t frame_count;
+    uint32_t produced_frame_count;
+    uint32_t destination_accepted_count;
+    uint32_t local_accepted_count;
+    uint32_t persisted_frame_count;
+    uint32_t rejected_frame_count;
+    uint32_t dropped_frame_count;
     uint64_t file_size;
     uint32_t audio_crc;
     enum rdx_record_cause cause;
@@ -70,6 +84,7 @@ struct rdx_local_storage_service {
     uint8_t queue_head;
     uint8_t queue_tail;
     uint8_t queue_count;
+    uint32_t checkpoint_persisted_frame_count;
     struct rdx_local_storage_frame_slot queue[RDX_LOCAL_STORAGE_QUEUE_DEPTH];
     struct rdx_storage_index_entry index_entries[32];
     rdx_local_storage_completion_callback_t completion_callback;
@@ -98,6 +113,15 @@ int rdx_local_storage_service_init(
  * retried without rebuilding the Service or spawning another worker. */
 enum rdx_storage_result rdx_local_storage_service_recover(
     struct rdx_local_storage_service *service);
+
+/* Reserve a persistent Native serial number before Engine START and derive
+ * the first-version raw Opus artifact identity/names from that reservation.
+ * The serial high-water commit intentionally survives a later START rollback,
+ * so power loss, failed capture open and file deletion cannot reuse an ID. */
+enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
+    struct rdx_local_storage_service *service,
+    enum rdx_record_format_id format_id,
+    struct rdx_storage_artifact_spec *spec);
 
 enum rdx_storage_result rdx_local_storage_service_start(
     struct rdx_local_storage_service *service,
