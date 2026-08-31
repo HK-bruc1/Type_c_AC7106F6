@@ -81,6 +81,21 @@ void rdx_transport_fake_emit_simple(
     rdx_transport_fake_emit_event(&event);
 }
 
+void rdx_transport_fake_emit_can_send(uint32_t generation,
+                                      uint32_t owner,
+                                      uint32_t token)
+{
+    struct rdx_transport_event event;
+
+    memset(&event, 0, sizeof(event));
+    event.type = RDX_TRANSPORT_EVENT_CAN_SEND_NOW;
+    event.connection_generation = generation;
+    event.data.can_send.session_id = owner;
+    event.data.can_send.capture_generation = token;
+    fake_transport.can_send_pending = 0;
+    rdx_transport_fake_emit_event(&event);
+}
+
 int rdx_transport_init(rdx_transport_event_callback_t event_callback,
                        void *context)
 {
@@ -125,19 +140,16 @@ enum rdx_transport_result rdx_transport_send(
 int rdx_transport_request_can_send_now(
     uint32_t session_id, uint32_t capture_generation)
 {
-    struct rdx_transport_event event;
-
     if (!fake_transport.initialized || !fake_transport.connected
-        || !fake_transport.ccc_enabled || !fake_transport.record_streaming
+        || !fake_transport.ccc_enabled
         || !session_id || !capture_generation) {
         return -1;
     }
-    memset(&event, 0, sizeof(event));
-    event.type = RDX_TRANSPORT_EVENT_CAN_SEND_NOW;
-    event.connection_generation = fake_transport.generation;
-    event.data.can_send.session_id = session_id;
-    event.data.can_send.capture_generation = capture_generation;
-    return rdx_transport_fake_emit_event(&event);
+    fake_transport.can_send_request_count++;
+    fake_transport.can_send_pending = 1;
+    fake_transport.can_send_owner = session_id;
+    fake_transport.can_send_token = capture_generation;
+    return 0;
 }
 
 int rdx_transport_set_record_streaming(uint8_t enabled)

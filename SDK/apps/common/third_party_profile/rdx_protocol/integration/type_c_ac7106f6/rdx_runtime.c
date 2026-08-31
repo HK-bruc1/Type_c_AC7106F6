@@ -120,6 +120,13 @@ static int rdx_runtime_check_storage_structure(void)
         return -1;
     }
 #endif
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    if (rdx_protocol_v23_local_storage_bind_service(&rdx_local_storage)) {
+        printf("[RDX][CAP] boot=failed cap=local_storage_wire"
+               " reason=bind\n");
+        return -1;
+    }
+#endif
     if (!backend_ready) {
         rdx_local_storage.readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
     }
@@ -145,6 +152,9 @@ static int rdx_runtime_check_storage_structure(void)
                &rdx_record_coordinator)) {
         printf("[RDX][CAP] boot=failed cap=local_recording"
                " reason=coordinator\n");
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
         return -1;
     }
 #endif
@@ -242,6 +252,9 @@ int rdx_runtime_start(void)
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
     ret = rdx_runtime_check_storage_structure();
     if (ret) {
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
         rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
         rdx_device_state_exit();
@@ -256,6 +269,9 @@ int rdx_runtime_start(void)
         rdx_protocol_v23_record_bind_coordinator(NULL);
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
         rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
@@ -271,6 +287,9 @@ int rdx_runtime_start(void)
         rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
         rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
@@ -290,6 +309,9 @@ int rdx_runtime_start(void)
         rdx_record_engine_shutdown(RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
         rdx_local_storage_service_shutdown(
             &rdx_local_storage, RDX_RECORD_SHUTDOWN_TIMEOUT_MS);
 #endif
@@ -328,6 +350,9 @@ void rdx_runtime_stop(void)
     /* Protocol record_exit only marks STOP_PENDING; the Engine must be
      * stopped while its callback context is still valid. */
     rdx_protocol_v23_exit();
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    rdx_protocol_v23_local_storage_bind_service(NULL);
+#endif
 #if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
     RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_bind_coordinator(NULL);

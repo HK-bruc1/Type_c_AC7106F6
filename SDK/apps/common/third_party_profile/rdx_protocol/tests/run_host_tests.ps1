@@ -128,6 +128,16 @@ $specs = @(
             (Join-Path $testDir 'rdx_protocol_v23_record_storage_test.c'),
             (Join-Path $protocolDir 'rdx_protocol_v23_record.c')
         )),
+    (New-RdxTestSpec -Name 'protocol_v23_local_storage' `
+        -Defines @(
+            'RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE=1',
+            'RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE=1'
+        ) `
+        -Includes @($testInclude, $publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_protocol_v23_local_storage_test.c'),
+            (Join-Path $protocolDir 'rdx_protocol_v23_local_storage.c')
+        )),
     (New-RdxTestSpec -Name 'rtc_service' `
         -Defines @('RDX_CFG_RTC_ENABLE=1') `
         -Includes @($testInclude, $publicInclude, $profileRoot) `

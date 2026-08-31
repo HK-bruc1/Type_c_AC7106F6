@@ -35,8 +35,32 @@ struct fake_completion {
     struct rdx_local_storage_completion last;
 };
 
+struct fake_operation_media {
+    struct rdx_storage_file_info files[2];
+    uint8_t data[8];
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+    uint32_t count;
+    int capacity_calls;
+    int enumerate_calls;
+    int read_calls;
+    int delete_calls;
+    int format_calls;
+    enum rdx_storage_result capacity_result;
+    enum rdx_storage_result enumerate_result;
+    enum rdx_storage_result read_result;
+    enum rdx_storage_result delete_result;
+    enum rdx_storage_result format_result;
+};
+
+struct fake_operation_completion {
+    int calls;
+    struct rdx_local_storage_operation_completion last;
+};
+
 static struct fake_media *g_media;
 static struct fake_native *g_native;
+static struct fake_operation_media *g_operation_media;
 
 static uint32_t fake_crc32_update(uint32_t previous, uint32_t frame_count,
                                   const uint8_t *data, uint32_t len)
@@ -60,6 +84,86 @@ static enum rdx_storage_result fake_ready(void)
 {
     g_media->ready_calls++;
     return g_media->result;
+}
+
+static enum rdx_storage_result operation_ready(void)
+{
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result operation_capacity(
+    uint64_t *total_bytes, uint64_t *free_bytes)
+{
+    g_operation_media->capacity_calls++;
+    if (g_operation_media->capacity_result != RDX_STORAGE_RESULT_READY) {
+        return g_operation_media->capacity_result;
+    }
+    *total_bytes = g_operation_media->total_bytes;
+    *free_bytes = g_operation_media->free_bytes;
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result operation_enumerate(
+    struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count)
+{
+    g_operation_media->enumerate_calls++;
+    *count = g_operation_media->count;
+    if (g_operation_media->enumerate_result != RDX_STORAGE_RESULT_READY) {
+        return g_operation_media->enumerate_result;
+    }
+    if (capacity < g_operation_media->count) {
+        return RDX_STORAGE_RESULT_NO_SPACE;
+    }
+    if (g_operation_media->count) {
+        memcpy(items, g_operation_media->files,
+               g_operation_media->count * sizeof(items[0]));
+    }
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result operation_read(
+    const struct rdx_storage_file_id *file_id, uint64_t offset,
+    uint8_t *buffer, uint32_t len, uint32_t *read_len)
+{
+    uint32_t available;
+
+    g_operation_media->read_calls++;
+    if (g_operation_media->read_result != RDX_STORAGE_RESULT_READY) {
+        *read_len = 0;
+        return g_operation_media->read_result;
+    }
+    assert(file_id->artifact_id.value
+           == g_operation_media->files[0].file_id.artifact_id.value);
+    assert(offset < g_operation_media->files[0].file_size);
+    available = (uint32_t)(
+        g_operation_media->files[0].file_size - offset);
+    if (len > available) {
+        len = available;
+    }
+    memcpy(buffer, g_operation_media->data + (uint32_t)offset, len);
+    *read_len = len;
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result operation_delete(
+    const struct rdx_storage_file_id *file_id)
+{
+    g_operation_media->delete_calls++;
+    assert(file_id->artifact_id.value
+           == g_operation_media->files[0].file_id.artifact_id.value);
+    if (g_operation_media->delete_result == RDX_STORAGE_RESULT_READY) {
+        g_operation_media->count = 0;
+    }
+    return g_operation_media->delete_result;
+}
+
+static enum rdx_storage_result operation_format(void)
+{
+    g_operation_media->format_calls++;
+    if (g_operation_media->format_result == RDX_STORAGE_RESULT_READY) {
+        g_operation_media->count = 0;
+    }
+    return g_operation_media->format_result;
 }
 
 static enum rdx_storage_result fake_recover(void)
@@ -172,6 +276,16 @@ static void completion(void *priv,
                        const struct rdx_local_storage_completion *event)
 {
     struct fake_completion *fake = priv;
+    fake->calls++;
+    fake->last = *event;
+}
+
+static void operation_completion(
+    void *priv,
+    const struct rdx_local_storage_operation_completion *event)
+{
+    struct fake_operation_completion *fake = priv;
+
     fake->calls++;
     fake->last = *event;
 }
@@ -323,6 +437,59 @@ static void test_native_checkpoint_cadence(void)
     assert(native.marker_states[2] == RDX_STORAGE_MARKER_STATE_WRITING);
     assert(rdx_record_local_destination_ops()->abort(
                &destination, 8, 4, RDX_RECORD_CAUSE_USER_REQUEST) != 0);
+}
+
+static void test_pause_resume_rebind_preserves_artifact(void)
+{
+    struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
+    struct fake_native native = { 0 };
+    struct fake_completion events = { 0 };
+    struct rdx_storage_media_ops media_ops = { 0 };
+    struct rdx_native_artifact_ops native_ops = { 0 };
+    struct rdx_local_storage_service service;
+    struct rdx_record_local_destination destination;
+    struct rdx_storage_artifact_spec spec = test_spec();
+    struct rdx_record_frame frame;
+    const uint8_t payload[4] = { 1, 2, 3, 4 };
+    const struct rdx_record_destination_ops *ops;
+
+    media_ops.ensure_ready = fake_ready;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_media = &media;
+    g_native = &native;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, completion, &events) == 0);
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_READY);
+    assert(rdx_record_local_destination_init(&destination, &service) == 0);
+    ops = rdx_record_local_destination_ops();
+    assert(ops->attach(&destination, 8, 4) == 0);
+    assert(ops->rebind_capture != NULL);
+    assert(ops->rebind_capture(&destination, 8, 3, 5) != 0);
+    assert(service.capture_generation == 4);
+    assert(ops->rebind_capture(&destination, 8, 4, 5) == 0);
+    assert(service.capture_generation == 5);
+
+    frame = test_frame(0, payload);
+    assert(ops->consume(&destination, &frame) != 0);
+    frame.capture_generation = 5;
+    assert(ops->consume(&destination, &frame) == 0);
+    assert(rdx_local_storage_service_pump(&service, 0)
+           == RDX_STORAGE_RESULT_READY);
+    assert(ops->seal(&destination, 8, 5) == 0);
+    assert(events.calls == 1);
+    assert(events.last.type == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_COMMITTED);
+    assert(events.last.frame_count == 1);
+    assert(events.last.persisted_frame_count == 1);
+    assert(!service.active);
 }
 
 static void test_required_queue_failure(void)
@@ -716,10 +883,179 @@ static void test_media_outage_invalidates_recovery(void)
     assert(native.recover_calls == 2);
 }
 
+static void test_app_operations_are_serialized_and_identity_safe(void)
+{
+    struct fake_operation_media media;
+    struct fake_native native;
+    struct fake_operation_completion events;
+    struct rdx_storage_media_ops media_ops;
+    struct rdx_native_artifact_ops native_ops;
+    struct rdx_local_storage_service service;
+    struct rdx_local_storage_operation_request request;
+    struct rdx_storage_file_info items[2];
+    uint8_t read_buffer[4];
+    int calls_before;
+
+    memset(&media, 0, sizeof(media));
+    memset(&native, 0, sizeof(native));
+    memset(&events, 0, sizeof(events));
+    memset(&media_ops, 0, sizeof(media_ops));
+    memset(&native_ops, 0, sizeof(native_ops));
+    media.total_bytes = 8ULL * 1024 * 1024;
+    media.free_bytes = 3ULL * 1024 * 1024;
+    media.count = 1;
+    media.files[0].file_id.artifact_id.value = 0x700;
+    media.files[0].file_id.serial_number = 7;
+    strcpy(media.files[0].file_id.name, "abc.raw");
+    media.files[0].file_size = 4;
+    media.files[0].audio_crc = 0x12345678UL;
+    media.data[0] = 0x10;
+    media.data[1] = 0x20;
+    media.data[2] = 0x30;
+    media.data[3] = 0x40;
+    media_ops.ensure_ready = operation_ready;
+    media_ops.get_capacity = operation_capacity;
+    media_ops.read = operation_read;
+    media_ops.enumerate = operation_enumerate;
+    media_ops.delete = operation_delete;
+    media_ops.format = operation_format;
+    native_ops.recover = fake_recover;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_operation_media = &media;
+    g_native = &native;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, NULL, NULL) == 0);
+
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_CAPACITY;
+    request.token = 1;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 1);
+    assert(events.last.type == RDX_LOCAL_STORAGE_OPERATION_CAPACITY);
+    assert(events.last.token == 1);
+    assert(events.last.total_bytes == media.total_bytes);
+    assert(events.last.free_bytes == media.free_bytes);
+
+    memset(items, 0, sizeof(items));
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_ENUMERATE;
+    request.token = 2;
+    request.data.enumerate.items = items;
+    request.data.enumerate.capacity = 2;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 2 && events.last.count == 1);
+    assert(items[0].file_id.serial_number == 7);
+
+    memset(read_buffer, 0, sizeof(read_buffer));
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL;
+    request.token = 3;
+    request.data.read.serial_number = 7;
+    request.data.read.offset = 1;
+    request.data.read.buffer = read_buffer;
+    request.data.read.length = 2;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 3);
+    assert(events.last.result == RDX_STORAGE_RESULT_READY);
+    assert(events.last.read_length == 2);
+    assert(events.last.file.file_id.serial_number == 7);
+    assert(read_buffer[0] == 0x20 && read_buffer[1] == 0x30);
+
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY;
+    request.token = 4;
+    request.data.delete_file.serial_number = 7;
+    strcpy(request.data.delete_file.filename, "wrong.raw");
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 4);
+    assert(events.last.result == RDX_STORAGE_RESULT_BAD_ARGUMENT);
+    assert(media.delete_calls == 0 && media.count == 1);
+
+    request.token = 5;
+    strcpy(request.data.delete_file.filename, "abc.raw");
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 5);
+    assert(events.last.result == RDX_STORAGE_RESULT_READY);
+    assert(media.delete_calls == 1 && media.count == 0);
+
+    media.count = 1;
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_FORMAT;
+    request.token = 6;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 6);
+    assert(events.last.result == RDX_STORAGE_RESULT_READY);
+    assert(events.last.total_bytes == media.total_bytes);
+    assert(events.last.free_bytes == media.free_bytes);
+    assert(media.format_calls == 1 && native.recover_calls == 1);
+    assert(rdx_local_storage_service_readiness(&service)
+           == RDX_STORAGE_READINESS_READY);
+
+    media.format_result = RDX_STORAGE_RESULT_IO_ERROR;
+    request.token = 7;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == 7);
+    assert(events.last.result == RDX_STORAGE_RESULT_IO_ERROR);
+    assert(rdx_local_storage_service_readiness(&service)
+           == RDX_STORAGE_READINESS_RECOVERY_REQUIRED);
+
+    calls_before = events.calls;
+    service.active = 1;
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_CAPACITY;
+    request.token = 8;
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_BUSY);
+    assert(events.calls == calls_before);
+    service.active = 0;
+
+    media.count = 2;
+    media.files[1] = media.files[0];
+    media.files[1].file_id.artifact_id.value = 0x701;
+    strcpy(media.files[1].file_id.name, "duplicate.raw");
+    memset(&request, 0, sizeof(request));
+    request.type = RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL;
+    request.token = 9;
+    request.data.read.serial_number = 7;
+    request.data.read.buffer = read_buffer;
+    request.data.read.length = sizeof(read_buffer);
+    assert(rdx_local_storage_service_submit_operation(
+               &service, &request, operation_completion, &events)
+           == RDX_STORAGE_RESULT_READY);
+    assert(events.calls == calls_before + 1);
+    assert(events.last.result == RDX_STORAGE_RESULT_CORRUPT);
+    assert(rdx_local_storage_service_readiness(&service)
+           == RDX_STORAGE_READINESS_RECOVERY_REQUIRED);
+}
+
 int main(void)
 {
     test_native_commit();
     test_native_checkpoint_cadence();
+    test_pause_resume_rebind_preserves_artifact();
     test_required_queue_failure();
     test_short_write_is_failed();
     test_close_size_mismatch_is_not_published();
@@ -728,5 +1064,6 @@ int main(void)
     test_coordinator_reserves_persistent_identity();
     test_recovery_failure_gates_start();
     test_media_outage_invalidates_recovery();
+    test_app_operations_are_serialized_and_identity_safe();
     return 0;
 }

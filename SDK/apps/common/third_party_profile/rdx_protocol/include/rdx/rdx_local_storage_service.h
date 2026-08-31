@@ -39,6 +39,54 @@ enum rdx_local_storage_completion_type {
     RDX_LOCAL_STORAGE_COMPLETION_LEGACY_FILE_FAILED,
 };
 
+/* APP file commands arrive on btstack and must never execute FAT there.
+ * These operations are copied into the existing rdx_storage worker.  Caller
+ * owned output buffers must remain valid until the completion callback. */
+enum rdx_local_storage_operation_type {
+    RDX_LOCAL_STORAGE_OPERATION_NONE = 0,
+    RDX_LOCAL_STORAGE_OPERATION_CAPACITY,
+    RDX_LOCAL_STORAGE_OPERATION_ENUMERATE,
+    RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL,
+    RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY,
+    RDX_LOCAL_STORAGE_OPERATION_FORMAT,
+};
+
+struct rdx_local_storage_operation_request {
+    enum rdx_local_storage_operation_type type;
+    uint32_t token;
+    union {
+        struct {
+            struct rdx_storage_file_info *items;
+            uint32_t capacity;
+        } enumerate;
+        struct {
+            uint32_t serial_number;
+            uint64_t offset;
+            uint8_t *buffer;
+            uint32_t length;
+        } read;
+        struct {
+            uint32_t serial_number;
+            char filename[RDX_STORAGE_NAME_MAX];
+        } delete_file;
+    } data;
+};
+
+struct rdx_local_storage_operation_completion {
+    enum rdx_local_storage_operation_type type;
+    enum rdx_storage_result result;
+    uint32_t token;
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+    uint32_t count;
+    uint32_t read_length;
+    struct rdx_storage_file_info file;
+};
+
+typedef void (*rdx_local_storage_operation_callback_t)(
+    void *priv,
+    const struct rdx_local_storage_operation_completion *completion);
+
 struct rdx_local_storage_completion {
     enum rdx_local_storage_completion_type type;
     enum rdx_storage_result result;
@@ -86,9 +134,17 @@ struct rdx_local_storage_service {
     uint8_t queue_count;
     uint32_t checkpoint_persisted_frame_count;
     struct rdx_local_storage_frame_slot queue[RDX_LOCAL_STORAGE_QUEUE_DEPTH];
-    struct rdx_storage_index_entry index_entries[32];
+    union {
+        struct rdx_storage_index_entry index_entries[32];
+        struct rdx_storage_file_info file_items[32];
+    } scratch;
     rdx_local_storage_completion_callback_t completion_callback;
     void *completion_priv;
+    struct rdx_local_storage_operation_request operation;
+    rdx_local_storage_operation_callback_t operation_callback;
+    void *operation_priv;
+    uint8_t operation_pending;
+    uint8_t operation_running;
 #if CONFIG_CPU_BR56
     /* The target service owns one worker and serializes all backend calls.
      * Host tests intentionally compile without the SDK task primitives. */
@@ -129,6 +185,11 @@ enum rdx_storage_result rdx_local_storage_service_start(
 enum rdx_storage_result rdx_local_storage_service_attach(
     struct rdx_local_storage_service *service, uint32_t session_id,
     uint32_t capture_generation);
+/* Preserve one Artifact across PAUSE/RESUME while rejecting stale frames
+ * from the closed capture instance. */
+enum rdx_storage_result rdx_local_storage_service_rebind_capture(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t old_capture_generation, uint32_t new_capture_generation);
 /* Cancel an artifact that was prepared before Record Engine assigned the
  * runtime session/capture token.  This is only valid before attach(). */
 enum rdx_storage_result rdx_local_storage_service_cancel_start(
@@ -162,6 +223,13 @@ enum rdx_storage_result rdx_local_storage_service_delete(
     const struct rdx_storage_file_id *file_id);
 enum rdx_storage_result rdx_local_storage_service_format(
     struct rdx_local_storage_service *service);
+/* Submit one bounded APP-facing operation.  Target builds complete it on the
+ * rdx_storage worker; host builds complete synchronously for deterministic
+ * Golden Trace tests while preserving the same callback contract. */
+enum rdx_storage_result rdx_local_storage_service_submit_operation(
+    struct rdx_local_storage_service *service,
+    const struct rdx_local_storage_operation_request *request,
+    rdx_local_storage_operation_callback_t callback, void *priv);
 enum rdx_storage_result rdx_local_storage_service_quiesce(
     struct rdx_local_storage_service *service, uint16_t timeout_ms);
 /* Stop the target worker and release any active artifact before the runtime

@@ -377,6 +377,20 @@ static int rdx_v23_record_destination_consume(
     return 0;
 }
 
+static int rdx_v23_record_destination_rebind_capture(
+    void *priv, uint32_t session_id, uint32_t old_capture_generation,
+    uint32_t new_capture_generation)
+{
+    (void)priv;
+    if (session_id != rdx_online_record.session_id
+        || old_capture_generation != rdx_online_record.capture_generation
+        || !new_capture_generation) {
+        return -1;
+    }
+    rdx_online_record.capture_generation = new_capture_generation;
+    return 0;
+}
+
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
 static void rdx_v23_record_destination_poll(
     void *priv, uint32_t session_id, uint32_t capture_generation)
@@ -425,6 +439,7 @@ static void rdx_v23_record_destination_detach(void *priv, uint32_t session_id,
 
 static const struct rdx_record_destination_ops rdx_v23_record_destination = {
     .attach = rdx_v23_record_destination_attach,
+    .rebind_capture = rdx_v23_record_destination_rebind_capture,
     .consume = rdx_v23_record_destination_consume,
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
     .poll = rdx_v23_record_destination_poll,

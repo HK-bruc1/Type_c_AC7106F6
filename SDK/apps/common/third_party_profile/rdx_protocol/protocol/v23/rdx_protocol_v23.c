@@ -61,7 +61,7 @@ uint8_t rdx_protocol_v23_query_ready(
 
 int rdx_protocol_v23_init(void)
 {
-#if RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
     int ret;
 #endif
 
@@ -79,6 +79,17 @@ int rdx_protocol_v23_init(void)
         return ret;
     }
 #endif
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    ret = rdx_protocol_v23_local_storage_init(&rdx_v23_context);
+    if (ret) {
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+        rdx_protocol_v23_record_exit();
+#endif
+        rdx_protocol_v23_management_exit();
+        memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
+        return ret;
+    }
+#endif
     rdx_v23_context.initialized = 1;
     return 0;
 }
@@ -89,6 +100,9 @@ void rdx_protocol_v23_exit(void)
         return;
     }
     rdx_v23_context.initialized = 0;
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    rdx_protocol_v23_local_storage_exit();
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_exit();
 #endif
@@ -98,6 +112,9 @@ void rdx_protocol_v23_exit(void)
 
 static void rdx_protocol_v23_handle_link_change(uint8_t connected)
 {
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    rdx_protocol_v23_local_storage_handle_link_change(connected);
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_handle_link_change(connected);
 #endif
@@ -108,6 +125,9 @@ static void rdx_protocol_v23_handle_link_change(uint8_t connected)
 
 static void rdx_protocol_v23_handle_ccc_change(void)
 {
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    rdx_protocol_v23_local_storage_handle_ccc_change();
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_handle_ccc_change();
 #endif
@@ -136,6 +156,10 @@ static void rdx_protocol_v23_receive(const uint8_t *data, uint16_t len)
                (unsigned int)(sizeof(rdx_v23_diagnostic_pong) - 1), ret);
     } else if (rdx_protocol_v23_management_handle_command(data, len)) {
         return;
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+    } else if (rdx_protocol_v23_local_storage_handle_command(data, len)) {
+        return;
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     } else if (rdx_protocol_v23_record_handle_command(data, len)) {
         return;
@@ -177,6 +201,11 @@ void rdx_protocol_v23_handle_transport_event(
                                  event->data.rx.len);
         break;
     case RDX_PROTOCOL_SESSION_EVENT_CAN_SEND_NOW:
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+        rdx_protocol_v23_local_storage_handle_can_send(
+            event->data.can_send.session_id,
+            event->data.can_send.capture_generation);
+#endif
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
         rdx_protocol_v23_record_handle_can_send(
             event->data.can_send.session_id,

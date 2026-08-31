@@ -8,6 +8,10 @@
 #include "rdx_protocol/integration/type_c_ac7106f6/rdx_product_compat_profile.h"
 #include "rdx/rdx_wire_defs.h"
 
+#ifndef RDX_CFG_ADVERTISED_DEVICE_ABILITY
+#define RDX_CFG_ADVERTISED_DEVICE_ABILITY RDX_COMPAT_DEVICE_ABILITY
+#endif
+
 static const char *const rdx_type_c_app_keys[] = {
     RDX_COMPAT_APP_KEY_LIST
 };
@@ -32,7 +36,7 @@ static const struct rdx_product_profile rdx_type_c_product_profile = {
     .product_type = RDX_COMPAT_PRODUCT_TYPE,
     .self_mark = RDX_COMPAT_SELF_MARK,
     .identity_format = RDX_COMPAT_IDENTITY_FORMAT,
-    .device_ability = RDX_COMPAT_DEVICE_ABILITY,
+    .device_ability = RDX_CFG_ADVERTISED_DEVICE_ABILITY,
     .include_protocol_version = RDX_COMPAT_INCLUDE_PROTOCOL_VERSION,
     .protocol_version = RDX_COMPAT_PROTOCOL_VERSION,
     .fixed_battery_level = RDX_COMPAT_FIXED_BATTERY_LEVEL,

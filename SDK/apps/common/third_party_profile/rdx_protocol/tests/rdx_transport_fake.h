@@ -13,11 +13,15 @@ struct rdx_transport_fake_state {
     unsigned int send_attempt_count;
     unsigned int accepted_count;
     unsigned int disconnect_count;
+    unsigned int can_send_request_count;
     uint16_t accepted_len;
     uint8_t initialized;
     uint8_t connected;
     uint8_t ccc_enabled;
     uint8_t record_streaming;
+    uint8_t can_send_pending;
+    uint32_t can_send_owner;
+    uint32_t can_send_token;
     uint8_t accepted_data[RDX_TRANSPORT_FAKE_TX_BUFFER_SIZE];
 };
 
@@ -30,5 +34,8 @@ void rdx_transport_fake_receive(uint32_t generation,
                                 const uint8_t *data, uint16_t len);
 void rdx_transport_fake_emit_simple(
     enum rdx_transport_event_type type, uint32_t generation);
+void rdx_transport_fake_emit_can_send(uint32_t generation,
+                                      uint32_t owner,
+                                      uint32_t token);
 
 #endif

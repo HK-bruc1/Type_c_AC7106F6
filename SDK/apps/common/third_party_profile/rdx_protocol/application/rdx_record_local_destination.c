@@ -27,6 +27,18 @@ static int local_consume(void *priv, const struct rdx_record_frame *frame)
                : RDX_RECORD_DESTINATION_ERROR_STORAGE;
 }
 
+static int local_rebind_capture(void *priv, uint32_t session_id,
+                                uint32_t old_capture_generation,
+                                uint32_t new_capture_generation)
+{
+    struct rdx_record_local_destination *destination = priv;
+
+    return rdx_local_storage_service_rebind_capture(
+               destination->service, session_id, old_capture_generation,
+               new_capture_generation)
+           == RDX_STORAGE_RESULT_READY ? 0 : -1;
+}
+
 static int local_seal(void *priv, uint32_t session_id,
                       uint32_t capture_generation)
 {
@@ -72,6 +84,7 @@ static void local_detach_capture(void *priv, uint32_t session_id,
 
 static const struct rdx_record_destination_ops local_ops = {
     .attach = local_attach,
+    .rebind_capture = local_rebind_capture,
     .consume = local_consume,
     .seal = local_seal,
     .abort = local_abort,

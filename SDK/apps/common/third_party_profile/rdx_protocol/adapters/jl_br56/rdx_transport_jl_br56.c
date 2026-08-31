@@ -414,7 +414,8 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
         break;
 
     case ATT_EVENT_CAN_SEND_NOW: {
-#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    (RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE)
         u32 session_id = 0;
         u32 capture_generation = 0;
         u8 ready = 0;
@@ -426,9 +427,9 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.tx_stats.can_send_event_count++;
         }
 #endif
-#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
-        if (rdx_ble.record_streaming
-            && rdx_ble.can_send_pending
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    (RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE)
+        if (rdx_ble.can_send_pending
             && rdx_ble.can_send_connection_generation ==
                 rdx_ble.connection_generation) {
             session_id = rdx_ble.can_send_session_id;
@@ -453,7 +454,8 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
 #endif
         rdx_ble_clear_can_send_locked();
         spin_unlock(&rdx_ble.tx_lock);
-#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    (RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE)
         if (ready) {
             memset(&transport_event, 0, sizeof(transport_event));
             transport_event.type = RDX_TRANSPORT_EVENT_CAN_SEND_NOW;
@@ -739,15 +741,15 @@ enum rdx_transport_result rdx_transport_send(
 int rdx_transport_request_can_send_now(
     uint32_t session_id, uint32_t capture_generation)
 {
-#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
+    (RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE)
     u16 con_handle;
     u32 now_ms;
 
     now_ms = sys_timer_get_ms();
     spin_lock(&rdx_ble.tx_lock);
     if (!rdx_ble.hdl || !rdx_ble.con_handle || !rdx_ble.tx_ccc
-        || !rdx_ble.record_streaming || !session_id
-        || !capture_generation) {
+        || !session_id || !capture_generation) {
         spin_unlock(&rdx_ble.tx_lock);
         return -1;
     }

@@ -42,4 +42,14 @@ uint8_t rdx_protocol_v23_record_handle_command(
 void rdx_protocol_v23_record_handle_can_send(uint32_t session_id,
                                              uint32_t capture_generation);
 
+int rdx_protocol_v23_local_storage_init(
+    struct rdx_protocol_v23_context *context);
+void rdx_protocol_v23_local_storage_exit(void);
+void rdx_protocol_v23_local_storage_handle_link_change(uint8_t connected);
+void rdx_protocol_v23_local_storage_handle_ccc_change(void);
+uint8_t rdx_protocol_v23_local_storage_handle_command(
+    const uint8_t *data, uint16_t len);
+void rdx_protocol_v23_local_storage_handle_can_send(
+    uint32_t owner, uint32_t token);
+
 #endif

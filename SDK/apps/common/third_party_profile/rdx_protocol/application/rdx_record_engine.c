@@ -1002,6 +1002,7 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
     struct rdx_audio_capture_open_params audio_params;
     enum rdx_audio_capture_result capture_result;
     enum rdx_record_result validation_result;
+    uint32_t previous_capture_generation;
     uint8_t recorder_open_attempted = 0;
     int ret;
 
@@ -1017,10 +1018,32 @@ static void rdx_record_engine_resume(const struct rdx_record_request *request)
         return;
     }
 
+    previous_capture_generation =
+        rdx_record_engine.session.capture_generation;
     rdx_record_session_begin_resume(&rdx_record_engine.session);
     rdx_record_engine.capture_frame_seq = 0;
     rdx_record_engine.warmup_count = 0;
     rdx_record_engine_clear_queues();
+
+    if (rdx_record_engine.destination_ops
+        && rdx_record_engine.destination_ops->rebind_capture
+        && rdx_record_engine.destination_ops->rebind_capture(
+               rdx_record_engine.destination_priv,
+               rdx_record_engine.session.session_id,
+               previous_capture_generation,
+               rdx_record_engine.session.capture_generation)) {
+        /* rebind_capture is atomic by contract.  Restore the live binding
+         * while retaining next_capture_generation's monotonic high-water. */
+        rdx_record_engine.session.capture_generation =
+            previous_capture_generation;
+        ret = -1;
+        printf("[RDX][ENGINE] resume_rebind_failed request=%u session=%u"
+               " capture=%u\n",
+               (unsigned int)request->request_id,
+               (unsigned int)rdx_record_engine.session.session_id,
+               (unsigned int)previous_capture_generation);
+        goto resume_failed;
+    }
 
     capture_result = rdx_record_engine_capture_readiness();
     if (capture_result != RDX_AUDIO_CAPTURE_OK) {

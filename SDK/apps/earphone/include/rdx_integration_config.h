@@ -46,9 +46,37 @@
 #ifndef RDX_LOCAL_STORAGE_DEV_TEST_ENABLE
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
 #endif
+#ifndef RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE
+#define RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE  0
+#endif
 #define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      \
     (RDX_CFG_LOCAL_STORAGE_ENABLE || RDX_LOCAL_STORAGE_DEV_TEST_ENABLE)
-#define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       RDX_CFG_LOCAL_STORAGE_ENABLE
+#define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       \
+    (RDX_CFG_LOCAL_STORAGE_ENABLE || RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE)
+
+/* Stage-C APP Wire development depends on the build-only Service/Backend
+ * gate so a Wire-only image can never compile handlers which have no storage
+ * worker behind them. */
+#if RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE && \
+    !RDX_LOCAL_STORAGE_DEV_TEST_ENABLE
+#error "RDX Local Storage Wire development requires the storage dev build"
+#endif
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE && \
+    !RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
+#error "RDX Local Storage Wire requires the Local Storage Service"
+#endif
+
+/* The production compatibility profile remains the only release Ability.
+ * A Stage-C Wire image must nevertheless expose the Local entry to the real
+ * APP; otherwise its UI cannot issue mem/list/upload/delete/format commands.
+ * Reuse the explicit non-release Wire gate so the temporary advertised bit
+ * disappears automatically when the development flags return to zero. */
+#if RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE
+#define RDX_CFG_ADVERTISED_DEVICE_ABILITY       \
+    (RDX_COMPAT_DEVICE_ABILITY | RDX_ABILITY_LOCAL_STORAGE)
+#else
+#define RDX_CFG_ADVERTISED_DEVICE_ABILITY       RDX_COMPAT_DEVICE_ABILITY
+#endif
 
 #ifndef RDX_STORAGE_BACKEND_NATIVE
 #define RDX_STORAGE_BACKEND_NATIVE              0
@@ -279,6 +307,7 @@
 #define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      0
 #define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       0
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
+#define RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE  0
 #define RDX_STORAGE_BACKEND_NATIVE              0
 #define RDX_STORAGE_BACKEND_LEGACY_UXFILE       0
 #define RDX_LIBRDX_UXFILE_LINKED                0

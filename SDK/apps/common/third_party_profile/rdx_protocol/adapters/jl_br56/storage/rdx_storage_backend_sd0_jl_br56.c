@@ -222,7 +222,10 @@ static enum rdx_storage_result sd0_capacity(uint64_t *total_bytes,
     if (!part || fget_free_space(rdx_sd0.root, &free_kb)) {
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    *total_bytes = (uint64_t)part->total_size;
+    /* JL reports both fget_free_space() and vfs_partition::total_size in
+     * KiB.  Keep the Media Port byte-based; the compatibility Wire converts
+     * both values back to KiB so it matches the reference APP contract. */
+    *total_bytes = (uint64_t)part->total_size * 1024ULL;
     *free_bytes = (uint64_t)free_kb * 1024ULL;
     return RDX_STORAGE_RESULT_READY;
 }
@@ -408,11 +411,19 @@ static enum rdx_storage_result sd0_delete(
 
 static enum rdx_storage_result sd0_format(void)
 {
+    int ret;
+
     if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
         return RDX_STORAGE_RESULT_NOT_READY;
     }
-    return f_format(rdx_sd0.root, "fat", 0) ? RDX_STORAGE_RESULT_IO_ERROR
-                                            : RDX_STORAGE_RESULT_READY;
+    /* Formatting can exceed the watchdog window.  This follows JL's native
+     * UXFILE implementation; the Service immediately reprobes the media and
+     * rebuilds the internal layout plus empty A/B index before reporting
+     * completion to the APP. */
+    wdt_disable();
+    ret = f_format(rdx_sd0.root, "fat", 0);
+    wdt_enable();
+    return ret ? RDX_STORAGE_RESULT_IO_ERROR : RDX_STORAGE_RESULT_READY;
 }
 
 static enum rdx_storage_result sd0_open_temp(

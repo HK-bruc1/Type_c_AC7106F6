@@ -42,7 +42,10 @@ static int composite_consume(void *priv,
         || frame->session_id != composite->session_id
         || frame->capture_generation != composite->capture_generation
         || !composite->local_ops || !composite->local_ops->consume) {
-        return -1;
+        /* A token/contract mismatch is not queue backpressure.  Preserve the
+         * storage failure class so Engine does not report a misleading
+         * QUEUE_FULL termination for a stale capture callback. */
+        return RDX_RECORD_DESTINATION_ERROR_STORAGE;
     }
     ret = composite->local_ops->consume(composite->local_priv, frame);
     if (ret) {
@@ -62,6 +65,41 @@ static int composite_consume(void *priv,
                 composite->online_priv, composite->session_id,
                 composite->capture_generation);
         }
+        composite->online_attached = 0;
+    }
+    return 0;
+}
+
+static int composite_rebind_capture(void *priv, uint32_t session_id,
+                                    uint32_t old_capture_generation,
+                                    uint32_t new_capture_generation)
+{
+    struct rdx_record_composite_destination *composite = priv;
+
+    if (!composite || !composite->local_attached
+        || session_id != composite->session_id
+        || old_capture_generation != composite->capture_generation
+        || !new_capture_generation
+        || !composite->local_ops
+        || !composite->local_ops->rebind_capture) {
+        return -1;
+    }
+    /* Local is REQUIRED and owns the Artifact.  Its rebind is atomic, so a
+     * failure leaves every binding on the old token and Resume can retry. */
+    if (composite->local_ops->rebind_capture(
+            composite->local_priv, session_id, old_capture_generation,
+            new_capture_generation)) {
+        return -1;
+    }
+    composite->capture_generation = new_capture_generation;
+
+    /* Online is OPTIONAL.  If it cannot follow the new capture instance,
+     * remove only the mirror; Local recording remains authoritative. */
+    if (composite->online_attached && composite->online_ops
+        && composite->online_ops->rebind_capture
+        && composite->online_ops->rebind_capture(
+               composite->online_priv, session_id, old_capture_generation,
+               new_capture_generation)) {
         composite->online_attached = 0;
     }
     return 0;
@@ -206,6 +244,7 @@ static void composite_detach(void *priv, uint32_t session_id,
 
 static const struct rdx_record_destination_ops composite_ops = {
     .attach = composite_attach,
+    .rebind_capture = composite_rebind_capture,
     .consume = composite_consume,
     .poll = composite_poll,
     .seal = composite_seal,

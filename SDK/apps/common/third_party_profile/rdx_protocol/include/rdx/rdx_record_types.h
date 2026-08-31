@@ -157,6 +157,13 @@ struct rdx_record_frame {
 struct rdx_record_destination_ops {
     int (*attach)(void *priv, uint32_t session_id,
                   uint32_t capture_generation);
+    /* PAUSE/RESUME keeps the logical Session and Artifact but opens a new
+     * capture instance.  Rebind token-aware destinations before the resumed
+     * source can deliver frames; implementations must either update the
+     * token atomically or leave the old binding intact on failure. */
+    int (*rebind_capture)(void *priv, uint32_t session_id,
+                          uint32_t old_capture_generation,
+                          uint32_t new_capture_generation);
     int (*consume)(void *priv, const struct rdx_record_frame *frame);
     void (*poll)(void *priv, uint32_t session_id,
                  uint32_t capture_generation);

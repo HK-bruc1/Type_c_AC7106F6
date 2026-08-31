@@ -5,22 +5,45 @@
 
 struct fake_destination {
     int attach_count;
+    int rebind_count;
     int consume_count;
     int seal_count;
     int abort_count;
     int detach_count;
     int fail_attach;
+    int fail_rebind;
     int fail_consume;
+    uint32_t session_id;
+    uint32_t capture_generation;
 };
 
 static int fake_attach(void *priv, uint32_t session_id,
                        uint32_t capture_generation)
 {
     struct fake_destination *fake = priv;
-    (void)session_id;
-    (void)capture_generation;
     fake->attach_count++;
-    return fake->fail_attach;
+    if (fake->fail_attach) {
+        return fake->fail_attach;
+    }
+    fake->session_id = session_id;
+    fake->capture_generation = capture_generation;
+    return 0;
+}
+
+static int fake_rebind(void *priv, uint32_t session_id,
+                       uint32_t old_capture_generation,
+                       uint32_t new_capture_generation)
+{
+    struct fake_destination *fake = priv;
+
+    fake->rebind_count++;
+    if (fake->fail_rebind || session_id != fake->session_id
+        || old_capture_generation != fake->capture_generation
+        || !new_capture_generation) {
+        return -1;
+    }
+    fake->capture_generation = new_capture_generation;
+    return 0;
 }
 
 static int fake_consume(void *priv, const struct rdx_record_frame *frame)
@@ -64,6 +87,7 @@ static void fake_detach(void *priv, uint32_t session_id,
 
 static const struct rdx_record_destination_ops fake_ops = {
     .attach = fake_attach,
+    .rebind_capture = fake_rebind,
     .consume = fake_consume,
     .seal = fake_seal,
     .abort = fake_abort,
@@ -100,10 +124,39 @@ static void test_local_required_online_optional(void)
     assert(local.attach_count == 1 && online.attach_count == 1);
     assert(ops->consume(&composite, &frame) == 0);
     assert(local.consume_count == 1 && online.consume_count == 1);
-    assert(ops->seal(&composite, 9, 3) == 0);
+    assert(ops->rebind_capture(&composite, 9, 3, 4) == 0);
+    assert(local.rebind_count == 1 && online.rebind_count == 1);
+    assert(ops->consume(&composite, &frame) ==
+           RDX_RECORD_DESTINATION_ERROR_STORAGE);
+    assert(local.consume_count == 1 && online.consume_count == 1);
+    frame.capture_generation = 4;
+    assert(ops->consume(&composite, &frame) == 0);
+    assert(local.consume_count == 2 && online.consume_count == 2);
+    assert(ops->seal(&composite, 9, 4) == 0);
     assert(local.seal_count == 1 && online.seal_count == 1);
-    ops->detach_capture(&composite, 9, 3);
+    ops->detach_capture(&composite, 9, 4);
     assert(local.detach_count == 1 && online.detach_count == 1);
+}
+
+static void test_online_rebind_failure_only_removes_mirror(void)
+{
+    struct fake_destination local = { 0 };
+    struct fake_destination online = { 0 };
+    struct rdx_record_composite_destination composite;
+    const struct rdx_record_destination_ops *ops;
+    struct rdx_record_frame frame = test_frame();
+
+    online.fail_rebind = 1;
+    assert(rdx_record_composite_destination_init(
+               &composite, &fake_ops, &local, &fake_ops, &online) == 0);
+    ops = rdx_record_composite_destination_ops();
+    assert(ops->attach(&composite, 9, 3) == 0);
+    assert(ops->rebind_capture(&composite, 9, 3, 4) == 0);
+    assert(composite.local_attached == 1);
+    assert(composite.online_attached == 0);
+    frame.capture_generation = 4;
+    assert(ops->consume(&composite, &frame) == 0);
+    assert(local.consume_count == 1 && online.consume_count == 0);
 }
 
 static void test_local_failure_does_not_mirror(void)
@@ -145,6 +198,7 @@ static void test_abort_before_attach_cleans_local(void)
 int main(void)
 {
     test_local_required_online_optional();
+    test_online_rebind_failure_only_removes_mirror();
     test_local_failure_does_not_mirror();
     test_abort_before_attach_cleans_local();
     return 0;

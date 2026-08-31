@@ -1106,6 +1106,11 @@ c_SRC_FILES += \
 #endif
 #endif
 
+#if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_local_storage.c
+#endif
+
 #if RDX_CFG_CONFERENCE_RECORDING_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/application/rdx_mic_gain_service.c \
