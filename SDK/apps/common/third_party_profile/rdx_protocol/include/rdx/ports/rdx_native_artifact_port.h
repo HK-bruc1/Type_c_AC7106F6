@@ -7,6 +7,11 @@
 
 /* Native mode only: the Storage Service owns the Artifact transaction. */
 struct rdx_native_artifact_ops {
+    /* Optional startup recovery hook.  The Service calls it after the JL
+     * mount is ready and before accepting a new Artifact.  A backend that
+     * cannot provide recovery must leave this NULL; it must not pretend that
+     * Native marker/index guarantees exist. */
+    enum rdx_storage_result (*recover)(void);
     enum rdx_storage_result (*open_temp)(
         const struct rdx_storage_artifact_spec *spec, void **handle);
     enum rdx_storage_result (*append)(void *handle, const uint8_t *data,

@@ -49,6 +49,18 @@ enum rdx_artifact_state {
     RDX_ARTIFACT_STATE_QUARANTINED,
 };
 
+/* Stable on-media values used by the Native marker serializer.  They are
+ * intentionally separate from enum rdx_artifact_state: changing an in-memory
+ * domain enum must never renumber an existing recovery record. */
+enum rdx_storage_marker_state {
+    RDX_STORAGE_MARKER_STATE_ALLOCATED = 0,
+    RDX_STORAGE_MARKER_STATE_WRITING = 1,
+    RDX_STORAGE_MARKER_STATE_SEALED = 2,
+    RDX_STORAGE_MARKER_STATE_PUBLISHED = 3,
+    RDX_STORAGE_MARKER_STATE_INDEXED = 4,
+    RDX_STORAGE_MARKER_STATE_FAILED = 5,
+};
+
 struct rdx_artifact_id {
     uint64_t value;
 };

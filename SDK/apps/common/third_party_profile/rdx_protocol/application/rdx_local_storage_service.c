@@ -11,12 +11,29 @@
 #define RDX_LOCAL_STORAGE_SEAL_WAIT_TICKS 100
 #endif
 
-#define RDX_STORAGE_MARKER_STATE_ALLOCATED    0u
-#define RDX_STORAGE_MARKER_STATE_WRITING      1u
-#define RDX_STORAGE_MARKER_STATE_SEALED       2u
-#define RDX_STORAGE_MARKER_STATE_PUBLISHED    3u
-#define RDX_STORAGE_MARKER_STATE_INDEXED      4u
-#define RDX_STORAGE_MARKER_STATE_FAILED       5u
+/* CRC32/IEEE is part of the Native Artifact checkpoint contract.  Keep the
+ * serialized value in the Artifact (rather than a backend-private running
+ * state) so a checkpoint can be compared with the value returned by close().
+ * The first frame uses the standard init/xorout pair; subsequent frames feed
+ * the previous finalized value back into the running state. */
+static uint32_t service_crc32_update(uint32_t previous,
+                                     uint32_t frame_count,
+                                     const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = frame_count ? (previous ^ 0xffffffffUL) : 0xffffffffUL;
+    uint32_t i;
+
+    for (i = 0; i < len; i++) {
+        uint32_t bit;
+
+        crc ^= data[i];
+        for (bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1)
+                  ^ (0xedb88320UL & (uint32_t)-(int)(crc & 1));
+        }
+    }
+    return crc ^ 0xffffffffUL;
+}
 
 #if CONFIG_CPU_BR56
 static void service_lock(struct rdx_local_storage_service *service)
@@ -296,6 +313,40 @@ int rdx_local_storage_service_init(
     return 0;
 }
 
+enum rdx_storage_result rdx_local_storage_service_recover(
+    struct rdx_local_storage_service *service)
+{
+    enum rdx_storage_result result;
+
+    if (!service || !service->media_ops || !service->media_ops->ensure_ready) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    service_lock(service);
+    if (service->active) {
+        service_unlock(service);
+        return RDX_STORAGE_RESULT_BUSY;
+    }
+    service->readiness = RDX_STORAGE_READINESS_RECOVERING;
+    result = service->media_ops->ensure_ready();
+    if (result == RDX_STORAGE_RESULT_READY
+        && service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
+        && service->native_ops && service->native_ops->recover) {
+        result = service->native_ops->recover();
+    }
+    if (result == RDX_STORAGE_RESULT_READY) {
+        service->readiness = RDX_STORAGE_READINESS_READY;
+        service->recovery_checked = 1;
+    } else if (result == RDX_STORAGE_RESULT_NOT_READY) {
+        service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
+        service->recovery_checked = 0;
+    } else {
+        service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
+        service->recovery_checked = 0;
+    }
+    service_unlock(service);
+    return result;
+}
+
 enum rdx_storage_result rdx_local_storage_service_start(
     struct rdx_local_storage_service *service,
     const struct rdx_storage_artifact_spec *spec)
@@ -311,6 +362,11 @@ enum rdx_storage_result rdx_local_storage_service_start(
     if (service->active) {
         return RDX_STORAGE_RESULT_BUSY;
     }
+    if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
+        && service->native_ops && service->native_ops->recover
+        && !service->recovery_checked) {
+        return RDX_STORAGE_RESULT_BAD_STATE;
+    }
     if (service->readiness == RDX_STORAGE_READINESS_RECOVERY_REQUIRED
         || service->readiness == RDX_STORAGE_READINESS_HOST_OWNED
         || service->readiness == RDX_STORAGE_READINESS_QUIESCING) {
@@ -320,6 +376,13 @@ enum rdx_storage_result rdx_local_storage_service_start(
     result = service->media_ops->ensure_ready();
     if (result != RDX_STORAGE_RESULT_READY) {
         service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
+        if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
+            && service->native_ops && service->native_ops->recover) {
+            /* The mount may represent a replaced or power-cycled medium when
+             * it becomes available again.  Do not reuse recovery evidence
+             * obtained before the readiness failure. */
+            service->recovery_checked = 0;
+        }
         return result;
     }
     if (service->backend == RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE) {
@@ -526,8 +589,12 @@ static enum rdx_storage_result service_pump_locked(
         }
         if (result != RDX_STORAGE_RESULT_READY
             || written != slot->frame.payload_len
-            || rdx_artifact_persist_frame(&service->artifact,
-                                          slot->frame.payload_len, 0)) {
+            || rdx_artifact_persist_frame(
+                   &service->artifact, slot->frame.payload_len,
+                   service_crc32_update(service->artifact.audio_crc,
+                                        service->artifact.persisted_frame_count,
+                                        slot->payload,
+                                        slot->frame.payload_len))) {
             return service_fail(service,
                                 result == RDX_STORAGE_RESULT_READY
                                     ? RDX_STORAGE_RESULT_IO_ERROR : result,
@@ -631,7 +698,9 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service->artifact_handle = NULL;
-        if (file_size != service->artifact.audio_bytes) {
+        if (file_size != service->artifact.audio_bytes
+            || (service->artifact.persisted_frame_count
+                && audio_crc != service->artifact.audio_crc)) {
             return service_fail(service, RDX_STORAGE_RESULT_CORRUPT,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }

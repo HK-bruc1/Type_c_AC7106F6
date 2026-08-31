@@ -22,12 +22,15 @@
      + RDX_SD0_INDEX_TRAILER_SIZE)
 #define RDX_SD0_MARKER_DATA_SIZE   \
     (2u * 8u + 14u * 4u + 2u * RDX_STORAGE_NAME_MAX + 4u)
+#define RDX_SD0_LAYOUT_DIR_COUNT   3u
 
 struct rdx_sd0_open_file {
     FILE *file;
     struct rdx_artifact_id artifact_id;
     char temp_path[RDX_SD0_PATH_MAX];
     char final_path[RDX_SD0_PATH_MAX];
+    uint64_t audio_bytes;
+    uint32_t audio_crc;
     uint8_t pending_rename;
 };
 
@@ -43,8 +46,123 @@ struct rdx_sd0_backend {
 
 static struct rdx_sd0_backend rdx_sd0;
 
+static int sd0_path(const char *name, char *path, uint32_t capacity);
+
+static uint32_t sd0_crc32_update(uint32_t previous,
+                                 uint8_t initialized,
+                                 const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = initialized ? (previous ^ 0xffffffffUL) : 0xffffffffUL;
+    uint32_t i;
+
+    for (i = 0; i < len; i++) {
+        uint32_t bit;
+
+        crc ^= data[i];
+        for (bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1)
+                  ^ (0xedb88320UL & (uint32_t)-(int)(crc & 1));
+        }
+    }
+    return crc ^ 0xffffffffUL;
+}
+
+static enum rdx_storage_result sd0_crc_file(const char *path,
+                                             uint64_t *file_size,
+                                             uint32_t *audio_crc)
+{
+    uint8_t buffer[256];
+    FILE *file;
+    uint32_t crc = 0;
+    uint8_t initialized = 0;
+    uint64_t size = 0;
+
+    if (!path || !file_size || !audio_crc) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    file = fopen(path, "r");
+    if (!file) {
+        return RDX_STORAGE_RESULT_IO_ERROR;
+    }
+    for (;;) {
+        int count = fread(buffer, 1, sizeof(buffer), file);
+
+        if (count < 0) {
+            fclose(file);
+            return RDX_STORAGE_RESULT_IO_ERROR;
+        }
+        if (!count) {
+            break;
+        }
+        if ((uint64_t)count > UINT64_MAX - size) {
+            fclose(file);
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        crc = sd0_crc32_update(crc, initialized, buffer, (uint32_t)count);
+        initialized = 1;
+        size += (uint32_t)count;
+    }
+    fclose(file);
+    *file_size = size;
+    *audio_crc = initialized ? crc : 0;
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_file_size(
+    const struct rdx_storage_file_id *file_id, uint64_t *file_size)
+{
+    char path[RDX_SD0_PATH_MAX];
+    FILE *file;
+
+    if (!file_id || !file_size
+        || sd0_path(file_id->name, path, sizeof(path))) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    file = fopen(path, "r");
+    if (!file) {
+        return RDX_STORAGE_RESULT_IO_ERROR;
+    }
+    *file_size = flen(file);
+    fclose(file);
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_ensure_layout(void)
+{
+    static const char *const names[RDX_SD0_LAYOUT_DIR_COUNT] = {
+        "RDXREC", "RDXTMP", "RDXBAD",
+    };
+    uint32_t i;
+
+    for (i = 0; i < RDX_SD0_LAYOUT_DIR_COUNT; i++) {
+        char folder[16];
+        char path[RDX_SD0_PATH_MAX];
+
+        strncpy(folder, names[i], sizeof(folder) - 1);
+        folder[sizeof(folder) - 1] = 0;
+        if (snprintf(path, sizeof(path), "%s%s/", rdx_sd0.root,
+                     names[i]) >= sizeof(path)) {
+            return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+        }
+        if (!fdir_exist(path)) {
+            continue;
+        }
+        if (fmk_dir(rdx_sd0.root, folder, 0) || fdir_exist(path)) {
+            return RDX_STORAGE_RESULT_IO_ERROR;
+        }
+    }
+    return RDX_STORAGE_RESULT_READY;
+}
+
 static enum rdx_storage_result sd0_load_index(
     struct rdx_storage_index_snapshot *snapshot);
+static enum rdx_storage_result sd0_commit_index(
+    const struct rdx_storage_index_snapshot *snapshot);
+static enum rdx_storage_result sd0_load_marker(
+    const struct rdx_artifact_id *artifact_id,
+    struct rdx_storage_marker *marker);
+static int sd0_marker_path(const struct rdx_artifact_id *artifact_id,
+                           char *path, uint32_t capacity);
 
 static enum rdx_storage_result sd0_ready(void)
 {
@@ -60,7 +178,7 @@ static enum rdx_storage_result sd0_ready(void)
     }
     strncpy(rdx_sd0.root, root, sizeof(rdx_sd0.root) - 1);
     rdx_sd0.root[sizeof(rdx_sd0.root) - 1] = 0;
-    return RDX_STORAGE_RESULT_READY;
+    return sd0_ensure_layout();
 }
 
 static int sd0_path(const char *name, char *path, uint32_t capacity)
@@ -160,10 +278,8 @@ static enum rdx_storage_result sd0_stat(
     if (!file) {
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    *file_size = flen(file);
-    *audio_crc = 0; /* CRC is persisted in the Artifact marker. */
     fclose(file);
-    return RDX_STORAGE_RESULT_READY;
+    return sd0_crc_file(path, file_size, audio_crc);
 }
 
 static enum rdx_storage_result sd0_enumerate(
@@ -204,8 +320,13 @@ static enum rdx_storage_result sd0_delete(
     const struct rdx_storage_file_id *file_id)
 {
     char path[RDX_SD0_PATH_MAX];
+    char marker_path[RDX_SD0_PATH_MAX];
+    struct rdx_storage_index_snapshot snapshot;
+    struct rdx_storage_index_entry removed;
+    uint32_t removed_at;
+    uint32_t i;
 
-    if (!file_id) {
+    if (!file_id || !file_id->artifact_id.value || !file_id->name[0]) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
@@ -214,8 +335,73 @@ static enum rdx_storage_result sd0_delete(
     if (sd0_path(file_id->name, path, sizeof(path))) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
-    return fdelete_by_name(path) ? RDX_STORAGE_RESULT_IO_ERROR
-                                 : RDX_STORAGE_RESULT_READY;
+    memset(rdx_sd0.enumerate_entries, 0,
+           sizeof(rdx_sd0.enumerate_entries));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.entries = rdx_sd0.enumerate_entries;
+    snapshot.capacity = RDX_SD0_INDEX_MAX_ENTRIES;
+    if (sd0_load_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    removed_at = snapshot.count;
+    for (i = 0; i < snapshot.count; i++) {
+        if (snapshot.entries[i].file.file_id.artifact_id.value
+            == file_id->artifact_id.value) {
+            removed_at = i;
+            break;
+        }
+    }
+    if (removed_at == snapshot.count
+        || strncmp(snapshot.entries[removed_at].file.file_id.name,
+                   file_id->name, RDX_STORAGE_NAME_MAX)) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    removed = snapshot.entries[removed_at];
+    if (removed_at + 1 < snapshot.count) {
+        memmove(&snapshot.entries[removed_at],
+                &snapshot.entries[removed_at + 1],
+                (snapshot.count - removed_at - 1)
+                * sizeof(snapshot.entries[0]));
+    }
+    snapshot.count--;
+    if (sd0_commit_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
+        return RDX_STORAGE_RESULT_IO_ERROR;
+    }
+    if (fdelete_by_name(path)) {
+        /* Restore list visibility if the FAT delete did not happen.  A failed
+         * rollback is reported as CORRUPT so Service can gate future START. */
+        memset(rdx_sd0.enumerate_entries, 0,
+               sizeof(rdx_sd0.enumerate_entries));
+        memset(&snapshot, 0, sizeof(snapshot));
+        snapshot.entries = rdx_sd0.enumerate_entries;
+        snapshot.capacity = RDX_SD0_INDEX_MAX_ENTRIES;
+        if (sd0_load_index(&snapshot) != RDX_STORAGE_RESULT_READY
+            || snapshot.count >= snapshot.capacity) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        if (removed_at > snapshot.count) {
+            removed_at = snapshot.count;
+        }
+        if (removed_at < snapshot.count) {
+            memmove(&snapshot.entries[removed_at + 1],
+                    &snapshot.entries[removed_at],
+                    (snapshot.count - removed_at)
+                    * sizeof(snapshot.entries[0]));
+        }
+        snapshot.entries[removed_at] = removed;
+        snapshot.count++;
+        return sd0_commit_index(&snapshot) == RDX_STORAGE_RESULT_READY
+                   ? RDX_STORAGE_RESULT_IO_ERROR
+                   : RDX_STORAGE_RESULT_CORRUPT;
+    }
+    if (!sd0_marker_path(&file_id->artifact_id, marker_path,
+                         sizeof(marker_path))) {
+        /* A stale terminal marker is not a normal-list entry.  Its cleanup is
+         * best effort so an already completed file deletion stays idempotent
+         * from the APP's perspective. */
+        (void)fdelete_by_name(marker_path);
+    }
+    return RDX_STORAGE_RESULT_READY;
 }
 
 static enum rdx_storage_result sd0_format(void)
@@ -253,6 +439,8 @@ static enum rdx_storage_result sd0_open_temp(
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     open->artifact_id = spec->artifact_id;
+    open->audio_bytes = 0;
+    open->audio_crc = 0;
     open->pending_rename = 1;
     *handle = open;
     return RDX_STORAGE_RESULT_READY;
@@ -273,6 +461,16 @@ static enum rdx_storage_result sd0_append(void *handle, const uint8_t *data,
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     *written = (uint32_t)count;
+    if (*written) {
+        if (*written > UINT64_MAX - open->audio_bytes) {
+            *written = 0;
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        open->audio_crc = sd0_crc32_update(open->audio_crc,
+                                           open->audio_bytes != 0,
+                                           data, *written);
+        open->audio_bytes += *written;
+    }
     return *written == len ? RDX_STORAGE_RESULT_READY
                            : RDX_STORAGE_RESULT_IO_ERROR;
 }
@@ -281,14 +479,26 @@ static enum rdx_storage_result sd0_close(void *handle, uint64_t *file_size,
                                          uint32_t *audio_crc)
 {
     struct rdx_sd0_open_file *open = handle;
+    char path[RDX_SD0_PATH_MAX];
+    enum rdx_storage_result result;
 
     if (!open || !open->file || !file_size || !audio_crc) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
-    *file_size = flen(open->file);
-    *audio_crc = 0;
+    strncpy(path, open->temp_path, sizeof(path) - 1);
+    path[sizeof(path) - 1] = 0;
     fclose(open->file);
     open->file = NULL;
+    /* Re-open the file and calculate the checksum from persisted bytes.  The
+     * running value maintained by append() is only a cheap consistency hint;
+     * this read-back is the checkpoint evidence consumed by Service. */
+    result = sd0_crc_file(path, file_size, audio_crc);
+    if (result != RDX_STORAGE_RESULT_READY
+        || *file_size != open->audio_bytes
+        || (open->audio_bytes && *audio_crc != open->audio_crc)) {
+        return result == RDX_STORAGE_RESULT_READY
+                   ? RDX_STORAGE_RESULT_CORRUPT : result;
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -430,6 +640,8 @@ static enum rdx_storage_result sd0_store_marker(
     const struct rdx_storage_marker *marker)
 {
     uint8_t data[RDX_SD0_MARKER_DATA_SIZE];
+    uint8_t verify_data[RDX_SD0_MARKER_DATA_SIZE];
+    struct rdx_storage_marker verify;
     char path[RDX_SD0_PATH_MAX];
     FILE *file;
     uint32_t len;
@@ -455,6 +667,16 @@ static enum rdx_storage_result sd0_store_marker(
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     fclose(file);
+    /* A successful fwrite/fclose only proves that the VFS accepted the
+     * operation.  Re-open and decode the marker so a torn/short write is not
+     * used as a recovery checkpoint. */
+    if (sd0_load_marker(&marker->artifact_id, &verify)
+        != RDX_STORAGE_RESULT_READY
+        || sd0_serialize_marker(&verify, verify_data, sizeof(verify_data))
+           != len
+        || memcmp(data, verify_data, len)) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -528,6 +750,7 @@ static enum rdx_storage_result sd0_load_index(
     uint32_t best_count = 0;
     uint32_t slot;
     uint8_t best_found = 0;
+    uint8_t saw_index_file = 0;
 
     if (!snapshot || !snapshot->entries || !snapshot->capacity) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
@@ -555,6 +778,7 @@ static enum rdx_storage_result sd0_load_index(
         if (!file) {
             continue;
         }
+        saw_index_file = 1;
         len = flen(file);
         if (len > RDX_SD0_INDEX_DATA_SIZE
             || fread(data, 1, len, file) != (int)len) {
@@ -609,6 +833,84 @@ static enum rdx_storage_result sd0_load_index(
     }
     snapshot->generation = best_generation;
     snapshot->count = best_count;
+    if (saw_index_file && !best_found) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_recover(void)
+{
+    struct rdx_storage_index_snapshot snapshot;
+    uint32_t i;
+
+    if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
+        return RDX_STORAGE_RESULT_NOT_READY;
+    }
+    /* Reuse the backend-owned image; recovery runs before a recording can
+     * start and the adapter is single-owner, so no second 32-entry array is
+     * needed on the worker stack. */
+    memset(rdx_sd0.enumerate_entries, 0,
+           sizeof(rdx_sd0.enumerate_entries));
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.entries = rdx_sd0.enumerate_entries;
+    snapshot.capacity = RDX_SD0_INDEX_MAX_ENTRIES;
+    if (sd0_load_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    if (!snapshot.generation && !snapshot.count) {
+        /* New media gets a real, checksummed empty A/B index.  This is a
+         * bounded fast path and deliberately does not scan the volume. */
+        if (sd0_commit_index(&snapshot) != RDX_STORAGE_RESULT_READY) {
+            return RDX_STORAGE_RESULT_IO_ERROR;
+        }
+        return RDX_STORAGE_RESULT_READY;
+    }
+    /* Recovery is deliberately bounded by the index size.  It never scans
+     * the whole FAT volume or guesses that an unindexed file is complete. */
+    for (i = 0; i < snapshot.count; i++) {
+        struct rdx_storage_marker marker;
+        uint64_t file_size;
+        enum rdx_storage_result result;
+
+        result = sd0_load_marker(
+            &snapshot.entries[i].file.file_id.artifact_id, &marker);
+        if (result != RDX_STORAGE_RESULT_READY) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        if (marker.state != RDX_STORAGE_MARKER_STATE_INDEXED
+            && marker.state != RDX_STORAGE_MARKER_STATE_PUBLISHED) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        if (snapshot.entries[i].file.state != RDX_ARTIFACT_STATE_COMMITTED
+            || marker.serial_number
+               != snapshot.entries[i].file.file_id.serial_number
+            || strncmp(marker.final_name,
+                       snapshot.entries[i].file.file_id.name,
+                       sizeof(marker.final_name))) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        result = sd0_file_size(&snapshot.entries[i].file.file_id,
+                               &file_size);
+        if (result != RDX_STORAGE_RESULT_READY
+            || file_size != snapshot.entries[i].file.file_size
+            || file_size != marker.audio_bytes
+            || snapshot.entries[i].file.audio_crc != marker.audio_crc
+            || snapshot.entries[i].file.frame_count
+               != marker.persisted_frame_count
+            || marker.local_accepted_count
+               != marker.persisted_frame_count) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        if (marker.state == RDX_STORAGE_MARKER_STATE_PUBLISHED) {
+            /* A power cut after index commit but before INDEXED marker is
+             * recoverable without inventing a second index generation. */
+            marker.state = RDX_STORAGE_MARKER_STATE_INDEXED;
+            if (sd0_store_marker(&marker) != RDX_STORAGE_RESULT_READY) {
+                return RDX_STORAGE_RESULT_CORRUPT;
+            }
+        }
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -620,18 +922,24 @@ static enum rdx_storage_result sd0_commit_index(
     FILE *file;
     uint32_t offset = 0;
     uint32_t i;
+    uint32_t expected_generation;
+    struct rdx_storage_index_snapshot verify;
 
     if (!snapshot || (!snapshot->entries && snapshot->count)
         || snapshot->count > snapshot->capacity
         || snapshot->count > RDX_SD0_INDEX_MAX_ENTRIES) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    if (snapshot->generation == UINT32_MAX) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
     if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
         return RDX_STORAGE_RESULT_NOT_READY;
     }
     sd0_put_u32(data, &offset, RDX_SD0_INDEX_MAGIC);
     sd0_put_u32(data, &offset, RDX_SD0_INDEX_VERSION);
-    sd0_put_u32(data, &offset, snapshot->generation + 1);
+    expected_generation = snapshot->generation + 1;
+    sd0_put_u32(data, &offset, expected_generation);
     sd0_put_u32(data, &offset, snapshot->count);
     for (i = 0; i < snapshot->count; i++) {
         const struct rdx_storage_file_info *entry =
@@ -660,6 +968,15 @@ static enum rdx_storage_result sd0_commit_index(
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     fclose(file);
+    memset(rdx_sd0.enumerate_entries, 0, sizeof(rdx_sd0.enumerate_entries));
+    memset(&verify, 0, sizeof(verify));
+    verify.entries = rdx_sd0.enumerate_entries;
+    verify.capacity = RDX_SD0_INDEX_MAX_ENTRIES;
+    if (sd0_load_index(&verify) != RDX_STORAGE_RESULT_READY
+        || verify.generation != expected_generation
+        || verify.count != snapshot->count) {
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -721,6 +1038,7 @@ static const struct rdx_storage_media_ops sd0_media_ops = {
 };
 
 static const struct rdx_native_artifact_ops sd0_native_ops = {
+    .recover = sd0_recover,
     .open_temp = sd0_open_temp,
     .append = sd0_append,
     .close = sd0_close,

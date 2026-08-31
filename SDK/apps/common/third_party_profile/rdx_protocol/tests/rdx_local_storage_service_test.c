@@ -16,10 +16,14 @@ struct fake_native {
     int index_commit_calls;
     int quarantine_calls;
     uint32_t bytes;
+    uint32_t audio_crc;
+    uint8_t audio_initialized;
     uint32_t close_size_delta;
     uint32_t marker_states[8];
     int fail_marker_state;
     int fail_append;
+    int recover_calls;
+    enum rdx_storage_result recover_result;
     uint32_t index_count;
 };
 
@@ -31,10 +35,34 @@ struct fake_completion {
 static struct fake_media *g_media;
 static struct fake_native *g_native;
 
+static uint32_t fake_crc32_update(uint32_t previous, uint32_t frame_count,
+                                  const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = frame_count ? (previous ^ 0xffffffffUL) : 0xffffffffUL;
+    uint32_t i;
+
+    for (i = 0; i < len; i++) {
+        uint32_t bit;
+
+        crc ^= data[i];
+        for (bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1)
+                  ^ (0xedb88320UL & (uint32_t)-(int)(crc & 1));
+        }
+    }
+    return crc ^ 0xffffffffUL;
+}
+
 static enum rdx_storage_result fake_ready(void)
 {
     g_media->ready_calls++;
     return g_media->result;
+}
+
+static enum rdx_storage_result fake_recover(void)
+{
+    g_native->recover_calls++;
+    return g_native->recover_result;
 }
 
 static enum rdx_storage_result fake_open_temp(
@@ -56,6 +84,10 @@ static enum rdx_storage_result fake_append(void *handle, const uint8_t *data,
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     native->bytes += len;
+    native->audio_crc = fake_crc32_update(native->audio_crc,
+                                          native->audio_initialized,
+                                          data, len);
+    native->audio_initialized = 1;
     *written = len;
     return RDX_STORAGE_RESULT_READY;
 }
@@ -65,7 +97,8 @@ static enum rdx_storage_result fake_close(void *handle, uint64_t *size,
 {
     struct fake_native *native = handle;
     *size = native->bytes + native->close_size_delta;
-    *crc = native->bytes ^ 0x55aa;
+    /* The fake models the Native backend's CRC32/IEEE close read-back. */
+    *crc = native->audio_initialized ? native->audio_crc : 0;
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -207,6 +240,10 @@ static void test_native_commit(void)
     assert(events.calls == 1);
     assert(events.last.type == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_COMMITTED);
     assert(events.last.frame_count == 1);
+    assert(events.last.file_size == 4);
+    assert(events.last.audio_crc == 0xb63cfbcdUL);
+    assert(events.last.audio_crc == native.audio_crc);
+    assert(service.artifact.audio_crc == native.audio_crc);
     assert(media.ready_calls == 1);
     assert(native.append_calls == 1 && native.publish_calls == 1);
     assert(native.index_commit_calls == 1 && native.marker_calls == 6);
@@ -458,6 +495,82 @@ static void test_coordinator_binds_runtime_session(void)
     assert(events.last.type == RDX_LOCAL_STORAGE_COMPLETION_ARTIFACT_FAILED);
 }
 
+static void test_recovery_failure_gates_start(void)
+{
+    struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
+    struct fake_native native = { 0 };
+    struct rdx_storage_media_ops media_ops = { 0 };
+    struct rdx_native_artifact_ops native_ops = { 0 };
+    struct rdx_local_storage_service service;
+    struct rdx_storage_artifact_spec spec = test_spec();
+
+    media_ops.ensure_ready = fake_ready;
+    native.recover_result = RDX_STORAGE_RESULT_CORRUPT;
+    native_ops.recover = fake_recover;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_media = &media;
+    g_native = &native;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, NULL, NULL) == 0);
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_BAD_STATE);
+    assert(rdx_local_storage_service_recover(&service)
+           == RDX_STORAGE_RESULT_CORRUPT);
+    assert(native.recover_calls == 1);
+    assert(rdx_local_storage_service_readiness(&service)
+           == RDX_STORAGE_READINESS_RECOVERY_REQUIRED);
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_BAD_STATE);
+}
+
+static void test_media_outage_invalidates_recovery(void)
+{
+    struct fake_media media = { 0, RDX_STORAGE_RESULT_READY };
+    struct fake_native native = { 0 };
+    struct rdx_storage_media_ops media_ops = { 0 };
+    struct rdx_native_artifact_ops native_ops = { 0 };
+    struct rdx_local_storage_service service;
+    struct rdx_storage_artifact_spec spec = test_spec();
+
+    media_ops.ensure_ready = fake_ready;
+    native.recover_result = RDX_STORAGE_RESULT_READY;
+    native_ops.recover = fake_recover;
+    native_ops.open_temp = fake_open_temp;
+    native_ops.append = fake_append;
+    native_ops.close = fake_close;
+    native_ops.publish = fake_publish;
+    native_ops.store_marker = fake_marker;
+    native_ops.load_index = fake_load_index;
+    native_ops.commit_index = fake_commit_index;
+    native_ops.quarantine = fake_quarantine;
+    g_media = &media;
+    g_native = &native;
+    assert(rdx_local_storage_service_init(
+               &service, RDX_LOCAL_STORAGE_BACKEND_NATIVE, &media_ops,
+               &native_ops, NULL, NULL, NULL) == 0);
+    assert(rdx_local_storage_service_recover(&service)
+           == RDX_STORAGE_RESULT_READY);
+    assert(native.recover_calls == 1);
+
+    media.result = RDX_STORAGE_RESULT_NOT_READY;
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_NOT_READY);
+    media.result = RDX_STORAGE_RESULT_READY;
+    assert(rdx_local_storage_service_start(&service, &spec)
+           == RDX_STORAGE_RESULT_BAD_STATE);
+    assert(rdx_local_storage_service_recover(&service)
+           == RDX_STORAGE_RESULT_READY);
+    assert(native.recover_calls == 2);
+}
+
 int main(void)
 {
     test_native_commit();
@@ -466,5 +579,7 @@ int main(void)
     test_close_size_mismatch_is_not_published();
     test_indexed_marker_failure_is_not_committed();
     test_coordinator_binds_runtime_session();
+    test_recovery_failure_gates_start();
+    test_media_outage_invalidates_recovery();
     return 0;
 }

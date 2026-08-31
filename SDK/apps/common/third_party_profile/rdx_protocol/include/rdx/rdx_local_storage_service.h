@@ -66,6 +66,7 @@ struct rdx_local_storage_service {
     uint8_t capture_detached;
     uint8_t seal_requested;
     uint8_t completion_sent;
+    uint8_t recovery_checked;
     uint8_t queue_head;
     uint8_t queue_tail;
     uint8_t queue_count;
@@ -91,6 +92,12 @@ int rdx_local_storage_service_init(
     const struct rdx_legacy_uxfile_ops *legacy_ops,
     rdx_local_storage_completion_callback_t completion_callback,
     void *completion_priv);
+
+/* Validate the bounded Native marker/index recovery path after mount.  This
+ * is intentionally separate from init so a temporary media outage can be
+ * retried without rebuilding the Service or spawning another worker. */
+enum rdx_storage_result rdx_local_storage_service_recover(
+    struct rdx_local_storage_service *service);
 
 enum rdx_storage_result rdx_local_storage_service_start(
     struct rdx_local_storage_service *service,

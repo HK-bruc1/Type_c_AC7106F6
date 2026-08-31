@@ -71,6 +71,18 @@ static int rdx_runtime_check_storage_structure(void)
         rdx_local_storage.readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
     }
 #if RDX_STORAGE_BACKEND_NATIVE || RDX_STORAGE_BACKEND_LEGACY_UXFILE
+#if RDX_STORAGE_BACKEND_NATIVE
+    if (backend_ready) {
+        enum rdx_storage_result recovery_result;
+
+        recovery_result = rdx_local_storage_service_recover(
+            &rdx_local_storage);
+        if (recovery_result != RDX_STORAGE_RESULT_READY) {
+            printf("[RDX][CAP] local_storage=recovery_required result=%u\n",
+                   recovery_result);
+        }
+    }
+#endif
     rdx_boot_structural_caps |= RDX_CAP_LOCAL_STORAGE
 #if RDX_STORAGE_BACKEND_NATIVE
                                | RDX_CAP_STORAGE_BACKEND_NATIVE
