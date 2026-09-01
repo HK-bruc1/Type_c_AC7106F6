@@ -10,6 +10,9 @@
 #include "rdx/rdx_identity_service.h"
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23.h"
 #include "rdx/ports/rdx_transport_port.h"
+#if RDX_CFG_OTA_ENABLE
+#include "rdx/ports/rdx_firmware_update_port.h"
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx/ports/rdx_audio_capture_port.h"
 #include "rdx/rdx_record_engine.h"
@@ -97,6 +100,15 @@ int rdx_runtime_start(void)
         rdx_boot_structural_caps = RDX_CAP_NONE;
         return ret;
     }
+#endif
+#if RDX_CFG_OTA_ENABLE
+    ret = rdx_firmware_update_check_structure();
+    if (ret) {
+        rdx_device_state_exit();
+        rdx_boot_structural_caps = RDX_CAP_NONE;
+        return ret;
+    }
+    rdx_boot_structural_caps |= RDX_CAP_OTA_UPDATE;
 #endif
     ret = rdx_protocol_v23_init();
     if (ret) {

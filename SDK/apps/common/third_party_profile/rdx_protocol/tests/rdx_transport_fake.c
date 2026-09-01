@@ -36,6 +36,7 @@ uint32_t rdx_transport_fake_connect(void)
     }
     fake_transport.connected = 1;
     fake_transport.ccc_enabled = 0;
+    fake_transport.ota_ccc_enabled = 0;
     memset(&event, 0, sizeof(event));
     event.type = RDX_TRANSPORT_EVENT_CONNECTED;
     event.connection_generation = fake_transport.generation;
@@ -64,6 +65,33 @@ void rdx_transport_fake_receive(uint32_t generation,
 
     memset(&event, 0, sizeof(event));
     event.type = RDX_TRANSPORT_EVENT_RX;
+    event.connection_generation = generation;
+    event.data.rx.data = data;
+    event.data.rx.len = len;
+    rdx_transport_fake_emit_event(&event);
+}
+
+void rdx_transport_fake_set_ota_ccc(uint32_t generation, uint8_t enabled)
+{
+    struct rdx_transport_event event;
+
+    if (generation == fake_transport.generation) {
+        fake_transport.ota_ccc_enabled = !!enabled;
+    }
+    memset(&event, 0, sizeof(event));
+    event.type = RDX_TRANSPORT_EVENT_OTA_CCC_CHANGED;
+    event.connection_generation = generation;
+    event.data.ccc_enabled = enabled;
+    rdx_transport_fake_emit_event(&event);
+}
+
+void rdx_transport_fake_ota_write(uint32_t generation,
+                                  const uint8_t *data, uint16_t len)
+{
+    struct rdx_transport_event event;
+
+    memset(&event, 0, sizeof(event));
+    event.type = RDX_TRANSPORT_EVENT_OTA_RX;
     event.connection_generation = generation;
     event.data.rx.data = data;
     event.data.rx.len = len;
@@ -122,6 +150,28 @@ enum rdx_transport_result rdx_transport_send(
     return RDX_TRANSPORT_ACCEPTED;
 }
 
+enum rdx_transport_result rdx_transport_ota_send(
+    const uint8_t *data, uint16_t len,
+    uint32_t connection_generation)
+{
+    if (!data || !len || len > sizeof(fake_transport.ota_accepted_data)) {
+        return RDX_TRANSPORT_FATAL;
+    }
+    if (!fake_transport.initialized || !fake_transport.connected
+        || !fake_transport.ota_ccc_enabled
+        || connection_generation != fake_transport.generation) {
+        return RDX_TRANSPORT_UNAVAILABLE;
+    }
+    fake_transport.ota_send_attempt_count++;
+    if (fake_transport.send_result != RDX_TRANSPORT_ACCEPTED) {
+        return fake_transport.send_result;
+    }
+    memcpy(fake_transport.ota_accepted_data, data, len);
+    fake_transport.ota_accepted_len = len;
+    fake_transport.ota_accepted_count++;
+    return RDX_TRANSPORT_ACCEPTED;
+}
+
 int rdx_transport_request_can_send_now(
     uint32_t session_id, uint32_t capture_generation)
 {
@@ -175,5 +225,6 @@ void rdx_transport_disconnect(void)
     event.connection_generation = fake_transport.generation;
     fake_transport.connected = 0;
     fake_transport.ccc_enabled = 0;
+    fake_transport.ota_ccc_enabled = 0;
     rdx_transport_fake_emit_event(&event);
 }

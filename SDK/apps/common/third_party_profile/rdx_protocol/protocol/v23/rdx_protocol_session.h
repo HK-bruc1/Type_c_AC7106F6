@@ -10,6 +10,7 @@ struct rdx_protocol_session {
     uint8_t connected;
     uint8_t identity_read;
     uint8_t ccc_ready;
+    uint8_t ota_ccc_ready;
     uint8_t authenticated;
 };
 
@@ -21,6 +22,8 @@ enum rdx_protocol_session_event_result {
     RDX_PROTOCOL_SESSION_EVENT_CCC_CHANGED,
     RDX_PROTOCOL_SESSION_EVENT_RX,
     RDX_PROTOCOL_SESSION_EVENT_CAN_SEND_NOW,
+    RDX_PROTOCOL_SESSION_EVENT_OTA_CCC_CHANGED,
+    RDX_PROTOCOL_SESSION_EVENT_OTA_RX,
 };
 
 void rdx_protocol_session_reset(struct rdx_protocol_session *session);
@@ -32,6 +35,8 @@ int rdx_protocol_session_mark_authenticated(
 uint8_t rdx_protocol_session_can_send(
     const struct rdx_protocol_session *session);
 uint8_t rdx_protocol_session_is_ready(
+    const struct rdx_protocol_session *session);
+uint8_t rdx_protocol_session_is_ota_ready(
     const struct rdx_protocol_session *session);
 
 #endif

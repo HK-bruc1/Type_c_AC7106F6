@@ -11,6 +11,7 @@
 #include "rdx/rdx_wire_defs.h"
 #include "rdx/ports/rdx_system_action_port.h"
 #include "rdx/ports/rdx_transport_port.h"
+#include "rdx_firmware_update_fake.h"
 #include "rdx_transport_fake.h"
 
 static char fake_ble_name[RDX_BLE_NAME_MAX_LEN + 1] = "IKKO";
@@ -34,6 +35,32 @@ static void assert_last_tx(const char *expected)
 
     assert(fake->accepted_len == expected_len);
     assert(!memcmp(fake->accepted_data, expected, expected_len));
+}
+
+static void assert_last_ota_tx(const char *expected)
+{
+    const struct rdx_transport_fake_state *fake =
+        rdx_transport_fake_get_state();
+    size_t expected_len = strlen(expected);
+
+    assert(fake->ota_accepted_len == expected_len);
+    assert(!memcmp(fake->ota_accepted_data, expected, expected_len));
+}
+
+static uint32_t test_crc32(const uint8_t *data, uint16_t len)
+{
+    uint32_t crc = 0xffffffffUL;
+    uint16_t i;
+    uint8_t bit;
+
+    for (i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (bit = 0; bit < 8; bit++) {
+            crc = (crc >> 1)
+                ^ (0xedb88320UL & (0UL - (crc & 1UL)));
+        }
+    }
+    return ~crc;
 }
 
 int rdx_appkey_verify(const u8 *payload, u16 len,
@@ -317,10 +344,143 @@ static void test_protocol_lifecycle_rejects_delayed_events(void)
     rdx_transport_exit();
 }
 
+static void test_protocol_ota_sequence_and_session_boundary(void)
+{
+    static const uint8_t begin[] =
+        "*APP#upgrade#9.9.9#453#448#2#";
+    static const uint8_t oversized_begin[] =
+        "*APP#upgrade#9.9.9#449#449#1#";
+    uint8_t image[453];
+    uint8_t packet[512];
+    const struct rdx_transport_fake_state *transport;
+    const struct rdx_firmware_update_fake_state *update;
+    uint32_t generation;
+    unsigned int i;
+    int header_len;
+
+    for (i = 0; i < sizeof(image); i++) {
+        image[i] = (uint8_t)(i * 37U + 11U);
+    }
+    fake_timeout_reset();
+    rdx_firmware_update_fake_reset();
+    assert(rdx_protocol_v23_init() == 0);
+    assert(rdx_transport_init(rdx_protocol_v23_handle_transport_event,
+                              NULL) == 0);
+    transport = rdx_transport_fake_get_state();
+    update = rdx_firmware_update_fake_get_state();
+
+    generation = rdx_transport_fake_connect();
+    rdx_transport_fake_set_ota_ccc(generation, 1);
+    rdx_transport_fake_ota_write(generation,
+                                 begin, sizeof(begin) - 1);
+    assert(update->begin_count == 0);
+    assert(transport->ota_accepted_count == 0);
+
+    rdx_transport_fake_set_ccc(generation, 1);
+    {
+        uint8_t appkey_request[64];
+        uint16_t appkey_len;
+
+        make_appkey_request(appkey_request, &appkey_len);
+        rdx_transport_fake_receive(generation,
+                                   appkey_request, appkey_len);
+    }
+    rdx_transport_fake_ota_write(generation,
+                                 oversized_begin,
+                                 sizeof(oversized_begin) - 1);
+    assert(update->begin_count == 0);
+    assert_last_ota_tx("*DEV#otareq#4#0#");
+
+    rdx_transport_fake_ota_write(generation,
+                                 begin, sizeof(begin) - 1);
+    assert(update->begin_count == 1);
+    assert(update->image_size == sizeof(image));
+    assert(update->watchdog_ms == 10000);
+    assert_last_ota_tx("*DEV#otareq#0#1#");
+
+    header_len = snprintf((char *)packet, sizeof(packet),
+                          "*APP#ota#1#448#%u#",
+                          (unsigned int)test_crc32(image, 448));
+    assert(header_len > 0);
+    assert(header_len + 448 <= sizeof(packet));
+    memcpy(packet + header_len, image, 448);
+    rdx_transport_fake_ota_write(
+        generation, packet, header_len + 448);
+    assert(update->write_count == 0);
+    assert(update->finish_count == 0);
+    assert_last_ota_tx("*DEV#otareq#0#2#");
+
+    header_len = snprintf((char *)packet, sizeof(packet),
+                          "*APP#ota#2#5#%u#",
+                          (unsigned int)test_crc32(image + 448, 5));
+    assert(header_len > 0);
+    assert(header_len + 5 <= sizeof(packet));
+    memcpy(packet + header_len, image + 448, 5);
+    rdx_transport_fake_ota_write(generation, packet, header_len + 5);
+    assert(update->write_count == 1);
+    assert(update->finish_count == 1);
+    assert(update->data_len == sizeof(image));
+    assert(!memcmp(update->data, image, sizeof(image)));
+    assert(transport->ota_accepted_count == 3);
+
+    rdx_firmware_update_fake_emit(
+        RDX_FIRMWARE_UPDATE_EVENT_VERIFIED, 0);
+    assert_last_ota_tx("*DEV#otareq#0#0#");
+    assert(transport->ota_accepted_count == 4);
+    assert(update->reset_count == 0);
+
+    rdx_firmware_update_fake_emit(
+        RDX_FIRMWARE_UPDATE_EVENT_COMMITTED, 0);
+    assert_last_ota_tx("*DEV#otareq#0#0#");
+    assert(transport->ota_accepted_count == 5);
+    assert(update->reset_count == 1);
+
+    rdx_protocol_v23_exit();
+    rdx_transport_exit();
+
+    fake_timeout_reset();
+    rdx_firmware_update_fake_reset();
+    assert(rdx_protocol_v23_init() == 0);
+    assert(rdx_transport_init(rdx_protocol_v23_handle_transport_event,
+                              NULL) == 0);
+    generation = connect_and_authenticate();
+    rdx_transport_fake_set_ota_ccc(generation, 1);
+    rdx_transport_fake_ota_write(generation,
+                                 begin, sizeof(begin) - 1);
+    assert(rdx_firmware_update_fake_get_state()->active);
+    rdx_transport_fake_set_ota_ccc(generation, 0);
+    assert(rdx_firmware_update_fake_get_state()->abort_count == 1);
+    assert(!rdx_firmware_update_fake_get_state()->active);
+
+    rdx_transport_fake_set_ota_ccc(generation, 1);
+    rdx_transport_fake_ota_write(generation,
+                                 begin, sizeof(begin) - 1);
+    header_len = snprintf((char *)packet, sizeof(packet),
+                          "*APP#ota#1#447#%u#",
+                          (unsigned int)test_crc32(image, 447));
+    assert(header_len > 0);
+    memcpy(packet + header_len, image, 447);
+    rdx_transport_fake_ota_write(generation,
+                                 packet, header_len + 447);
+    assert_last_ota_tx("*DEV#otareq#2#0#");
+    assert(rdx_firmware_update_fake_get_state()->abort_count == 2);
+
+    rdx_transport_fake_ota_write(generation,
+                                 begin, sizeof(begin) - 1);
+    assert(rdx_firmware_update_fake_get_state()->active);
+    rdx_transport_disconnect();
+    assert(rdx_firmware_update_fake_get_state()->abort_count == 3);
+    assert(!rdx_firmware_update_fake_get_state()->active);
+
+    rdx_protocol_v23_exit();
+    rdx_transport_exit();
+}
+
 int main(void)
 {
     test_protocol_transport_sequence();
     test_protocol_lifecycle_rejects_delayed_events();
+    test_protocol_ota_sequence_and_session_boundary();
     puts("RDX V23 protocol host tests passed");
     return 0;
 }

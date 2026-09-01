@@ -44,13 +44,16 @@
      RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
      RDX_ABILITY_RECORD_MARK)
+
+/* OTA has no published Device Ability bit in the V23 wire contract. */
+#define RDX_COMPAT_OTA_ENABLE                  1
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
 #define RDX_COMPAT_PROTOCOL_VERSION            0x17
 #define RDX_COMPAT_FIXED_BATTERY_LEVEL         100
 #define RDX_BLE_ADV_INTERVAL                   160
 
-#define RDX_COMPAT_FIRMWARE_VERSION            "1.0.0"
-#define RDX_COMPAT_HARDWARE_VERSION            "0.0.1"
+#define RDX_COMPAT_FIRMWARE_VERSION            "0.0.1"
+#define RDX_COMPAT_HARDWARE_VERSION            "1.0.1"
 
 /*
  * librdxApp.a 中按 app_select 选择的具名 AppKey 字典。

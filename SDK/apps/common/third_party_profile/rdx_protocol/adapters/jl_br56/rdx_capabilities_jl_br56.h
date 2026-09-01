@@ -11,6 +11,7 @@
      RDX_CAP_FACTORY_IDENTITY                  | \
      RDX_CAP_RTC                               | \
      RDX_CAP_MEETING_CAPTURE                   | \
-     RDX_CAP_CALL_CAPTURE)
+     RDX_CAP_CALL_CAPTURE                      | \
+     RDX_CAP_OTA_UPDATE)
 
 #endif /* RDX_CAPABILITIES_JL_BR56_H */

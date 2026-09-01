@@ -1081,6 +1081,13 @@ c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_rtc_backup_repository_jl_br56.c
 #endif
 
+#if RDX_CFG_OTA_ENABLE
+c_SRC_FILES += \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_ota_service.c \
+    apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_firmware_update_jl_br56.c \
+    apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_ota.c
+#endif
+
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_audio_capture_jl_br56.c \

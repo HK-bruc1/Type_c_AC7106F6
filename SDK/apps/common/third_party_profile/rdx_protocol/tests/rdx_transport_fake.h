@@ -17,8 +17,13 @@ struct rdx_transport_fake_state {
     uint8_t initialized;
     uint8_t connected;
     uint8_t ccc_enabled;
+    uint8_t ota_ccc_enabled;
     uint8_t record_streaming;
     uint8_t accepted_data[RDX_TRANSPORT_FAKE_TX_BUFFER_SIZE];
+    unsigned int ota_send_attempt_count;
+    unsigned int ota_accepted_count;
+    uint16_t ota_accepted_len;
+    uint8_t ota_accepted_data[RDX_TRANSPORT_FAKE_TX_BUFFER_SIZE];
 };
 
 const struct rdx_transport_fake_state *rdx_transport_fake_get_state(void);
@@ -26,6 +31,9 @@ void rdx_transport_fake_set_send_result(enum rdx_transport_result result);
 int rdx_transport_fake_emit_event(const struct rdx_transport_event *event);
 uint32_t rdx_transport_fake_connect(void);
 void rdx_transport_fake_set_ccc(uint32_t generation, uint8_t enabled);
+void rdx_transport_fake_set_ota_ccc(uint32_t generation, uint8_t enabled);
+void rdx_transport_fake_ota_write(uint32_t generation,
+                                  const uint8_t *data, uint16_t len);
 void rdx_transport_fake_receive(uint32_t generation,
                                 const uint8_t *data, uint16_t len);
 void rdx_transport_fake_emit_simple(

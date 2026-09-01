@@ -16,6 +16,7 @@
 #define RDX_CAP_RTC                             (1UL << 4)
 #define RDX_CAP_MEETING_CAPTURE                 (1UL << 5)
 #define RDX_CAP_CALL_CAPTURE                    (1UL << 6)
+#define RDX_CAP_OTA_UPDATE                      (1UL << 7)
 
 #define RDX_REQUIRED_BASE_CAPS                  \
     (RDX_CAP_TRANSPORT                         | \

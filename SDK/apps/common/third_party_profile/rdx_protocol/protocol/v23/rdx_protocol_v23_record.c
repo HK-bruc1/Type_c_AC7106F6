@@ -8,6 +8,9 @@
 #include "rdx/rdx_record_engine.h"
 #include "rdx/rdx_online_record_service.h"
 #include "rdx/rdx_session_metadata_service.h"
+#if RDX_CFG_OTA_ENABLE
+#include "rdx/rdx_ota_service.h"
+#endif
 #include "rdx/ports/rdx_transport_port.h"
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23_internal.h"
 
@@ -563,6 +566,12 @@ static int rdx_v23_record_start_scene_request(
                                       "record", 0)) {
         return RDX_RECORD_RESULT_LINK_LOST;
     }
+#if RDX_CFG_OTA_ENABLE
+    if (rdx_ota_service_is_active()) {
+        printf("[RDX][ONLINE] start_rejected reason=ota_active\n");
+        return RDX_RECORD_RESULT_BUSY;
+    }
+#endif
 
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STREAMING) {
         rdx_v23_record_send_state(rdx_online_record.wire_state);

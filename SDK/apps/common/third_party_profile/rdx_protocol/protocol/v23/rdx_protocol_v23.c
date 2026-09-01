@@ -61,7 +61,7 @@ uint8_t rdx_protocol_v23_query_ready(
 
 int rdx_protocol_v23_init(void)
 {
-#if RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_OTA_ENABLE
     int ret;
 #endif
 
@@ -71,9 +71,20 @@ int rdx_protocol_v23_init(void)
 
     memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
     rdx_protocol_v23_management_init(&rdx_v23_context);
+#if RDX_CFG_OTA_ENABLE
+    ret = rdx_protocol_v23_ota_init(&rdx_v23_context);
+    if (ret) {
+        rdx_protocol_v23_management_exit();
+        memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
+        return ret;
+    }
+#endif
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     ret = rdx_protocol_v23_record_init(&rdx_v23_context);
     if (ret) {
+#if RDX_CFG_OTA_ENABLE
+        rdx_protocol_v23_ota_exit();
+#endif
         rdx_protocol_v23_management_exit();
         memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
         return ret;
@@ -92,14 +103,22 @@ void rdx_protocol_v23_exit(void)
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_exit();
 #endif
+#if RDX_CFG_OTA_ENABLE
+    rdx_protocol_v23_ota_exit();
+#endif
     rdx_protocol_v23_management_exit();
     memset(&rdx_v23_context, 0, sizeof(rdx_v23_context));
 }
 
-static void rdx_protocol_v23_handle_link_change(uint8_t connected)
+static void rdx_protocol_v23_handle_link_change(
+    uint8_t connected, uint32_t connection_generation)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_handle_link_change(connected);
+#endif
+#if RDX_CFG_OTA_ENABLE
+    rdx_protocol_v23_ota_handle_link_change(
+        connected, connection_generation);
 #endif
     rdx_protocol_v23_management_handle_link_change(connected);
     printf("[RDX][SESSION] link=%s app_ready=0\n",
@@ -110,6 +129,9 @@ static void rdx_protocol_v23_handle_ccc_change(void)
 {
 #if RDX_CFG_ONLINE_RECORDING_ENABLE
     rdx_protocol_v23_record_handle_ccc_change();
+#endif
+#if RDX_CFG_OTA_ENABLE
+    rdx_protocol_v23_ota_handle_session_change();
 #endif
     printf("[RDX][SESSION] ccc=%u app_ready=%u\n",
            rdx_v23_context.session.ccc_ready,
@@ -161,11 +183,26 @@ void rdx_protocol_v23_handle_transport_event(
         &rdx_v23_context.session, event);
     switch (result) {
     case RDX_PROTOCOL_SESSION_EVENT_CONNECTED:
-        rdx_protocol_v23_handle_link_change(1);
+        rdx_protocol_v23_handle_link_change(
+            1, event->connection_generation);
         break;
     case RDX_PROTOCOL_SESSION_EVENT_LINK_LOST:
-        rdx_protocol_v23_handle_link_change(0);
+        rdx_protocol_v23_handle_link_change(
+            0, event->connection_generation);
         break;
+#if RDX_CFG_OTA_ENABLE
+    case RDX_PROTOCOL_SESSION_EVENT_OTA_CCC_CHANGED:
+        rdx_protocol_v23_ota_handle_session_change();
+        printf("[RDX][OTA] ccc=%u app_ready=%u\n",
+               rdx_v23_context.session.ota_ccc_ready,
+               rdx_v23_context.session.authenticated);
+        break;
+    case RDX_PROTOCOL_SESSION_EVENT_OTA_RX:
+        rdx_protocol_v23_ota_handle_write(
+            event->data.rx.data, event->data.rx.len,
+            event->connection_generation);
+        break;
+#endif
     case RDX_PROTOCOL_SESSION_EVENT_IDENTITY_READ:
         printf("[RDX][GATT] identity=read\n");
         break;

@@ -50,6 +50,11 @@ enum rdx_protocol_session_event_result rdx_protocol_session_handle_event(
         return RDX_PROTOCOL_SESSION_EVENT_RX;
     case RDX_TRANSPORT_EVENT_CAN_SEND_NOW:
         return RDX_PROTOCOL_SESSION_EVENT_CAN_SEND_NOW;
+    case RDX_TRANSPORT_EVENT_OTA_CCC_CHANGED:
+        session->ota_ccc_ready = !!event->data.ccc_enabled;
+        return RDX_PROTOCOL_SESSION_EVENT_OTA_CCC_CHANGED;
+    case RDX_TRANSPORT_EVENT_OTA_RX:
+        return RDX_PROTOCOL_SESSION_EVENT_OTA_RX;
     default:
         return RDX_PROTOCOL_SESSION_EVENT_IGNORED;
     }
@@ -77,4 +82,11 @@ uint8_t rdx_protocol_session_is_ready(
 {
     return rdx_protocol_session_can_send(session)
         && session->authenticated;
+}
+
+uint8_t rdx_protocol_session_is_ota_ready(
+    const struct rdx_protocol_session *session)
+{
+    return session && session->connected && session->authenticated
+        && session->ota_ccc_ready;
 }
