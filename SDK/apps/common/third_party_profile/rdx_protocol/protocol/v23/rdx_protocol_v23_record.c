@@ -601,6 +601,9 @@ static void rdx_v23_record_engine_event(
         uint8_t notify = event->cause != RDX_RECORD_CAUSE_LINK_LOST
                     && event->cause != RDX_RECORD_CAUSE_CCC_OFF
                     && event->cause != RDX_RECORD_CAUSE_SHUTDOWN;
+        uint8_t artifact_committed =
+            event->result == RDX_RECORD_RESULT_OK
+            && event->termination_mode == RDX_RECORD_TERMINATION_NORMAL;
 
         rdx_transport_set_record_streaming(0);
         rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
@@ -611,16 +614,18 @@ static void rdx_v23_record_engine_event(
 #endif
         if (notify && rdx_protocol_session_can_send(
                 &rdx_v23_record_context->session)) {
-            rdx_v23_record_send_state(
-                0, event->result == RDX_RECORD_RESULT_OK
-                   && event->termination_mode == RDX_RECORD_TERMINATION_NORMAL);
+            /* Engine emits SESSION_STOPPED only after synchronous seal()
+             * has returned.  The long STOP form is therefore the final
+             * committed-Artifact acknowledgement; every failure/forced
+             * termination uses the identity-free form. */
+            rdx_v23_record_send_state(0, artifact_committed);
         }
         rdx_v23_record_clear_identity();
         printf("[RDX][ONLINE] stopped session=%u mode=%u cause=%u"
-               " result=%u notify=%u\n",
+               " result=%u notify=%u committed=%u\n",
                (unsigned int)event->session_id,
                event->termination_mode, event->cause,
-               event->result, notify);
+               event->result, notify, artifact_committed);
     }
 }
 
@@ -769,6 +774,9 @@ static void rdx_v23_record_stop(void)
         return;
     }
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
+        /* The first STOP owns the final completion.  Do not queue another
+         * request or emit a premature success acknowledgement. */
+        printf("[RDX][ONLINE] duplicate_stop state=pending\n");
         return;
     }
 
@@ -782,8 +790,18 @@ static void rdx_v23_record_stop(void)
     rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
+        /* Submission did not transfer ownership to Engine.  Restore the
+         * observable recording state so APP can retry STOP instead of
+         * leaving Protocol permanently stuck in STOP_PENDING. */
+        rdx_online_record.state = rdx_online_record.wire_state == 2
+                                  ? RDX_ONLINE_RECORD_PAUSED
+                                  : RDX_ONLINE_RECORD_STREAMING;
         printf("[RDX][ONLINE] stop_submit_failed request=%u ret=%d\n",
                (unsigned int)request.request_id, ret);
+        if (rdx_protocol_session_can_send(
+                &rdx_v23_record_context->session)) {
+            rdx_v23_record_send_state(rdx_online_record.wire_state, 1);
+        }
     }
 }
 

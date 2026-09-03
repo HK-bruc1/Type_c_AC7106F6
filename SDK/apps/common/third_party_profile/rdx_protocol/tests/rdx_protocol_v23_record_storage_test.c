@@ -301,13 +301,46 @@ int main(void)
     assert(!strcmp((char *)last_wire,
                    "*DEV#record#1#0#1#0#1#0#23#42b595.raw#"));
 
+    /* A failed STOP submit must restore STREAMING and retain the persistent
+     * identity, otherwise all later STOP/START commands remain stuck behind
+     * STOP_PENDING. */
+    submit_result = RDX_RECORD_RESULT_CONTROL_QUEUE_FULL;
+    sends_before = send_calls;
     assert(rdx_protocol_v23_record_handle_command(
                stop, sizeof(stop) - 1) == 1);
     assert(submit_calls == 5);
     assert(last_request.type == RDX_RECORD_REQUEST_STOP);
+    assert(send_calls == sends_before + 1);
+    assert(!strcmp((char *)last_wire,
+                   "*DEV#record#1#0#1#0#1#0#23#42b595.raw#"));
+
+    /* The retry is accepted.  A duplicate while its final completion is
+     * pending must neither resubmit nor emit a premature STOP ACK. */
+    submit_result = RDX_RECORD_RESULT_OK;
+    sends_before = send_calls;
+    assert(rdx_protocol_v23_record_handle_command(
+               stop, sizeof(stop) - 1) == 1);
+    assert(submit_calls == 6);
+    assert(last_request.type == RDX_RECORD_REQUEST_STOP);
+    assert(send_calls == sends_before);
+    assert(rdx_protocol_v23_record_handle_command(
+               stop, sizeof(stop) - 1) == 1);
+    assert(submit_calls == 6);
+    assert(send_calls == sends_before);
+
     emit_stopped();
     assert(!strcmp((char *)last_wire,
                    "*DEV#record#0#0#1#0#1#0#23#42b595.raw#"));
+
+    /* Once complete, another STOP is an idempotent state query and does not
+     * expose a stale file identity. */
+    sends_before = send_calls;
+    assert(rdx_protocol_v23_record_handle_command(
+               stop, sizeof(stop) - 1) == 1);
+    assert(submit_calls == 6);
+    assert(send_calls == sends_before + 1);
+    assert(!strcmp((char *)last_wire,
+                   "*DEV#record#0#0#1#0#1#0#"));
 
     rdx_protocol_v23_record_exit();
     assert(rdx_protocol_v23_record_bind_coordinator(NULL) == 0);

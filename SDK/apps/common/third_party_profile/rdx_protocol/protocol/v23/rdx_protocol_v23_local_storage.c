@@ -343,6 +343,10 @@ static void rdx_local_wire_submit_auto_delete(void)
         rdx_local_wire_operation_completion, &rdx_local_wire);
     if (result != RDX_STORAGE_RESULT_READY) {
         rdx_local_wire.operation_type = RDX_LOCAL_STORAGE_OPERATION_NONE;
+        rdx_local_wire.file_auto_delete = 0;
+        printf("[RDX][LOCAL_WIRE] auto_delete_submit_failed result=%u"
+               " sn=%u\n", result,
+               (unsigned int)request.data.delete_file.serial_number);
     }
 }
 
@@ -445,6 +449,11 @@ static void rdx_local_wire_operation_completion(
             && completion->count <= RDX_LOCAL_WIRE_FILE_MAX
             && !rdx_local_wire_build_list(completion->count)
                 ? 0 : 1;
+        printf("[RDX][LOCAL_WIRE] list result=%u count=%u bytes=%u"
+               " packs=%u\n", wire->getlist_result,
+               (unsigned int)completion->count,
+               (unsigned int)wire->list_length,
+               (unsigned int)wire->list_pack_count);
         rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_GETLIST_ACK);
         break;
     case RDX_LOCAL_STORAGE_OPERATION_CAPACITY:
@@ -455,6 +464,10 @@ static void rdx_local_wire_operation_completion(
             wire->total_bytes = 0;
             wire->free_bytes = 0;
         }
+        printf("[RDX][LOCAL_WIRE] capacity result=%u free_kib=%u"
+               " total_kib=%u\n", completion->result,
+               (unsigned int)rdx_local_wire_to_kib(wire->free_bytes),
+               (unsigned int)rdx_local_wire_to_kib(wire->total_bytes));
         rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_CAPACITY);
         break;
     case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
@@ -477,15 +490,31 @@ static void rdx_local_wire_operation_completion(
             || wire->file_request_pack > wire->file_total_packs) {
             break;
         }
+        if (wire->file_request_pack == 1
+            || wire->file_request_pack == wire->file_total_packs
+            || !(wire->file_request_pack % 128)) {
+            printf("[RDX][LOCAL_WIRE] upload sn=%u pack=%u/%u"
+                   " offset_hi=%u offset_lo=%u len=%u auto_delete=%u\n",
+                   (unsigned int)wire->upload_file.file_id.serial_number,
+                   (unsigned int)wire->file_request_pack,
+                   (unsigned int)wire->file_total_packs,
+                   (unsigned int)(wire->file_base_offset >> 32),
+                   (unsigned int)wire->file_base_offset,
+                   (unsigned int)wire->file_chunk_length,
+                   wire->file_auto_delete);
+        }
         rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FILE_CHUNK);
         break;
     case RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY:
-        if (wire->file_auto_delete
-            && completion->file.file_id.serial_number
-               == wire->upload_file.file_id.serial_number) {
+        if (wire->file_auto_delete) {
             if (completion->result == RDX_STORAGE_RESULT_READY) {
                 wire->list_valid = 0;
             }
+            printf("[RDX][LOCAL_WIRE] auto_delete result=%u sn=%u"
+                   " filename=%s\n", completion->result,
+                   (unsigned int)wire->upload_file.file_id.serial_number,
+                   rdx_local_wire_basename(
+                       wire->upload_file.file_id.name));
             wire->file_auto_delete = 0;
             break;
         }
@@ -494,6 +523,10 @@ static void rdx_local_wire_operation_completion(
         if (!wire->delete_result) {
             wire->list_valid = 0;
         }
+        printf("[RDX][LOCAL_WIRE] delete result=%u sn=%u filename=%s\n",
+               wire->delete_result,
+               (unsigned int)wire->delete_serial_number,
+               wire->delete_filename);
         rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_DELETE_RESULT);
         break;
     case RDX_LOCAL_STORAGE_OPERATION_FORMAT:
@@ -503,6 +536,10 @@ static void rdx_local_wire_operation_completion(
         wire->total_bytes = completion->total_bytes;
         wire->free_bytes = completion->free_bytes;
         wire->list_valid = 0;
+        printf("[RDX][LOCAL_WIRE] format result=%u free_kib=%u"
+               " total_kib=%u\n", wire->format_result,
+               (unsigned int)rdx_local_wire_to_kib(wire->free_bytes),
+               (unsigned int)rdx_local_wire_to_kib(wire->total_bytes));
         if (wire->tx_stage == RDX_LOCAL_WIRE_TX_FORMAT_WAIT) {
             wire->tx_stage = RDX_LOCAL_WIRE_TX_FORMAT_RESULT;
         }

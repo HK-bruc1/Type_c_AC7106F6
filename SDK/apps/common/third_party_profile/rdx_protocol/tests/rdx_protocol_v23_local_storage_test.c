@@ -12,6 +12,7 @@
 #define TEST_TX_MAX             16
 #define TEST_TX_PACKET_MAX      192
 #define TEST_FILE_SIZE          83
+#define TEST_FILE_CAPACITY      245
 
 struct test_tx_packet {
     uint16_t len;
@@ -20,7 +21,7 @@ struct test_tx_packet {
 
 struct test_state {
     struct rdx_storage_file_info file;
-    uint8_t file_data[TEST_FILE_SIZE];
+    uint8_t file_data[TEST_FILE_CAPACITY];
     struct test_tx_packet packets[TEST_TX_MAX];
     enum rdx_transport_result send_result;
     uint32_t packet_count;
@@ -88,9 +89,10 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
         assert(test_state.file_present);
         assert(request->data.read.serial_number
                == test_state.file.file_id.serial_number);
-        assert(request->data.read.offset < TEST_FILE_SIZE);
+        assert(request->data.read.offset < test_state.file.file_size);
         completion.file = test_state.file;
-        available = TEST_FILE_SIZE - (uint32_t)request->data.read.offset;
+        available = (uint32_t)test_state.file.file_size
+                    - (uint32_t)request->data.read.offset;
         completion.read_length = request->data.read.length;
         if (completion.read_length > available) {
             completion.read_length = available;
@@ -294,17 +296,84 @@ static void test_capacity_and_file_golden_trace(void)
     assert_binary_packet(0, header, test_state.file_data, 80);
 }
 
+static void test_long_file_offset_and_auto_delete(void)
+{
+    static const uint8_t last_short_pack[] =
+        "*APP#opusfile#1#7#2#0#";
+    static const uint8_t offset_middle_pack[] =
+        "*APP#opusfile#0#7#2#0#80#";
+    static const uint8_t offset_last_auto_delete[] =
+        "*APP#opusfile#2#7#3#1#80#";
+    char header[TEST_TX_PACKET_MAX + 1];
+    uint32_t crc;
+    uint32_t delete_before = test_state.delete_count;
+    uint32_t owner;
+    uint32_t token;
+
+    /* Freeze the short final-chunk contract first: an 83-byte file is two
+     * 80-byte packs and the final packet carries only the remaining bytes. */
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               last_short_pack, sizeof(last_short_pack) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    crc = test_crc32(test_state.file_data + 80, 3);
+    snprintf(header, sizeof(header), "*DEV#opusfile#7#2#2#3#%lu#",
+             (unsigned long)crc);
+    assert_binary_packet(0, header, test_state.file_data + 80, 3);
+
+    /* A resumed transfer computes total packs relative to the supplied base
+     * offset while still reading the requested absolute file position. */
+    test_state.file.file_size = TEST_FILE_CAPACITY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               offset_middle_pack, sizeof(offset_middle_pack) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    crc = test_crc32(test_state.file_data + 160, 80);
+    snprintf(header, sizeof(header), "*DEV#opusfile#7#3#2#80#%lu#",
+             (unsigned long)crc);
+    assert_binary_packet(0, header, test_state.file_data + 160, 80);
+
+    /* Auto-delete is submitted only after the final chunk has been accepted
+     * by Transport, so a retryable TX cannot erase an unread recording. */
+    reset_packets();
+    test_state.send_result = RDX_TRANSPORT_RETRYABLE;
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               offset_last_auto_delete,
+               sizeof(offset_last_auto_delete) - 1) == 1);
+    assert(test_state.packet_count == 0);
+    assert(test_state.send_attempt_count == 1);
+    assert(test_state.can_send_request_count == 1);
+    assert(test_state.delete_count == delete_before);
+    assert(test_state.file_present);
+    owner = test_state.can_send_owner;
+    token = test_state.can_send_token;
+
+    test_state.send_result = RDX_TRANSPORT_ACCEPTED;
+    rdx_protocol_v23_local_storage_handle_can_send(owner, token);
+    assert(test_state.packet_count == 1);
+    crc = test_crc32(test_state.file_data + 240, 5);
+    snprintf(header, sizeof(header), "*DEV#opusfile#7#3#3#5#%lu#",
+             (unsigned long)crc);
+    assert_binary_packet(0, header, test_state.file_data + 240, 5);
+    assert(test_state.delete_count == delete_before + 1);
+    assert(!test_state.file_present);
+
+    test_state.file.file_size = TEST_FILE_SIZE;
+    test_state.file_present = 1;
+}
+
 static void test_delete_and_format_golden_trace(void)
 {
     static const uint8_t delete_file[] = "*APP#delfile#7#abc.raw#";
     static const uint8_t format[] = "*APP#format#";
+    uint32_t delete_before = test_state.delete_count;
 
     reset_packets();
     assert(rdx_protocol_v23_local_storage_handle_command(
                delete_file, sizeof(delete_file) - 1) == 1);
     assert(test_state.packet_count == 1);
     assert_text_packet(0, "*DEV#delfile#0#7#abc.raw#");
-    assert(test_state.delete_count == 1);
+    assert(test_state.delete_count == delete_before + 1);
     assert(!test_state.file_present);
 
     test_state.file_present = 1;
@@ -384,7 +453,7 @@ int main(void)
     strcpy(test_state.file.file_id.name, "abc.raw");
     test_state.file.file_size = TEST_FILE_SIZE;
     test_state.file.audio_crc = 891568578UL;
-    for (i = 0; i < TEST_FILE_SIZE; i++) {
+    for (i = 0; i < TEST_FILE_CAPACITY; i++) {
         test_state.file_data[i] = (uint8_t)(i + 1);
     }
 
@@ -400,6 +469,7 @@ int main(void)
 
     test_list_golden_trace();
     test_capacity_and_file_golden_trace();
+    test_long_file_offset_and_auto_delete();
     test_delete_and_format_golden_trace();
     test_malformed_and_disconnect();
     test_retryable_can_send();
