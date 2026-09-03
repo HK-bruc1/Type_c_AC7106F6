@@ -21,9 +21,9 @@ const struct rdx_record_destination_ops *
 rdx_protocol_v23_record_online_destination_ops(void);
 int rdx_protocol_v23_record_bind_coordinator(
     struct rdx_record_coordinator *coordinator);
-/* Composition Root binding for the stage-C APP file Wire.  Development
- * builds can bind the Service while the advertised Local Storage Ability
- * remains off. */
+/* Composition Root binding for the Local Storage APP Wire.  Formal Stage-D
+ * builds derive this from the advertised Ability; historical development
+ * builds may still bind it through the explicit test gates. */
 int rdx_protocol_v23_local_storage_bind_service(
     struct rdx_local_storage_service *service);
 

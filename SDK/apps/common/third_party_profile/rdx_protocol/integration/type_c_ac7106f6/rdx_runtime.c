@@ -20,8 +20,7 @@
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
 #include "rdx/rdx_local_storage_service.h"
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
-    RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
 #include "rdx/rdx_record_coordinator.h"
 #endif
 #if RDX_STORAGE_BACKEND_NATIVE
@@ -38,8 +37,7 @@ static u32 rdx_boot_structural_caps;
 
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
 static struct rdx_local_storage_service rdx_local_storage;
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
-    RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
 static struct rdx_record_coordinator rdx_record_coordinator;
 #endif
 
@@ -143,8 +141,7 @@ static int rdx_runtime_check_storage_structure(void)
         }
     }
 #endif
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
-    RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     if (rdx_record_coordinator_init(
             &rdx_record_coordinator, &rdx_local_storage,
             rdx_protocol_v23_record_online_destination_ops(), NULL)
@@ -264,8 +261,7 @@ int rdx_runtime_start(void)
 #endif
     ret = rdx_protocol_v23_init();
     if (ret) {
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
-    RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
         rdx_protocol_v23_record_bind_coordinator(NULL);
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
@@ -353,8 +349,7 @@ void rdx_runtime_stop(void)
 #if RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
     rdx_protocol_v23_local_storage_bind_service(NULL);
 #endif
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE && \
-    RDX_CFG_ONLINE_RECORDING_ENABLE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     rdx_protocol_v23_record_bind_coordinator(NULL);
 #endif
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE

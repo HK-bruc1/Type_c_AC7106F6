@@ -38,9 +38,10 @@
 #define RDX_CFG_RECORD_MARK_ENABLE             \
     ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_RECORD_MARK) != 0)
 
-/* Local storage is intentionally disabled in the current Product Profile.
- * Build-only work may opt in explicitly, but a backend must then be selected
- * by that profile; the shared integration header never picks one silently. */
+/* Local storage follows the Product Profile.  The Type-C Product Profile now
+ * enables the formal Stage-D ability and selects Native; other products may
+ * still opt in through their own profile, but this shared header never picks
+ * a backend silently. */
 #define RDX_CFG_LOCAL_STORAGE_ENABLE            \
     ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_LOCAL_STORAGE) != 0)
 #ifndef RDX_LOCAL_STORAGE_DEV_TEST_ENABLE
@@ -66,11 +67,10 @@
 #error "RDX Local Storage Wire requires the Local Storage Service"
 #endif
 
-/* The production compatibility profile remains the only release Ability.
- * A Stage-C Wire image must nevertheless expose the Local entry to the real
- * APP; otherwise its UI cannot issue mem/list/upload/delete/format commands.
- * Reuse the explicit non-release Wire gate so the temporary advertised bit
- * disappears automatically when the development flags return to zero. */
+/* The Product Compatibility Profile is the release Ability.  During the
+ * historical Stage-C bring-up a Wire dev image temporarily overlaid the Local
+ * bit so the real APP could exercise the entry.  Stage D now carries the bit
+ * in the profile itself; retain the overlay only for legacy dev test images. */
 #if RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE
 #define RDX_CFG_ADVERTISED_DEVICE_ABILITY       \
     (RDX_COMPAT_DEVICE_ABILITY | RDX_ABILITY_LOCAL_STORAGE)
@@ -93,6 +93,15 @@
 #ifndef RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED
 #define RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED   0
 #endif
+
+/* Local recording is the composition of the existing Online OPTIONAL
+ * destination and the Native Local REQUIRED destination.  Derive this from
+ * release/build capabilities so Stage-D production builds do not depend on
+ * the historical Stage-C development gate. */
+#define RDX_CFG_LOCAL_RECORDING_ENABLE          \
+    (RDX_CFG_ONLINE_RECORDING_ENABLE &&         \
+     RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE &&      \
+     RDX_STORAGE_BACKEND_NATIVE)
 
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
     ((RDX_STORAGE_BACKEND_NATIVE + RDX_STORAGE_BACKEND_LEGACY_UXFILE) != 1)
@@ -306,6 +315,7 @@
 #define RDX_CFG_LOCAL_STORAGE_ENABLE            0
 #define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      0
 #define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       0
+#define RDX_CFG_LOCAL_RECORDING_ENABLE          0
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
 #define RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE  0
 #define RDX_STORAGE_BACKEND_NATIVE              0

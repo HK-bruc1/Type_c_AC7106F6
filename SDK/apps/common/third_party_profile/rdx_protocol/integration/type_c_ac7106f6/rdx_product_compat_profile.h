@@ -35,15 +35,21 @@
  * 产品功能只允许通过 Device Ability 统一配置。
  * rdx_integration_config.h 会根据该掩码派生所有内部模块的编译门控；
  * 不要再为单项 RDX 能力增加平行的产品功能开关。
- * 当前 CALL_RECORDING 位仅用于目标 APP 联调；APP 解码、异常矩阵和长稳
- * 验收通过前不得把此掩码视为量产发布结论。
+ * 阶段 D 已按产品决策正式开放 Local Storage 广播。部分文件业务、异常
+ * 矩阵和长稳仍在后续迭代中，未完成能力由运行时返回稳定的 BUSY /
+ * NOT_READY / UNSUPPORTED 等结果，不得伪造成功。
  */
 #define RDX_COMPAT_DEVICE_ABILITY              \
     (RDX_ABILITY_RTC                          | \
      RDX_ABILITY_CONFERENCE_RECORDING         | \
      RDX_ABILITY_CALL_RECORDING               | \
      RDX_ABILITY_RECORD_PAUSE_RESUME           | \
-     RDX_ABILITY_RECORD_MARK)
+     RDX_ABILITY_RECORD_MARK                   | \
+     RDX_ABILITY_LOCAL_STORAGE)
+
+/* 阶段 D 首发采用已验证的 JL 原生 sd0 + FAT 后端；Legacy UXFILE 仍按
+ * 后续兼容性评审和业务迁移单独接入，不与 Native 同时编译。 */
+#define RDX_STORAGE_BACKEND_NATIVE             1
 #define RDX_COMPAT_INCLUDE_PROTOCOL_VERSION    1
 #define RDX_COMPAT_PROTOCOL_VERSION            0x17
 #define RDX_COMPAT_FIXED_BATTERY_LEVEL         100

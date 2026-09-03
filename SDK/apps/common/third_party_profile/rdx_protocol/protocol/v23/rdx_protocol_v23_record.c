@@ -8,7 +8,7 @@
 #include "rdx/rdx_record_engine.h"
 #include "rdx/rdx_session_metadata_service.h"
 #include "rdx/ports/rdx_transport_port.h"
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
 #include "rdx/rdx_record_coordinator.h"
 #endif
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23_internal.h"
@@ -24,7 +24,7 @@ static const uint8_t rdx_cmd_recmark[] = "*APP#recmark#";
 #endif
 
 static struct rdx_protocol_v23_context *rdx_v23_record_context;
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
 static struct rdx_record_coordinator *rdx_v23_record_coordinator;
 #endif
 typedef enum {
@@ -71,7 +71,7 @@ static rdx_online_record_runtime_t rdx_online_record;
 
 static void rdx_v23_record_load_identity(void)
 {
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     rdx_online_record.serial_number = 0;
     rdx_online_record.filename[0] = 0;
     if (rdx_v23_record_coordinator) {
@@ -458,7 +458,7 @@ rdx_protocol_v23_record_online_destination_ops(void)
 int rdx_protocol_v23_record_bind_coordinator(
     struct rdx_record_coordinator *coordinator)
 {
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     rdx_v23_record_coordinator = coordinator;
     return 0;
 #else
@@ -488,7 +488,7 @@ static void rdx_v23_record_engine_event(
                 || event->cause == RDX_RECORD_CAUSE_CCC_OFF
                 || event->cause == RDX_RECORD_CAUSE_SHUTDOWN;
 
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
             if (rdx_v23_record_coordinator) {
                 (void)rdx_record_coordinator_cancel_start(
                     rdx_v23_record_coordinator,
@@ -660,7 +660,7 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
     request.scene = scene;
     request.format_id = rdx_v23_record_format_for_scene(scene);
     rdx_online_record.scene = scene;
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     request.prepare_start = rdx_record_coordinator_prepare_engine_start;
     request.prepare_priv = rdx_v23_record_coordinator;
 #else
@@ -887,7 +887,7 @@ int rdx_protocol_v23_record_init(
     if (!context) {
         return -1;
     }
-#if RDX_LOCAL_STORAGE_DEV_TEST_ENABLE && RDX_STORAGE_BACKEND_NATIVE
+#if RDX_CFG_LOCAL_RECORDING_ENABLE
     if (!rdx_v23_record_coordinator) {
         return -1;
     }
