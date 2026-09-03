@@ -301,7 +301,7 @@
 #define TCFG_UPDATE_ENABLE                        1                // 升级选择
 #if TCFG_UPDATE_ENABLE
 #define TCFG_UPDATE_STORAGE_DEV_EN                0                // 设备升级
-#define TCFG_UPDATE_BLE_TEST_EN                   1                // ble蓝牙升级
+#define TCFG_UPDATE_BLE_TEST_EN                   0                // ble蓝牙升级
 #define TCFG_UPDATE_BT_LMP_EN                     0                // edr蓝牙升级
 #define TCFG_TEST_BOX_ENABLE                      0                // 测试盒串口升级
 #define TCFG_UPDATE_UART_IO_EN                    0                // 普通io串口升级

@@ -157,17 +157,27 @@ static void rdx_ota_handle_firmware_event(
                (unsigned int)rdx_ota.packet_count);
         rdx_ota_emit(RDX_OTA_WIRE_STATE_OK, 0);
         break;
-    case RDX_FIRMWARE_UPDATE_EVENT_COMMITTED:
+    case RDX_FIRMWARE_UPDATE_EVENT_COMMITTED: {
+        int reset_result;
+
         rdx_firmware_update_watchdog_cancel();
         rdx_ota.state = RDX_OTA_RUNTIME_COMMITTED;
         printf("[RDX][OTA] committed image_size=%u packets=%u\n",
                (unsigned int)rdx_ota.image_size,
                (unsigned int)rdx_ota.packet_count);
+        /* Arm reset before the final notify. COMMITTED is terminal: a link
+         * loss or CCC change must not cancel a boot-info commit. */
+        reset_result = rdx_firmware_update_schedule_reset(
+            RDX_OTA_RESET_DELAY_MS);
         rdx_ota_emit(RDX_OTA_WIRE_STATE_OK, 0);
-        if (rdx_firmware_update_schedule_reset(RDX_OTA_RESET_DELAY_MS)) {
+        if (reset_result) {
             printf("[RDX][OTA] reset_schedule_failed\n");
+            /* Boot Info is already committed; never leave the device in a
+             * reset-less committed state when the timer pool is exhausted. */
+            rdx_firmware_update_reset_now();
         }
         break;
+    }
     case RDX_FIRMWARE_UPDATE_EVENT_WRITE_FAILED:
         rdx_ota_fail(RDX_OTA_WIRE_STATE_OTHER,
                      RDX_OTA_SERVICE_ERR_PLATFORM, "flash_write");

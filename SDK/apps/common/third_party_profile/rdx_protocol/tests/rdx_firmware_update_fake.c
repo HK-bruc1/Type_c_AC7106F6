@@ -126,3 +126,8 @@ int rdx_firmware_update_schedule_reset(uint32_t delay_ms)
     fake_update.reset_count++;
     return 0;
 }
+
+void rdx_firmware_update_reset_now(void)
+{
+    fake_update.reset_count++;
+}

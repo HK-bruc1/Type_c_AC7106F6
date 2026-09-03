@@ -167,6 +167,12 @@
 #if RDX_CFG_OTA_ENABLE && !CONFIG_DOUBLE_BANK_ENABLE
 #error "RDX OTA requires the dual-bank flash layout"
 #endif
+#if RDX_CFG_OTA_ENABLE && \
+    (TCFG_UPDATE_BLE_TEST_EN || TCFG_UPDATE_BT_LMP_EN || \
+     TCFG_TEST_BOX_ENABLE || TCFG_UPDATE_STORAGE_DEV_EN || \
+     TCFG_UPDATE_UART_IO_EN)
+#error "RDX OTA owns firmware update; disable JL native OTA entry points"
+#endif
 
 /* RDX RTC calendar policy; products may override these before this include. */
 #ifndef RDX_RTC_VALID_YEAR_MIN

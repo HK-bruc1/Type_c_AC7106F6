@@ -29,6 +29,8 @@ struct rdx_firmware_update_runtime {
     uint8_t active;
     uint8_t finishing;
     uint8_t verifying;
+    uint8_t committing;
+    uint8_t callback_quarantine;
     uint16_t outstanding_writes;
     uint16_t watchdog_id;
     rdx_firmware_update_event_callback_t event_callback;
@@ -78,7 +80,9 @@ static void rdx_firmware_update_fail(
         rdx_firmware_update.active = 0;
         rdx_firmware_update.finishing = 0;
         rdx_firmware_update.verifying = 0;
-        rdx_firmware_update.outstanding_writes = 0;
+        rdx_firmware_update.committing = 0;
+        rdx_firmware_update.callback_quarantine =
+            rdx_firmware_update.outstanding_writes != 0;
         notify = 1;
     }
     spin_unlock(&rdx_firmware_update.lock);
@@ -107,6 +111,11 @@ static int rdx_firmware_update_commit_callback(int err)
         return 0;
     }
     rdx_firmware_update.active = 0;
+    rdx_firmware_update.finishing = 0;
+    rdx_firmware_update.verifying = 0;
+    rdx_firmware_update.committing = 0;
+    rdx_firmware_update.callback_quarantine =
+        rdx_firmware_update.outstanding_writes != 0;
     spin_unlock(&rdx_firmware_update.lock);
     norflash_set_write_protect_en();
     set_ota_status(0);
@@ -118,27 +127,33 @@ static int rdx_firmware_update_verify_callback(int verify_result)
 {
     uint32_t ret;
     uint8_t active;
+    uint8_t start_commit = 0;
 
     printf("[RDX][OTA][PLATFORM] verify=done result=%d\n",
            verify_result);
+    spin_lock(&rdx_firmware_update.lock);
+    active = rdx_firmware_update.active
+        && rdx_firmware_update.verifying
+        && !rdx_firmware_update.committing;
+    spin_unlock(&rdx_firmware_update.lock);
+    if (!active) {
+        return 0;
+    }
     if (verify_result) {
         rdx_firmware_update_fail(
             RDX_FIRMWARE_UPDATE_EVENT_VERIFY_FAILED, verify_result);
         return 0;
     }
-    spin_lock(&rdx_firmware_update.lock);
-    active = rdx_firmware_update.active
-        && rdx_firmware_update.verifying;
-    spin_unlock(&rdx_firmware_update.lock);
-    if (!active) {
-        return 0;
-    }
     rdx_firmware_update_emit(RDX_FIRMWARE_UPDATE_EVENT_VERIFIED, 0);
     spin_lock(&rdx_firmware_update.lock);
-    active = rdx_firmware_update.active
-        && rdx_firmware_update.verifying;
+    if (rdx_firmware_update.active
+        && rdx_firmware_update.verifying
+        && !rdx_firmware_update.committing) {
+        rdx_firmware_update.committing = 1;
+        start_commit = 1;
+    }
     spin_unlock(&rdx_firmware_update.lock);
-    if (!active) {
+    if (!start_commit) {
         return 0;
     }
     printf("[RDX][OTA][PLATFORM] commit=start mode=raw_bank\n");
@@ -185,18 +200,28 @@ static void rdx_firmware_update_try_verify(void)
 static int rdx_firmware_update_write_callback(void *priv)
 {
     int err = (int)(uintptr_t)priv;
+    uint8_t active;
 
     spin_lock(&rdx_firmware_update.lock);
     if (rdx_firmware_update.outstanding_writes) {
         rdx_firmware_update.outstanding_writes--;
     }
+    if (!rdx_firmware_update.active
+        && !rdx_firmware_update.outstanding_writes) {
+        rdx_firmware_update.callback_quarantine = 0;
+    }
+    active = rdx_firmware_update.active;
     spin_unlock(&rdx_firmware_update.lock);
     if (err) {
-        rdx_firmware_update_fail(
-            RDX_FIRMWARE_UPDATE_EVENT_WRITE_FAILED, err);
+        if (active) {
+            rdx_firmware_update_fail(
+                RDX_FIRMWARE_UPDATE_EVENT_WRITE_FAILED, err);
+        }
         return 0;
     }
-    rdx_firmware_update_try_verify();
+    if (active) {
+        rdx_firmware_update_try_verify();
+    }
     return 0;
 }
 
@@ -235,9 +260,20 @@ enum rdx_firmware_update_result rdx_firmware_update_begin(
 {
     uint32_t ret;
 
+    uint8_t callback_pending;
+
     if (!image_size || !event_callback
         || rdx_firmware_update_check_structure()) {
         return RDX_FIRMWARE_UPDATE_ERR_ARGUMENT;
+    }
+
+    spin_lock(&rdx_firmware_update.lock);
+    callback_pending = rdx_firmware_update.callback_quarantine
+        || rdx_firmware_update.outstanding_writes;
+    spin_unlock(&rdx_firmware_update.lock);
+    if (callback_pending) {
+        printf("[RDX][OTA][PLATFORM] begin_blocked pending_write_callbacks\n");
+        return RDX_FIRMWARE_UPDATE_ERR_INIT;
     }
 
     rdx_firmware_update_abort();
@@ -258,6 +294,8 @@ enum rdx_firmware_update_result rdx_firmware_update_begin(
     rdx_firmware_update.active = 1;
     rdx_firmware_update.finishing = 0;
     rdx_firmware_update.verifying = 0;
+    rdx_firmware_update.committing = 0;
+    rdx_firmware_update.callback_quarantine = 0;
     rdx_firmware_update.outstanding_writes = 0;
     rdx_firmware_update.event_callback = event_callback;
     rdx_firmware_update.event_context = event_context;
@@ -313,6 +351,8 @@ enum rdx_firmware_update_result rdx_firmware_update_finish(void)
 void rdx_firmware_update_abort(void)
 {
     uint8_t was_active;
+    uint8_t callbacks_pending;
+    uint16_t pending_writes;
 
     rdx_firmware_update_init_once();
     rdx_firmware_update_watchdog_cancel();
@@ -321,10 +361,17 @@ void rdx_firmware_update_abort(void)
     rdx_firmware_update.active = 0;
     rdx_firmware_update.finishing = 0;
     rdx_firmware_update.verifying = 0;
-    rdx_firmware_update.outstanding_writes = 0;
+    rdx_firmware_update.committing = 0;
+    pending_writes = rdx_firmware_update.outstanding_writes;
+    callbacks_pending = pending_writes != 0;
+    rdx_firmware_update.callback_quarantine = callbacks_pending;
     rdx_firmware_update.event_callback = NULL;
     rdx_firmware_update.event_context = NULL;
     spin_unlock(&rdx_firmware_update.lock);
+    if (callbacks_pending) {
+        printf("[RDX][OTA][PLATFORM] callback_quarantine writes=%u\n",
+               (unsigned int)pending_writes);
+    }
     if (was_active) {
         dual_bank_passive_update_exit(NULL);
         norflash_set_write_protect_en();
@@ -389,6 +436,11 @@ int rdx_firmware_update_schedule_reset(uint32_t delay_ms)
     return sys_timeout_add_2_task(
                NULL, rdx_firmware_update_reset, delay_ms, "app_core")
         ? 0 : -1;
+}
+
+void rdx_firmware_update_reset_now(void)
+{
+    rdx_firmware_update_reset(NULL);
 }
 
 #endif /* TCFG_RDX_ENABLE && RDX_CFG_OTA_ENABLE */

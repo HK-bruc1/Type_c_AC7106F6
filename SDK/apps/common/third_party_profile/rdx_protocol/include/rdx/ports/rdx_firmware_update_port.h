@@ -44,5 +44,6 @@ int rdx_firmware_update_watchdog_arm(
     void *context, uint32_t timeout_ms);
 void rdx_firmware_update_watchdog_cancel(void);
 int rdx_firmware_update_schedule_reset(uint32_t delay_ms);
+void rdx_firmware_update_reset_now(void);
 
 #endif /* RDX_FIRMWARE_UPDATE_PORT_H */
