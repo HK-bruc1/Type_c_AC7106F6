@@ -32,6 +32,9 @@
 #ifndef RDX_CFG_BLE_TX_DIAG_ENABLE
 #define RDX_CFG_BLE_TX_DIAG_ENABLE              0
 #endif
+#ifndef RDX_CFG_RECORD_PERF_DIAG_ENABLE
+#define RDX_CFG_RECORD_PERF_DIAG_ENABLE          0
+#endif
 #ifndef RDX_CFG_BLE_TX_QUEUE_DEPTH
 #define RDX_CFG_BLE_TX_QUEUE_DEPTH              4
 #endif

@@ -69,6 +69,7 @@ struct rdx_record_engine_runtime {
     volatile uint8_t frame_gate;
     volatile uint8_t worker_created;
     volatile uint8_t task_running;
+    uint8_t worker_wake_pending;
     uint8_t request_head;
     uint8_t request_tail;
     uint8_t request_count;
@@ -88,6 +89,11 @@ struct rdx_record_engine_runtime {
     uint32_t stale_count;
     uint32_t stop_discarded;
     uint32_t format_mismatch_count;
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+    uint32_t wake_post_count;
+    uint32_t wake_coalesced_count;
+    uint32_t wake_post_fail_count;
+#endif
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
     uint8_t first_frame_after_resume;
 #endif
@@ -138,9 +144,42 @@ static uint32_t rdx_record_engine_next_generation(uint32_t generation)
 
 static void rdx_record_engine_wake(void)
 {
+    uint8_t post = 0;
+    int ret;
+
+    spin_lock(&rdx_record_engine.lock);
     if (rdx_record_engine.worker_created) {
-        os_taskq_post_msg(RDX_RECORD_TASK_NAME, 1, RDX_RECORD_TASK_WAKE);
+        if (!rdx_record_engine.worker_wake_pending) {
+            rdx_record_engine.worker_wake_pending = 1;
+            post = 1;
+        } else {
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+            rdx_record_engine.wake_coalesced_count++;
+#endif
+        }
     }
+    spin_unlock(&rdx_record_engine.lock);
+    if (!post) {
+        return;
+    }
+
+    ret = os_taskq_post_msg(RDX_RECORD_TASK_NAME, 1,
+                            RDX_RECORD_TASK_WAKE);
+    spin_lock(&rdx_record_engine.lock);
+    if (ret) {
+        /* A full queue already contains a wake for this worker.  Clear the
+         * edge latch so a later producer can retry if the failure came from
+         * another OS condition. */
+        rdx_record_engine.worker_wake_pending = 0;
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+        rdx_record_engine.wake_post_fail_count++;
+#endif
+    } else {
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+        rdx_record_engine.wake_post_count++;
+#endif
+    }
+    spin_unlock(&rdx_record_engine.lock);
 }
 
 static void rdx_record_engine_emit(
@@ -416,6 +455,12 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
                 return;
             }
         }
+        /* V23 record#0 acknowledges the capture state, not durable Artifact
+         * commit.  All pre-cut candidates now belong to the Destination and
+         * the audio source is closed, so Protocol may answer APP before the
+         * potentially O(n) media verification below. */
+        rdx_record_engine_emit(RDX_RECORD_ENGINE_STOP_ACK_READY,
+                               request_id, result, mode, cause);
         destination_ret = rdx_record_engine.destination_ops->seal(
             rdx_record_engine.destination_priv,
             rdx_record_engine.session.session_id,
@@ -497,6 +542,14 @@ static void rdx_record_engine_stop(enum rdx_record_termination_mode mode,
            (unsigned int)rdx_record_engine.session.capture_generation,
            (unsigned int)rdx_record_engine.warmup_discard_count,
            (unsigned int)rdx_record_engine.session_frame_seq);
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+    printf("[RDX][ENGINE] wake post=%u coalesced=%u post_fail=%u"
+           " pending=%u\n",
+           (unsigned int)rdx_record_engine.wake_post_count,
+           (unsigned int)rdx_record_engine.wake_coalesced_count,
+           (unsigned int)rdx_record_engine.wake_post_fail_count,
+           rdx_record_engine.worker_wake_pending);
+#endif
     rdx_record_engine_emit(RDX_RECORD_ENGINE_SESSION_STOPPED,
                            request_id, completion_result, mode,
                            completion_cause);
@@ -593,6 +646,11 @@ static void rdx_record_engine_start(struct rdx_record_request *request)
     rdx_record_engine.stale_count = 0;
     rdx_record_engine.stop_discarded = 0;
     rdx_record_engine.format_mismatch_count = 0;
+#if RDX_CFG_RECORD_PERF_DIAG_ENABLE
+    rdx_record_engine.wake_post_count = 0;
+    rdx_record_engine.wake_coalesced_count = 0;
+    rdx_record_engine.wake_post_fail_count = 0;
+#endif
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
     rdx_record_engine.first_frame_after_resume = 0;
 #endif
@@ -1265,6 +1323,12 @@ static void rdx_record_engine_task(void *priv)
             break;
         }
         os_taskq_pend(NULL, msg, ARRAY_SIZE(msg));
+        /* Clear the edge before processing.  A producer arriving while the
+         * worker drains current work can then enqueue exactly one successor
+         * wake; producers in the same burst coalesce behind that edge. */
+        spin_lock(&rdx_record_engine.lock);
+        rdx_record_engine.worker_wake_pending = 0;
+        spin_unlock(&rdx_record_engine.lock);
     }
     rdx_record_engine.task_running = 0;
 }

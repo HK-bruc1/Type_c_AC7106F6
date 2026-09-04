@@ -13,6 +13,8 @@
 #define TEST_TX_PACKET_MAX      192
 #define TEST_FILE_SIZE          83
 #define TEST_FILE_CAPACITY      245
+#define TEST_LIST_FILE_MAX      32
+#define TEST_LIST_JSON_MAX      16384
 
 struct test_tx_packet {
     uint16_t len;
@@ -21,6 +23,7 @@ struct test_tx_packet {
 
 struct test_state {
     struct rdx_storage_file_info file;
+    struct rdx_storage_file_info list_files[TEST_LIST_FILE_MAX];
     uint8_t file_data[TEST_FILE_CAPACITY];
     struct test_tx_packet packets[TEST_TX_MAX];
     enum rdx_transport_result send_result;
@@ -32,6 +35,7 @@ struct test_state {
     uint32_t operation_count;
     uint32_t delete_count;
     uint32_t format_count;
+    uint32_t list_file_count;
     uint8_t file_present;
 };
 
@@ -80,9 +84,13 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
         break;
     case RDX_LOCAL_STORAGE_OPERATION_ENUMERATE:
         if (test_state.file_present) {
-            assert(request->data.enumerate.capacity >= 1);
-            request->data.enumerate.items[0] = test_state.file;
-            completion.count = 1;
+            assert(request->data.enumerate.capacity
+                   >= test_state.list_file_count);
+            memcpy(request->data.enumerate.items,
+                   test_state.list_files,
+                   test_state.list_file_count
+                       * sizeof(test_state.list_files[0]));
+            completion.count = test_state.list_file_count;
         }
         break;
     case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
@@ -236,18 +244,136 @@ static void assert_binary_packet(uint32_t index, const char *header,
                    payload, payload_len));
 }
 
+static uint32_t build_expected_list_json(char *json, uint32_t capacity)
+{
+    uint32_t length = 0;
+    uint32_t i;
+
+    assert(json);
+    assert(capacity);
+    if (!test_state.file_present || !test_state.list_file_count) {
+        return 0;
+    }
+    json[length++] = '[';
+    for (i = 0; i < test_state.list_file_count; i++) {
+        const struct rdx_storage_file_info *file =
+            &test_state.list_files[i];
+        const char *basename = strrchr(file->file_id.name, '/');
+        char escaped[RDX_STORAGE_NAME_MAX * 2];
+        uint32_t source = 0;
+        uint32_t target = 0;
+        int written;
+
+        basename = basename ? basename + 1 : file->file_id.name;
+        while (basename[source]) {
+            char value = basename[source++];
+
+            assert((uint8_t)value >= 0x20 && (uint8_t)value <= 0x7e);
+            if (value == '"' || value == '\\') {
+                assert(target + 1 < sizeof(escaped));
+                escaped[target++] = '\\';
+            }
+            assert(target + 1 < sizeof(escaped));
+            escaped[target++] = value;
+        }
+        escaped[target] = 0;
+        written = snprintf(
+            json + length, capacity - length,
+            "%s{\"sn\":%u,\"name\":\"%s\",\"size\":%u,"
+            "\"scene\":0,\"start_time\":0,\"end_time\":0,"
+            "\"crc\":\"%lu\",\"frame_size\":80,"
+            "\"opus\":1084753920,\"marks\":[]}",
+            i ? "," : "", (unsigned int)file->file_id.serial_number,
+            escaped, (unsigned int)file->file_size,
+            (unsigned long)file->audio_crc);
+        assert(written > 0 && (uint32_t)written < capacity - length);
+        length += (uint32_t)written;
+    }
+    assert(length + 1 < capacity);
+    json[length++] = ']';
+    json[length] = 0;
+    return length;
+}
+
+static void assert_list_pack(const char *json, uint32_t json_length,
+                             uint32_t previous_pack,
+                             uint32_t requested_pack,
+                             uint8_t *reassembled)
+{
+    char command[64];
+    char header[64];
+    uint32_t offset = (requested_pack - 1) * 96;
+    uint32_t chunk_length = json_length - offset;
+    uint32_t crc;
+
+    if (chunk_length > 96) {
+        chunk_length = 96;
+    }
+    snprintf(command, sizeof(command), "*APP#listreq#%u#%u#",
+             (unsigned int)previous_pack,
+             (unsigned int)requested_pack);
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               (const uint8_t *)command,
+               (uint16_t)strlen(command)) == 1);
+    assert(test_state.packet_count == 1);
+    crc = test_crc32((const uint8_t *)json + offset, chunk_length);
+    snprintf(header, sizeof(header), "*DEV#listreq#%u#%u#%lu#",
+             (unsigned int)requested_pack,
+             (unsigned int)chunk_length, (unsigned long)crc);
+    assert_binary_packet(0, header, (const uint8_t *)json + offset,
+                         chunk_length);
+    if (reassembled) {
+        memcpy(reassembled + offset, json + offset, chunk_length);
+    }
+}
+
+static void assert_current_list_snapshot(const char *expected,
+                                         uint32_t expected_length)
+{
+    static const uint8_t getlist[] = "*APP#getlist#";
+    static uint8_t reassembled[TEST_LIST_JSON_MAX];
+    char flist[64];
+    uint32_t pack_count = (expected_length + 95) / 96;
+    uint32_t pack;
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               getlist, sizeof(getlist) - 1) == 1);
+    assert(test_state.packet_count == 2);
+    assert_text_packet(0, "*DEV#getlist#0#");
+    snprintf(flist, sizeof(flist), "*DEV#flist#%u#%u#",
+             (unsigned int)expected_length,
+             (unsigned int)pack_count);
+    assert_text_packet(1, flist);
+    if (!pack_count) {
+        return;
+    }
+
+    memset(reassembled, 0, sizeof(reassembled));
+    for (pack = pack_count; pack; pack--) {
+        assert_list_pack(expected, expected_length,
+                         pack == pack_count ? 0 : pack + 1,
+                         pack, reassembled);
+    }
+    assert(!memcmp(reassembled, expected, expected_length));
+
+    /* The same frozen snapshot must support retransmission and a jump back
+     * to an earlier packet without retaining a forward-only JSON cursor. */
+    pack = pack_count > 2 ? pack_count / 2 : 1;
+    assert_list_pack(expected, expected_length, pack, pack, NULL);
+    assert_list_pack(expected, expected_length, pack, 1, NULL);
+}
+
 static void test_list_golden_trace(void)
 {
     static const uint8_t getlist[] = "*APP#getlist#";
-    static const uint8_t listreq[] = "*APP#listreq#0#1#";
     static const char list_json[] =
         "[{\"sn\":7,\"name\":\"abc.raw\",\"size\":83,"
         "\"scene\":0,\"start_time\":0,\"end_time\":0,"
         "\"crc\":\"891568578\",\"frame_size\":80,"
         "\"opus\":1084753920,\"marks\":[]}]";
     char expected[TEST_TX_PACKET_MAX + 1];
-    uint32_t chunk_len = (uint32_t)strlen(list_json);
-    uint32_t crc;
 
     reset_packets();
     assert(rdx_protocol_v23_local_storage_handle_command(
@@ -259,18 +385,59 @@ static void test_list_golden_trace(void)
              (unsigned int)((strlen(list_json) + 95) / 96));
     assert_text_packet(1, expected);
 
-    reset_packets();
-    assert(rdx_protocol_v23_local_storage_handle_command(
-               listreq, sizeof(listreq) - 1) == 1);
-    assert(test_state.packet_count == 1);
-    if (chunk_len > 96) {
-        chunk_len = 96;
+    assert_current_list_snapshot(list_json,
+                                 (uint32_t)strlen(list_json));
+}
+
+static void test_list_boundaries_and_escaping(void)
+{
+    static char expected[TEST_LIST_JSON_MAX];
+    uint32_t expected_length;
+    uint32_t i;
+
+    test_state.file_present = 0;
+    assert_current_list_snapshot("", 0);
+    test_state.file_present = 1;
+
+    test_state.list_file_count = 1;
+    test_state.list_files[0] = test_state.file;
+    strcpy(test_state.list_files[0].file_id.name,
+           "dir/a\"b\\c.raw");
+    expected_length = build_expected_list_json(
+        expected, sizeof(expected));
+    assert_current_list_snapshot(expected, expected_length);
+
+    for (i = 0; i < TEST_LIST_FILE_MAX; i++) {
+        struct rdx_storage_file_info *file =
+            &test_state.list_files[i];
+
+        memset(file, 0, sizeof(*file));
+        file->file_id.artifact_id.value = i + 1;
+        file->file_id.serial_number = i + 1;
+        file->file_size = TEST_FILE_SIZE + i;
+        file->audio_crc = 891568578UL + i;
+        snprintf(file->file_id.name, sizeof(file->file_id.name),
+                 "record-%02u.raw", (unsigned int)i);
     }
-    crc = test_crc32((const uint8_t *)list_json, chunk_len);
-    snprintf(expected, sizeof(expected), "*DEV#listreq#1#%u#%lu#",
-             (unsigned int)chunk_len, (unsigned long)crc);
-    assert_binary_packet(0, expected, (const uint8_t *)list_json,
-                         chunk_len);
+    for (i = 0; i < RDX_STORAGE_NAME_MAX - 1; i++) {
+        test_state.list_files[TEST_LIST_FILE_MAX - 1]
+            .file_id.name[i] = (i & 1) ? '\\' : '"';
+    }
+    test_state.list_files[TEST_LIST_FILE_MAX - 1]
+        .file_id.name[RDX_STORAGE_NAME_MAX - 1] = 0;
+
+    test_state.list_file_count = TEST_LIST_FILE_MAX - 1;
+    expected_length = build_expected_list_json(
+        expected, sizeof(expected));
+    assert_current_list_snapshot(expected, expected_length);
+
+    test_state.list_file_count = TEST_LIST_FILE_MAX;
+    expected_length = build_expected_list_json(
+        expected, sizeof(expected));
+    assert_current_list_snapshot(expected, expected_length);
+
+    test_state.list_file_count = 1;
+    test_state.list_files[0] = test_state.file;
 }
 
 static void test_capacity_and_file_golden_trace(void)
@@ -453,6 +620,8 @@ int main(void)
     strcpy(test_state.file.file_id.name, "abc.raw");
     test_state.file.file_size = TEST_FILE_SIZE;
     test_state.file.audio_crc = 891568578UL;
+    test_state.list_file_count = 1;
+    test_state.list_files[0] = test_state.file;
     for (i = 0; i < TEST_FILE_CAPACITY; i++) {
         test_state.file_data[i] = (uint8_t)(i + 1);
     }
@@ -468,6 +637,7 @@ int main(void)
     assert(rdx_protocol_v23_local_storage_init(&context) == 0);
 
     test_list_golden_trace();
+    test_list_boundaries_and_escaping();
     test_capacity_and_file_golden_trace();
     test_long_file_offset_and_auto_delete();
     test_delete_and_format_golden_trace();

@@ -8,29 +8,35 @@
  * - free: space before VM that remains after reserving TCFG_VM_SIZE.
  * - capacity: used + free. This is not the capacity of the whole flash.
  *
- * ram fields:
- * - total: allocator-managed RAM0 and optional RAM1 heap capacity.
- * - used/free: current allocated/free heap totals across RAM0 and RAM1.
- * - min_free: lowest sampled free total since boot. It is not an allocator
- *   low-water mark and may miss short peaks between samples.
+ * ram fields are reported separately for RAM0 and RAM1.  aggregate_* is only
+ * a dashboard value; it must not be used to decide whether either allocator
+ * pool can satisfy a request.  min_free is the lowest value observed by this
+ * module and is not an allocator-native low-water mark.
  *
- * Values use integer KiB (bytes / 1024) although the log suffix is KB. Heap
- * fields are read through separate SDK calls and are not an atomic snapshot.
+ * Flash values use integer KiB.  Heap values use exact bytes so small pool
+ * changes remain visible.  Heap fields are read through separate SDK calls
+ * and are not an atomic snapshot.
  */
 #include "app_config.h"
 
 #if TCFG_RESOURCE_MONITOR_ENABLE
+
+#include <string.h>
 
 #include "system/boot.h"
 #include "system/init.h"
 #include "system/timer.h"
 #include "malloc.h"
 #include "resource_monitor.h"
+#include "task.h"
 
 #define RESOURCE_BYTES_TO_KB(value)    ((u32)((value) / 1024))
 
 static u16 resource_monitor_timer_id;
-static u32 resource_monitor_min_ram_free = 0xffffffffUL;
+static u32 resource_monitor_min_ram0_free = 0xffffffffUL;
+static u32 resource_monitor_min_ram1_free = 0xffffffffUL;
+static u32 resource_monitor_min_aggregate_free = 0xffffffffUL;
+static SIMPLE_TASK_INFO resource_monitor_task_snapshot[24];
 
 static void resource_monitor_dump_flash_code(void)
 {
@@ -47,41 +53,103 @@ static void resource_monitor_dump_flash_code(void)
            RESOURCE_BYTES_TO_KB(code_free));
 }
 
-static void resource_monitor_dump_ram(const char *reason)
+static void resource_monitor_sample_ram(const char *reason, u8 emit)
 {
-    u32 ram_total = (u32)memory_get_size(P_HEAP_SIZE);
-    u32 ram_used = (u32)memory_get_size(P_MEMORY_USED)
-                   + (u32)memory_get_size(P_VLT_MEMORY_USED);
-    u32 ram_free = (u32)memory_get_size(P_MEMORY_UNUSED)
-                   + (u32)memory_get_size(P_VLT_MEMORY_UNUSED);
+    u32 ram0_total = (u32)memory_get_size(P_MEMORY_TOTAL);
+    u32 ram0_used = (u32)memory_get_size(P_MEMORY_USED);
+    u32 ram0_free = (u32)memory_get_size(P_MEMORY_UNUSED);
+    u32 ram1_total = (u32)memory_get_size(P_VLT_MEMORY_TOTAL);
+    u32 ram1_used = (u32)memory_get_size(P_VLT_MEMORY_USED);
+    u32 ram1_free = (u32)memory_get_size(P_VLT_MEMORY_UNUSED);
+    u32 aggregate_total = ram0_total + ram1_total;
+    u32 aggregate_used = ram0_used + ram1_used;
+    u32 aggregate_free = ram0_free + ram1_free;
 
-    if (ram_free < resource_monitor_min_ram_free) {
-        resource_monitor_min_ram_free = ram_free;
+    if (ram0_free < resource_monitor_min_ram0_free) {
+        resource_monitor_min_ram0_free = ram0_free;
+    }
+    if (ram1_free < resource_monitor_min_ram1_free) {
+        resource_monitor_min_ram1_free = ram1_free;
+    }
+    if (aggregate_free < resource_monitor_min_aggregate_free) {
+        resource_monitor_min_aggregate_free = aggregate_free;
+    }
+    if (!emit) {
+        return;
     }
 
-    printf("[RES] ram reason=%s total=%uKB used=%uKB"
-           " free=%uKB min_free=%uKB\n",
+    printf("[RES] ram reason=%s"
+           " ram0_total=%u ram0_used=%u ram0_free=%u ram0_min_free=%u"
+           " ram1_total=%u ram1_used=%u ram1_free=%u ram1_min_free=%u"
+           " aggregate_total=%u aggregate_used=%u aggregate_free=%u"
+           " aggregate_min_free=%u unit=B\n",
            reason ? reason : "unknown",
-           RESOURCE_BYTES_TO_KB(ram_total),
-           RESOURCE_BYTES_TO_KB(ram_used),
-           RESOURCE_BYTES_TO_KB(ram_free),
-           RESOURCE_BYTES_TO_KB(resource_monitor_min_ram_free));
+           (unsigned int)ram0_total, (unsigned int)ram0_used,
+           (unsigned int)ram0_free,
+           (unsigned int)resource_monitor_min_ram0_free,
+           (unsigned int)ram1_total, (unsigned int)ram1_used,
+           (unsigned int)ram1_free,
+           (unsigned int)resource_monitor_min_ram1_free,
+           (unsigned int)aggregate_total, (unsigned int)aggregate_used,
+           (unsigned int)aggregate_free,
+           (unsigned int)resource_monitor_min_aggregate_free);
 }
 
 void resource_monitor_snapshot(const char *reason)
 {
-    resource_monitor_dump_ram(reason);
+    resource_monitor_sample_ram(reason, 1);
+}
+
+void resource_monitor_observe(void)
+{
+    resource_monitor_sample_ram(NULL, 0);
+}
+
+static u8 resource_monitor_is_key_task(const char *name)
+{
+    if (!name) {
+        return 0;
+    }
+    return !strcmp(name, "rdx_record") || !strcmp(name, "rdx_storage")
+           || !strcmp(name, "btstack") || !strncmp(name, "jlstream_", 9);
+}
+
+void resource_monitor_dump_key_tasks(const char *reason)
+{
+    u16 count;
+    u16 i;
+
+    memset(resource_monitor_task_snapshot, 0,
+           sizeof(resource_monitor_task_snapshot));
+    count = simple_task_info_list_get(
+        resource_monitor_task_snapshot,
+        sizeof(resource_monitor_task_snapshot)
+            / sizeof(resource_monitor_task_snapshot[0]));
+    for (i = 0; i < count; i++) {
+        const SIMPLE_TASK_INFO *task = &resource_monitor_task_snapshot[i];
+
+        if (!resource_monitor_is_key_task(task->task_name)) {
+            continue;
+        }
+        printf("[RES] task reason=%s name=%s stack_used=%u stack_max=%u"
+               " stack_hwm=%u cpu=%u\n",
+               reason ? reason : "unknown", task->task_name,
+               (unsigned int)task->stack_used,
+               (unsigned int)task->stack_max,
+               (unsigned int)task->stack_hwm,
+               (unsigned int)task->task_usage);
+    }
 }
 
 static void resource_monitor_timer(void *priv)
 {
-    resource_monitor_dump_ram("periodic");
+    resource_monitor_sample_ram("periodic", 1);
 }
 
 static int resource_monitor_init(void)
 {
     resource_monitor_dump_flash_code();
-    resource_monitor_dump_ram("start");
+    resource_monitor_sample_ram("start", 1);
 
     resource_monitor_timer_id = sys_timer_add(NULL,
                                               resource_monitor_timer,

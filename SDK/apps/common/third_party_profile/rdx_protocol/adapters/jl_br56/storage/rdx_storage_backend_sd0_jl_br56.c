@@ -7,6 +7,12 @@
 #include "dev_manager.h"
 #include "fs/fs.h"
 #include "rdx_storage_backend_sd0_jl_br56.h"
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+#include "system/timer.h"
+#endif
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE && TCFG_RESOURCE_MONITOR_ENABLE
+#include "resource_monitor.h"
+#endif
 
 #define RDX_SD0_PATH_MAX       160
 #define RDX_SD0_INDEX_MAGIC    0x30584452UL /* RDX0 */
@@ -22,9 +28,138 @@
     (RDX_SD0_INDEX_HEADER_SIZE                                     \
      + RDX_SD0_INDEX_MAX_ENTRIES * RDX_SD0_INDEX_ENTRY_SIZE        \
      + RDX_SD0_INDEX_TRAILER_SIZE)
+#define RDX_SD0_CRC_READ_CHUNK     (RDX_SD0_INDEX_DATA_SIZE & ~511u)
 #define RDX_SD0_MARKER_DATA_SIZE   \
     (2u * 8u + 14u * 4u + 2u * RDX_STORAGE_NAME_MAX + 4u)
 #define RDX_SD0_LAYOUT_DIR_COUNT   2u
+
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+#define RDX_SD0_DIAG_BUCKET_COUNT  9u
+
+enum rdx_sd0_diag_operation {
+    RDX_SD0_DIAG_OPEN = 0,
+    RDX_SD0_DIAG_APPEND,
+    RDX_SD0_DIAG_MARKER_WRITE,
+    RDX_SD0_DIAG_MARKER_VERIFY,
+    RDX_SD0_DIAG_CLOSE_VERIFY,
+    RDX_SD0_DIAG_PUBLISH,
+    RDX_SD0_DIAG_INDEX_COMMIT,
+    RDX_SD0_DIAG_OPERATION_COUNT,
+};
+
+struct rdx_sd0_diag_metric {
+    uint32_t count;
+    uint32_t max_ms;
+    uint32_t buckets[RDX_SD0_DIAG_BUCKET_COUNT];
+};
+
+static const uint32_t rdx_sd0_diag_bucket_upper_ms[
+    RDX_SD0_DIAG_BUCKET_COUNT] = {
+    0, 1, 2, 5, 10, 20, 50, 100, UINT32_MAX
+};
+static const char *const rdx_sd0_diag_operation_name[
+    RDX_SD0_DIAG_OPERATION_COUNT] = {
+    "open", "append", "marker_write", "marker_verify", "close_verify",
+    "publish", "index_commit"
+};
+static struct rdx_sd0_diag_metric rdx_sd0_diag_metrics[
+    RDX_SD0_DIAG_OPERATION_COUNT];
+
+#define RDX_SD0_DIAG_BEGIN(name)  uint32_t name = sys_timer_get_ms()
+#define RDX_SD0_DIAG_END(operation, name)                              \
+    rdx_sd0_diag_record((operation), sys_timer_get_ms() - (name))
+
+static void rdx_sd0_diag_record(enum rdx_sd0_diag_operation operation,
+                                uint32_t elapsed_ms)
+{
+    struct rdx_sd0_diag_metric *metric;
+    uint32_t i;
+
+    if ((uint32_t)operation >= RDX_SD0_DIAG_OPERATION_COUNT) {
+        return;
+    }
+    metric = &rdx_sd0_diag_metrics[operation];
+    metric->count++;
+    if (elapsed_ms > metric->max_ms) {
+        metric->max_ms = elapsed_ms;
+    }
+    for (i = 0; i < RDX_SD0_DIAG_BUCKET_COUNT; i++) {
+        if (elapsed_ms <= rdx_sd0_diag_bucket_upper_ms[i]) {
+            metric->buckets[i]++;
+            break;
+        }
+    }
+}
+
+static uint32_t rdx_sd0_diag_percentile_bound(
+    const struct rdx_sd0_diag_metric *metric, uint32_t percent)
+{
+    uint32_t target;
+    uint32_t observed = 0;
+    uint32_t i;
+
+    if (!metric || !metric->count) {
+        return 0;
+    }
+    target = (metric->count * percent + 99) / 100;
+    for (i = 0; i < RDX_SD0_DIAG_BUCKET_COUNT; i++) {
+        observed += metric->buckets[i];
+        if (observed >= target) {
+            return rdx_sd0_diag_bucket_upper_ms[i];
+        }
+    }
+    return UINT32_MAX;
+}
+
+static void rdx_sd0_diag_reset(void)
+{
+    memset(rdx_sd0_diag_metrics, 0, sizeof(rdx_sd0_diag_metrics));
+}
+
+static void rdx_sd0_diag_dump(const char *reason)
+{
+    uint32_t i;
+
+    for (i = 0; i < RDX_SD0_DIAG_OPERATION_COUNT; i++) {
+        const struct rdx_sd0_diag_metric *metric = &rdx_sd0_diag_metrics[i];
+
+        printf("[RDX][O0][FAT] reason=%s op=%s count=%u max_ms=%u"
+               " p50_le_ms=%u p95_le_ms=%u p99_le_ms=%u\n",
+               reason ? reason : "unknown", rdx_sd0_diag_operation_name[i],
+               (unsigned int)metric->count, (unsigned int)metric->max_ms,
+               (unsigned int)rdx_sd0_diag_percentile_bound(metric, 50),
+               (unsigned int)rdx_sd0_diag_percentile_bound(metric, 95),
+               (unsigned int)rdx_sd0_diag_percentile_bound(metric, 99));
+    }
+}
+
+static void rdx_sd0_diag_resource(const char *reason, uint8_t include_tasks)
+{
+#if TCFG_RESOURCE_MONITOR_ENABLE
+    resource_monitor_snapshot(reason);
+    if (include_tasks) {
+        resource_monitor_dump_key_tasks(reason);
+    }
+#else
+    (void)reason;
+    (void)include_tasks;
+#endif
+}
+
+static void rdx_sd0_diag_observe(void)
+{
+#if TCFG_RESOURCE_MONITOR_ENABLE
+    resource_monitor_observe();
+#endif
+}
+#else
+#define RDX_SD0_DIAG_BEGIN(name)
+#define RDX_SD0_DIAG_END(operation, name)
+#define rdx_sd0_diag_reset()
+#define rdx_sd0_diag_dump(reason)
+#define rdx_sd0_diag_resource(reason, include_tasks)
+#define rdx_sd0_diag_observe()
+#endif
 
 struct rdx_sd0_open_file {
     FILE *file;
@@ -32,7 +167,6 @@ struct rdx_sd0_open_file {
     char temp_path[RDX_SD0_PATH_MAX];
     char final_path[RDX_SD0_PATH_MAX];
     uint64_t audio_bytes;
-    uint32_t audio_crc;
     uint8_t pending_rename;
 };
 
@@ -73,7 +207,10 @@ static enum rdx_storage_result sd0_crc_file(const char *path,
                                              uint64_t *file_size,
                                              uint32_t *audio_crc)
 {
-    uint8_t buffer[256];
+    /* close/stat and index load are serialized by the Backend owner. Reuse
+     * the index image after audio close so verification does not grow BSS or
+     * the already-high rdx_record stack, and read whole sector batches. */
+    uint8_t *buffer = rdx_sd0.index_data;
     FILE *file;
     uint32_t crc = 0;
     uint8_t initialized = 0;
@@ -87,7 +224,7 @@ static enum rdx_storage_result sd0_crc_file(const char *path,
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     for (;;) {
-        int count = fread(buffer, 1, sizeof(buffer), file);
+        int count = fread(buffer, 1, RDX_SD0_CRC_READ_CHUNK, file);
 
         if (count < 0) {
             fclose(file);
@@ -447,15 +584,20 @@ static enum rdx_storage_result sd0_open_temp(
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     open = &rdx_sd0.open;
+    rdx_sd0_diag_resource("local_open_before", 0);
+    RDX_SD0_DIAG_BEGIN(start_ms);
     open->file = fopen(open->temp_path, "w+");
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_OPEN, start_ms);
     if (!open->file) {
+        rdx_sd0_diag_resource("local_open_failed", 1);
+        rdx_sd0_diag_dump("open_failed");
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     open->artifact_id = spec->artifact_id;
     open->audio_bytes = 0;
-    open->audio_crc = 0;
     open->pending_rename = 1;
     *handle = open;
+    rdx_sd0_diag_resource("local_open_after", 0);
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -463,29 +605,38 @@ static enum rdx_storage_result sd0_append(void *handle, const uint8_t *data,
                                           uint32_t len, uint32_t *written)
 {
     struct rdx_sd0_open_file *open = handle;
+    enum rdx_storage_result result;
     int count;
 
     if (!open || !open->file || !data || !written) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    RDX_SD0_DIAG_BEGIN(start_ms);
     count = fwrite((void *)data, 1, len, open->file);
     if (count < 0) {
         *written = 0;
-        return RDX_STORAGE_RESULT_IO_ERROR;
+        result = RDX_STORAGE_RESULT_IO_ERROR;
+        goto done;
     }
     *written = (uint32_t)count;
     if (*written) {
         if (*written > UINT64_MAX - open->audio_bytes) {
             *written = 0;
-            return RDX_STORAGE_RESULT_CORRUPT;
+            result = RDX_STORAGE_RESULT_CORRUPT;
+            goto done;
         }
-        open->audio_crc = sd0_crc32_update(open->audio_crc,
-                                           open->audio_bytes != 0,
-                                           data, *written);
         open->audio_bytes += *written;
     }
-    return *written == len ? RDX_STORAGE_RESULT_READY
-                           : RDX_STORAGE_RESULT_IO_ERROR;
+    result = *written == len ? RDX_STORAGE_RESULT_READY
+                             : RDX_STORAGE_RESULT_IO_ERROR;
+done:
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_APPEND, start_ms);
+    rdx_sd0_diag_observe();
+    if (result != RDX_STORAGE_RESULT_READY) {
+        rdx_sd0_diag_resource("local_append_failed", 1);
+        rdx_sd0_diag_dump("append_failed");
+    }
+    return result;
 }
 
 static enum rdx_storage_result sd0_close(void *handle, uint64_t *file_size,
@@ -500,18 +651,25 @@ static enum rdx_storage_result sd0_close(void *handle, uint64_t *file_size,
     }
     strncpy(path, open->temp_path, sizeof(path) - 1);
     path[sizeof(path) - 1] = 0;
+    rdx_sd0_diag_resource("local_stop_before_close", 1);
+    RDX_SD0_DIAG_BEGIN(start_ms);
     fclose(open->file);
     open->file = NULL;
     /* Re-open the file and calculate the checksum from persisted bytes.  The
-     * running value maintained by append() is only a cheap consistency hint;
-     * this read-back is the checkpoint evidence consumed by Service. */
+     * Service owns the rolling CRC calculated from accepted frame boundaries;
+     * this read-back is the independent commit evidence compared by Service. */
     result = sd0_crc_file(path, file_size, audio_crc);
     if (result != RDX_STORAGE_RESULT_READY
-        || *file_size != open->audio_bytes
-        || (open->audio_bytes && *audio_crc != open->audio_crc)) {
-        return result == RDX_STORAGE_RESULT_READY
-                   ? RDX_STORAGE_RESULT_CORRUPT : result;
+        || *file_size != open->audio_bytes) {
+        result = result == RDX_STORAGE_RESULT_READY
+                     ? RDX_STORAGE_RESULT_CORRUPT : result;
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_CLOSE_VERIFY, start_ms);
+        rdx_sd0_diag_resource("local_close_failed", 1);
+        rdx_sd0_diag_dump("close_failed");
+        return result;
     }
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_CLOSE_VERIFY, start_ms);
+    rdx_sd0_diag_resource("local_close_after", 0);
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -579,8 +737,12 @@ static enum rdx_storage_result sd0_publish(const char *temp_name,
         || strcmp(final_path, open->final_path)) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    RDX_SD0_DIAG_BEGIN(start_ms);
     open->file = fopen(open->temp_path, "r");
     if (!open->file) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_PUBLISH, start_ms);
+        rdx_sd0_diag_resource("local_publish_failed", 1);
+        rdx_sd0_diag_dump("publish_failed");
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     source_file = open->file;
@@ -596,6 +758,11 @@ static enum rdx_storage_result sd0_publish(const char *temp_name,
            (unsigned int)(strlen(final_name) + 1), ret);
     if (!ret) {
         open->pending_rename = 0;
+    }
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_PUBLISH, start_ms);
+    if (ret) {
+        rdx_sd0_diag_resource("local_publish_failed", 1);
+        rdx_sd0_diag_dump("publish_failed");
     }
     return ret ? RDX_STORAGE_RESULT_IO_ERROR : RDX_STORAGE_RESULT_READY;
 }
@@ -702,6 +869,7 @@ static enum rdx_storage_result sd0_store_marker(
     char path[RDX_SD0_PATH_MAX];
     FILE *file;
     uint32_t len;
+    uint8_t readback_required;
 
     if (!marker) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
@@ -712,27 +880,54 @@ static enum rdx_storage_result sd0_store_marker(
     if (sd0_marker_path(&marker->artifact_id, path, sizeof(path))) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    if (marker->state == RDX_STORAGE_MARKER_STATE_ALLOCATED) {
+        rdx_sd0_diag_reset();
+        rdx_sd0_diag_resource("local_start_before_marker", 1);
+    } else if (marker->state == RDX_STORAGE_MARKER_STATE_WRITING) {
+        rdx_sd0_diag_resource("writing_marker_before", 0);
+    }
     len = sd0_serialize_marker(marker, data, sizeof(data));
     if (len != sizeof(data)) {
         return RDX_STORAGE_RESULT_CORRUPT;
     }
+    RDX_SD0_DIAG_BEGIN(write_start_ms);
     file = fopen(path, "w+");
     if (!file || fwrite(data, 1, len, file) != (int)len) {
         if (file) {
             fclose(file);
         }
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_MARKER_WRITE, write_start_ms);
+        rdx_sd0_diag_resource("marker_write_failed", 1);
+        rdx_sd0_diag_dump("marker_write_failed");
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     fclose(file);
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_MARKER_WRITE, write_start_ms);
+    rdx_sd0_diag_resource("marker_write_closed", 0);
+    readback_required = RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE
+                        || marker->state > RDX_STORAGE_MARKER_STATE_WRITING;
+    if (!readback_required) {
+        return RDX_STORAGE_RESULT_READY;
+    }
     /* A successful fwrite/fclose only proves that the VFS accepted the
      * operation.  Re-open and decode the marker so a torn/short write is not
      * used as a recovery checkpoint. */
+    RDX_SD0_DIAG_BEGIN(verify_start_ms);
     if (sd0_load_marker(&marker->artifact_id, &verify)
         != RDX_STORAGE_RESULT_READY
         || sd0_serialize_marker(&verify, verify_data, sizeof(verify_data))
            != len
         || memcmp(data, verify_data, len)) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_MARKER_VERIFY, verify_start_ms);
+        rdx_sd0_diag_resource("marker_verify_failed", 1);
+        rdx_sd0_diag_dump("marker_verify_failed");
         return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_MARKER_VERIFY, verify_start_ms);
+    rdx_sd0_diag_resource("marker_verify_closed", 0);
+    if (marker->state == RDX_STORAGE_MARKER_STATE_INDEXED) {
+        rdx_sd0_diag_resource("local_stop_complete", 1);
+        rdx_sd0_diag_dump("indexed");
     }
     return RDX_STORAGE_RESULT_READY;
 }
@@ -1083,11 +1278,15 @@ static enum rdx_storage_result sd0_commit_index(
                  (unsigned int)((snapshot->generation + 1) & 1)) >= sizeof(path)) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    RDX_SD0_DIAG_BEGIN(start_ms);
     file = fopen(path, "w+");
     if (!file || fwrite(data, 1, offset, file) != (int)offset) {
         if (file) {
             fclose(file);
         }
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_INDEX_COMMIT, start_ms);
+        rdx_sd0_diag_resource("index_commit_failed", 1);
+        rdx_sd0_diag_dump("index_commit_failed");
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     fclose(file);
@@ -1100,8 +1299,12 @@ static enum rdx_storage_result sd0_commit_index(
         || verify.generation != expected_generation
         || verify.serial_high_water != snapshot->serial_high_water
         || verify.count != snapshot->count) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_INDEX_COMMIT, start_ms);
+        rdx_sd0_diag_resource("index_verify_failed", 1);
+        rdx_sd0_diag_dump("index_verify_failed");
         return RDX_STORAGE_RESULT_CORRUPT;
     }
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_INDEX_COMMIT, start_ms);
     return RDX_STORAGE_RESULT_READY;
 }
 

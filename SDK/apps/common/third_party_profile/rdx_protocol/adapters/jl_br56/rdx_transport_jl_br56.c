@@ -29,6 +29,7 @@
 #define RDX_RECORD_CONN_INTERVAL_MAX          6
 #define RDX_RECORD_DLE_TX_OCTETS              251
 #define RDX_RECORD_DLE_TX_TIME                2120
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
 #define RDX_BLE_APP_SEND_RET_SLOTS               4
 
 struct rdx_ble_app_send_ret_stat {
@@ -43,11 +44,12 @@ struct rdx_ble_transport_tx_stats {
     u32 app_send_error_count;
     u32 app_send_ret_overflow_count;
     u32 can_send_request_count;
+    u32 can_send_native_request_count;
     u32 can_send_event_count;
     u32 can_send_ready_count;
     u32 can_send_coalesced_count;
     u32 can_send_timeout_rearm_count;
-    u32 spurious_event_count;
+    u32 unowned_event_count;
     u32 valid_len_sample_count;
     u16 valid_len_min;
     u16 valid_len_max;
@@ -62,6 +64,7 @@ struct rdx_ble_transport_tx_stats {
     struct rdx_ble_app_send_ret_stat
         app_send_ret[RDX_BLE_APP_SEND_RET_SLOTS];
 };
+#endif
 
 static const struct conn_update_param_t rdx_record_conn_param = {
     RDX_RECORD_CONN_INTERVAL_MIN,
@@ -92,7 +95,9 @@ typedef struct {
     u32 can_send_request_ms;
     rdx_transport_event_callback_t event_callback;
     void *event_context;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     struct rdx_ble_transport_tx_stats tx_stats;
+#endif
 } rdx_ble_transport_t;
 
 static rdx_ble_transport_t rdx_ble;
@@ -441,14 +446,16 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
         } else {
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
             if (rdx_ble.record_streaming) {
-                rdx_ble.tx_stats.spurious_event_count++;
+                /* The JL multi-profile ATT dispatcher also delivers
+                 * readiness events requested or generated elsewhere. */
+                rdx_ble.tx_stats.unowned_event_count++;
             }
 #endif
         }
 #else
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
         if (rdx_ble.record_streaming && !rdx_ble.can_send_pending) {
-            rdx_ble.tx_stats.spurious_event_count++;
+            rdx_ble.tx_stats.unowned_event_count++;
         }
 #endif
 #endif
@@ -745,6 +752,8 @@ int rdx_transport_request_can_send_now(
     (RDX_CFG_ONLINE_RECORDING_ENABLE || RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE)
     u16 con_handle;
     u32 now_ms;
+    u8 native_request;
+    u8 timeout_rearm = 0;
 
     now_ms = sys_timer_get_ms();
     spin_lock(&rdx_ble.tx_lock);
@@ -769,6 +778,7 @@ int rdx_transport_request_can_send_now(
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_ble.tx_stats.can_send_timeout_rearm_count++;
 #endif
+        timeout_rearm = 1;
         rdx_ble_clear_can_send_locked();
     }
 
@@ -779,11 +789,25 @@ int rdx_transport_request_can_send_now(
     rdx_ble.can_send_session_id = session_id;
     rdx_ble.can_send_capture_generation = capture_generation;
     rdx_ble.can_send_request_ms = now_ms;
+    native_request = !rdx_ble.record_streaming
+                     || RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING
+                     || timeout_rearm;
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_ble.tx_stats.can_send_request_count++;
+    if (native_request) {
+        rdx_ble.tx_stats.can_send_native_request_count++;
+    }
 #endif
     spin_unlock(&rdx_ble.tx_lock);
-    att_server_request_can_send_now_event(con_handle);
+    /* Online streaming retries on every new frame and receives the shared
+     * readiness events produced as accepted ATT packets retire.  Avoid a
+     * global request for each retry, but issue one bounded fallback after a
+     * waiter timeout.  Non-streaming Local Wire responses have no periodic
+     * producer and keep the native one-shot request as their progress
+     * guarantee. */
+    if (native_request) {
+        att_server_request_can_send_now_event(con_handle);
+    }
     return 0;
 #else
     (void)session_id;
@@ -809,7 +833,9 @@ int rdx_transport_set_record_streaming(uint8_t enabled)
 void rdx_transport_tx_diagnostics_reset(void)
 {
     spin_lock(&rdx_ble.tx_lock);
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     memset(&rdx_ble.tx_stats, 0, sizeof(rdx_ble.tx_stats));
+#endif
     rdx_ble_clear_can_send_locked();
     spin_unlock(&rdx_ble.tx_lock);
 }
@@ -852,12 +878,13 @@ void rdx_transport_tx_diagnostics_log(void)
            (unsigned int)stats.app_send_error_count,
            (unsigned int)stats.valid_len_sample_count,
            stats.valid_len_min, stats.valid_len_max);
-    printf("[RDX][TXQ] can_req=%u can_evt=%u spurious_evt=%u"
+    printf("[RDX][TXQ] can_req=%u native_req=%u can_evt=%u unowned_evt=%u"
            " can_ready=%u can_coalesced=%u timeout_rearm=%u pending=%u"
            "\n",
            (unsigned int)stats.can_send_request_count,
+           (unsigned int)stats.can_send_native_request_count,
            (unsigned int)stats.can_send_event_count,
-           (unsigned int)stats.spurious_event_count,
+           (unsigned int)stats.unowned_event_count,
            (unsigned int)stats.can_send_ready_count,
            (unsigned int)stats.can_send_coalesced_count,
            (unsigned int)stats.can_send_timeout_rearm_count,

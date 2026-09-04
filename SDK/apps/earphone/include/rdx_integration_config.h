@@ -103,6 +103,89 @@
      RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE &&      \
      RDX_STORAGE_BACKEND_NATIVE)
 
+/* O0 storage isolation policy.  The production-facing A image keeps the
+ * Storage worker and terminal commit checks, but disables periodic WRITING
+ * markers because current recovery cannot discover an unindexed marker.
+ * The switches deliberately stay independent so the documented A-D groups
+ * can be built from one source revision:
+ *   A: checkpoint=0, readback=1, local_only=0 (default stopgap)
+ *   B: checkpoint=1, readback=0, local_only=0
+ *   C: checkpoint=1, readback=1, local_only=1
+ *   D: checkpoint=1, readback=1, local_only=0 (fault baseline)
+ */
+#ifndef RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE
+#define RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE  0
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE
+#define RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE  1
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY
+#define RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY                0
+#endif
+
+/* Event snapshots and bounded FAT latency histograms are retained for fault
+ * reproduction but compiled out of submission/release images by default.
+ * TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE enables the normal diagnostic set;
+ * JL heap tracing remains a separate, higher-overhead opt-in knob. */
+#ifndef RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+#define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE  \
+    TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
+#endif
+#ifndef RDX_CFG_RECORD_PERF_DIAG_ENABLE
+#define RDX_CFG_RECORD_PERF_DIAG_ENABLE       \
+    TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS
+#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS            0
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES
+#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES    (20 * 1024)
+#endif
+
+/* O2 Native write batching.  Six 80 B Opus frames form one 480 B fwrite,
+ * reducing FAT allocator churn without crossing the next 512 B allocation
+ * step or enlarging the existing REQUIRED Local queue. */
+#ifndef RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES              480
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES              6
+#endif
+
+#if (RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE != 0) && \
+    (RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE != 1)
+#error "RDX periodic checkpoint policy must be 0 or 1"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE != 0) && \
+    (RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE != 1)
+#error "RDX nonterminal marker readback policy must be 0 or 1"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY != 0) && \
+    (RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY != 1)
+#error "RDX O0 local-only policy must be 0 or 1"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE != 0) && \
+    (RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE != 1)
+#error "RDX O0 diagnostics policy must be 0 or 1"
+#endif
+#if (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 0) && \
+    (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 1)
+#error "RDX Record performance diagnostics policy must be 0 or 1"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS != 0) && \
+    ((RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS < 16) || \
+     (RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS > 512))
+#error "RDX heap trace record count must be 0 or between 16 and 512"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES < 128) || \
+    (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES > 1024)
+#error "RDX Local write batch must be between 128 and 1024 bytes"
+#endif
+#if (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES < 1) || \
+    (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES > 16)
+#error "RDX Local write batch must contain between 1 and 16 frames"
+#endif
+
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
     ((RDX_STORAGE_BACKEND_NATIVE + RDX_STORAGE_BACKEND_LEGACY_UXFILE) != 1)
 #error "RDX local storage requires exactly one storage backend"
@@ -132,25 +215,49 @@
 #endif
 #endif
 
-/* Stage diagnostics can be disabled after BLE TX tuning is complete. */
+/* Submission builds disable verbose BLE statistics by default. */
 #ifndef RDX_CFG_BLE_TX_DIAG_ENABLE
-#define RDX_CFG_BLE_TX_DIAG_ENABLE             1
+#define RDX_CFG_BLE_TX_DIAG_ENABLE  TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
 #endif
 
-/* Key ownership and routing diagnostics can be disabled after bring-up. */
+/* Submission builds disable key ownership/routing traces by default. */
 #ifndef RDX_CFG_KEY_DIAG_ENABLE
-#define RDX_CFG_KEY_DIAG_ENABLE                1
+#define RDX_CFG_KEY_DIAG_ENABLE  TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
+#endif
+
+#if (RDX_CFG_BLE_TX_DIAG_ENABLE != 0) && \
+    (RDX_CFG_BLE_TX_DIAG_ENABLE != 1)
+#error "RDX BLE TX diagnostics policy must be 0 or 1"
+#endif
+#if (RDX_CFG_KEY_DIAG_ENABLE != 0) && (RDX_CFG_KEY_DIAG_ENABLE != 1)
+#error "RDX key diagnostics policy must be 0 or 1"
 #endif
 
 /* Stage 1: wake the existing Record Engine task from ATT can-send events. */
 #ifndef RDX_CFG_BLE_TX_CAN_SEND_ENABLE
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         1
 #endif
+/* JL dispatches ATT_EVENT_CAN_SEND_NOW through the shared multi-profile
+ * packet path.  While Online streaming is active, accepted ATT packets
+ * already produce those readiness events; issuing another global native
+ * request for every retry can congest btprofile.  The adapter still issues
+ * one bounded native fallback after CAN_SEND_TIMEOUT.  Keep the old
+ * per-waiter behavior as an explicit diagnostic rollback switch, not as the
+ * production default. */
+#ifndef RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING
+#define RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING  0
+#endif
 #ifndef RDX_CFG_BLE_TX_BURST_BUDGET
 #define RDX_CFG_BLE_TX_BURST_BUDGET            4
 #endif
 #ifndef RDX_CFG_BLE_TX_QUEUE_DEPTH
-#define RDX_CFG_BLE_TX_QUEUE_DEPTH             64
+/*
+ * Keep the O1 16-frame (about 320 ms) diagnostic capacity while validating
+ * the shared can-send fix.  The previous q_peak=1 assumption was invalidated
+ * by the first O1 target trace; this value is not release-qualified until
+ * repeated target runs show zero unexplained drop and forced termination.
+ */
+#define RDX_CFG_BLE_TX_QUEUE_DEPTH             16
 #endif
 #ifndef RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS
 #define RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS     100
@@ -159,6 +266,10 @@
     ((RDX_CFG_BLE_TX_BURST_BUDGET < 1) || \
      (RDX_CFG_BLE_TX_BURST_BUDGET > 16))
 #error "RDX BLE TX burst budget must be between 1 and 16"
+#endif
+#if (RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING != 0) && \
+    (RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING != 1)
+#error "RDX BLE native streaming request policy must be 0 or 1"
 #endif
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
     ((RDX_CFG_BLE_TX_QUEUE_DEPTH < 16) || \
@@ -316,6 +427,15 @@
 #define RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE      0
 #define RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE       0
 #define RDX_CFG_LOCAL_RECORDING_ENABLE          0
+#define RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE  0
+#define RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE  1
+#define RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY                0
+#define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE               0
+#define RDX_CFG_RECORD_PERF_DIAG_ENABLE                    0
+#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS            0
+#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES    (20 * 1024)
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES              480
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES              6
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
 #define RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE  0
 #define RDX_STORAGE_BACKEND_NATIVE              0
@@ -330,6 +450,7 @@
 #define RDX_CFG_BLE_TX_DIAG_ENABLE             0
 #define RDX_CFG_KEY_DIAG_ENABLE                0
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         0
+#define RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING  0
 #define RDX_CFG_BLE_TX_BURST_BUDGET            1
 #define RDX_CFG_BLE_TX_QUEUE_DEPTH             16
 #define RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS     100

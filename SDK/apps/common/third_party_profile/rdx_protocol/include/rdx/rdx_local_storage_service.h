@@ -26,6 +26,23 @@
 #define RDX_LOCAL_STORAGE_CHECKPOINT_INTERVAL_MS 1000
 #endif
 
+/* Product builds override this from rdx_integration_config.h.  Keep the safe
+ * O0 policy as the standalone/Host default as well: terminal state changes
+ * are still persisted, but no periodic WRITING transaction is generated. */
+#ifndef RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE
+#define RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE 0
+#endif
+
+/* Native audio is persisted in small contiguous batches.  480 B holds six
+ * 80 B Opus frames while staying below the next 512 B FAT allocation step;
+ * the frame cap also bounds STOP latency and per-run lock ownership. */
+#ifndef RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES 480
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES
+#define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES 6
+#endif
+
 enum rdx_local_storage_backend {
     RDX_LOCAL_STORAGE_BACKEND_NATIVE = 1,
     RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE = 2,
@@ -137,6 +154,10 @@ struct rdx_local_storage_service {
     union {
         struct rdx_storage_index_entry index_entries[32];
         struct rdx_storage_file_info file_items[32];
+        /* Recording and media/index operations are mutually exclusive.  Use
+         * the existing scratch storage for Native write coalescing so the
+         * 1024-word storage task stack does not absorb another 480 bytes. */
+        uint8_t write_batch[RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES];
     } scratch;
     rdx_local_storage_completion_callback_t completion_callback;
     void *completion_priv;
@@ -152,6 +173,7 @@ struct rdx_local_storage_service {
     uint8_t lock_initialized;
     uint8_t worker_created;
     uint8_t worker_stop;
+    uint8_t worker_wake_pending;
 #endif
 };
 

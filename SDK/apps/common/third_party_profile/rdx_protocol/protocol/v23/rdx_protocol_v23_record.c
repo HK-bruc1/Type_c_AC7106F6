@@ -42,6 +42,7 @@ typedef struct {
     uint32_t next_request_id;
     uint32_t session_id;
     uint32_t capture_generation;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     uint32_t sent_count;
     uint32_t send_fail_count;
     uint32_t destination_in_count;
@@ -53,14 +54,23 @@ typedef struct {
     uint32_t event_poll_count;
     uint32_t budget_hit_count;
     uint32_t arm_fail_count;
+    uint32_t wait_skip_count;
+#endif
     uint8_t tx_head;
     uint8_t tx_tail;
     uint8_t tx_count;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     uint8_t tx_peak;
+#endif
     uint8_t wire_state;
     uint8_t scene;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     uint8_t final_stats_logged;
     uint8_t burst_peak;
+#endif
+    uint8_t tx_waiting;
+    volatile uint8_t stop_ack_ready;
+    volatile uint8_t stop_ack_sent;
     uint32_t serial_number;
     char filename[RDX_RECORD_COMPAT_FILENAME_SIZE];
     uint16_t tx_len[RDX_RECORD_TX_QUEUE_DEPTH];
@@ -170,7 +180,9 @@ static int rdx_v23_record_queue_packet(const uint8_t *packet, uint16_t len)
         rdx_online_record.tx_head =
             (rdx_online_record.tx_head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
         rdx_online_record.tx_count--;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.queue_drop_count++;
+#endif
     }
 
     tail = rdx_online_record.tx_tail;
@@ -178,10 +190,12 @@ static int rdx_v23_record_queue_packet(const uint8_t *packet, uint16_t len)
     rdx_online_record.tx_len[tail] = len;
     rdx_online_record.tx_tail = (tail + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
     rdx_online_record.tx_count++;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.queued_count++;
     if (rdx_online_record.tx_count > rdx_online_record.tx_peak) {
         rdx_online_record.tx_peak = rdx_online_record.tx_count;
     }
+#endif
     return 0;
 }
 
@@ -190,10 +204,24 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
     int ret = 0;
     uint8_t sent_now = 0;
 
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.drain_count++;
+#endif
     if (!budget) {
         budget = 0xff;
     }
+
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    /* Once ATT reports back-pressure, do not probe the private JL queue again
+     * for every 20 ms source frame.  New frames only keep the bounded waiter
+     * alive; an owned CAN_SEND event re-opens the send gate in poll(). */
+    if (rdx_online_record.tx_waiting) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+        rdx_online_record.wait_skip_count++;
+#endif
+        goto arm_waiter;
+    }
+#endif
 
     while (rdx_online_record.tx_count && sent_now < budget) {
         uint8_t head = rdx_online_record.tx_head;
@@ -201,27 +229,41 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
         ret = rdx_protocol_v23_send(rdx_v23_record_context, rdx_online_record.tx_packet[head],
                             rdx_online_record.tx_len[head]);
         if (ret) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
             rdx_online_record.send_fail_count++;
+#endif
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+            rdx_online_record.tx_waiting = 1;
+#endif
             break;
         }
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.sent_count++;
+#endif
         rdx_online_record.tx_head =
             (head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
         rdx_online_record.tx_count--;
         sent_now++;
     }
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     if (sent_now > rdx_online_record.burst_peak) {
         rdx_online_record.burst_peak = sent_now;
     }
+#endif
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+arm_waiter:
     if (rdx_online_record.tx_count) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         if (sent_now >= budget) {
             rdx_online_record.budget_hit_count++;
         }
+#endif
         if (rdx_transport_request_can_send_now(
                 rdx_online_record.session_id,
                 rdx_online_record.capture_generation)) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
             rdx_online_record.arm_fail_count++;
+#endif
         }
     }
 #endif
@@ -230,11 +272,11 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
 
 static void rdx_v23_record_log_final(const char *reason)
 {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     if (rdx_online_record.final_stats_logged) {
         return;
     }
     rdx_online_record.final_stats_logged = 1;
-#if RDX_CFG_BLE_TX_DIAG_ENABLE
     uint32_t accounted;
 
     accounted = rdx_online_record.sent_count
@@ -261,12 +303,15 @@ static void rdx_v23_record_log_final(const char *reason)
            (unsigned int)rdx_online_record.send_fail_count);
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
     printf("[RDX][TXQ] drain=%u event_poll=%u budget_hit=%u"
-           " burst_peak=%u arm_fail=%u budget=%u depth=%u direct_att=0\n",
+           " burst_peak=%u arm_fail=%u wait_skip=%u waiting=%u"
+           " budget=%u depth=%u direct_att=0\n",
            (unsigned int)rdx_online_record.drain_count,
            (unsigned int)rdx_online_record.event_poll_count,
            (unsigned int)rdx_online_record.budget_hit_count,
            rdx_online_record.burst_peak,
            (unsigned int)rdx_online_record.arm_fail_count,
+           (unsigned int)rdx_online_record.wait_skip_count,
+           rdx_online_record.tx_waiting,
            RDX_CFG_BLE_TX_BURST_BUDGET,
            RDX_RECORD_TX_QUEUE_DEPTH);
 #endif
@@ -283,6 +328,7 @@ static int rdx_v23_record_destination_attach(void *priv, uint32_t session_id,
     memset(&rdx_online_record.tx_len, 0, sizeof(rdx_online_record.tx_len));
     rdx_online_record.session_id = session_id;
     rdx_online_record.capture_generation = capture_generation;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.sent_count = 0;
     rdx_online_record.send_fail_count = 0;
     rdx_online_record.destination_in_count = 0;
@@ -294,12 +340,19 @@ static int rdx_v23_record_destination_attach(void *priv, uint32_t session_id,
     rdx_online_record.event_poll_count = 0;
     rdx_online_record.budget_hit_count = 0;
     rdx_online_record.arm_fail_count = 0;
+    rdx_online_record.wait_skip_count = 0;
+#endif
     rdx_online_record.tx_head = 0;
     rdx_online_record.tx_tail = 0;
     rdx_online_record.tx_count = 0;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.tx_peak = 0;
     rdx_online_record.burst_peak = 0;
+#endif
+    rdx_online_record.tx_waiting = 0;
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.final_stats_logged = 0;
+#endif
     rdx_transport_tx_diagnostics_reset();
     return 0;
 }
@@ -318,10 +371,14 @@ static int rdx_v23_record_destination_consume(
             rdx_online_record.capture_generation) {
         return 0;
     }
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.destination_in_count++;
+#endif
     if (rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING
         && rdx_online_record.state != RDX_ONLINE_RECORD_PAUSE_PENDING) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.cancel_discard_count++;
+#endif
         return 0;
     }
 
@@ -330,7 +387,9 @@ static int rdx_v23_record_destination_consume(
                            frame->payload_len, frame->payload_len);
     if (header_len <= 0
         || (uint32_t)header_len + frame->payload_len > sizeof(packet)) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.cancel_discard_count++;
+#endif
         return -1;
     }
     memcpy(packet + header_len, frame->payload, frame->payload_len);
@@ -352,15 +411,20 @@ static int rdx_v23_record_destination_consume(
     } else {
         ret = rdx_protocol_v23_send(rdx_v23_record_context, packet, header_len + frame->payload_len);
         if (ret) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
             rdx_online_record.send_fail_count++;
+#endif
             ret = rdx_v23_record_queue_packet(
                 packet, header_len + frame->payload_len);
         } else {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
             rdx_online_record.sent_count++;
+#endif
         }
     }
 #endif
 
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     if ((frame->session_frame_seq + 1) % 250 == 0) {
         printf("[RDX][ONLINE] frames=%u sent=%u send_fail=%u queued=%u"
                " pending=%u peak=%u drop=%u\n",
@@ -372,6 +436,7 @@ static int rdx_v23_record_destination_consume(
                (unsigned int)rdx_online_record.tx_peak,
                (unsigned int)rdx_online_record.queue_drop_count);
     }
+#endif
     /* Transport back-pressure is handled by the bounded TX queue.  The
      * packet-size check above is the only fatal validation in this path. */
     return 0;
@@ -401,7 +466,10 @@ static void rdx_v23_record_destination_poll(
         || rdx_online_record.state != RDX_ONLINE_RECORD_STREAMING) {
         return;
     }
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.event_poll_count++;
+#endif
+    rdx_online_record.tx_waiting = 0;
     rdx_v23_record_drain_queue(RDX_CFG_BLE_TX_BURST_BUDGET);
 }
 #endif
@@ -412,11 +480,14 @@ static void rdx_v23_record_destination_cancel(void *priv, uint32_t session_id,
     (void)priv;
     if (session_id == rdx_online_record.session_id
         && capture_generation == rdx_online_record.capture_generation) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.cancel_discard_count +=
             rdx_online_record.tx_count;
+#endif
         rdx_online_record.tx_head = 0;
         rdx_online_record.tx_tail = 0;
         rdx_online_record.tx_count = 0;
+        rdx_online_record.tx_waiting = 0;
         rdx_v23_record_log_final("cancel");
     }
 }
@@ -426,13 +497,18 @@ static void rdx_v23_record_destination_detach(void *priv, uint32_t session_id,
 {
     (void)priv;
     if (session_id == rdx_online_record.session_id
-        && capture_generation == rdx_online_record.capture_generation
-        && !rdx_online_record.final_stats_logged) {
+        && capture_generation == rdx_online_record.capture_generation) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+        if (rdx_online_record.final_stats_logged) {
+            return;
+        }
         rdx_online_record.cancel_discard_count +=
             rdx_online_record.tx_count;
+#endif
         rdx_online_record.tx_head = 0;
         rdx_online_record.tx_tail = 0;
         rdx_online_record.tx_count = 0;
+        rdx_online_record.tx_waiting = 0;
         rdx_v23_record_log_final("detach");
     }
 }
@@ -546,19 +622,28 @@ static void rdx_v23_record_engine_event(
             return;
         }
         rdx_transport_set_record_streaming(0);
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         rdx_online_record.pause_discard_count += rdx_online_record.tx_count;
         rdx_online_record.cancel_discard_count += rdx_online_record.tx_count;
+#endif
         rdx_online_record.tx_head = 0;
         rdx_online_record.tx_tail = 0;
         rdx_online_record.tx_count = 0;
+        rdx_online_record.tx_waiting = 0;
         rdx_online_record.state = RDX_ONLINE_RECORD_PAUSED;
         rdx_online_record.wire_state = 2;
         rdx_v23_record_send_state(2, 1);
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
         printf("[RDX][ONLINE] paused session=%u capture=%u"
                " tx_discard=%u\n",
                (unsigned int)event->session_id,
                (unsigned int)event->capture_generation,
                (unsigned int)rdx_online_record.pause_discard_count);
+#else
+        printf("[RDX][ONLINE] paused session=%u capture=%u\n",
+               (unsigned int)event->session_id,
+               (unsigned int)event->capture_generation);
+#endif
         return;
     }
 
@@ -597,6 +682,44 @@ static void rdx_v23_record_engine_event(
     }
 #endif
 
+    if (event->type == RDX_RECORD_ENGINE_STOP_ACK_READY) {
+        int ack_ret = -1;
+
+        if (event->result != RDX_RECORD_RESULT_OK
+            || event->termination_mode != RDX_RECORD_TERMINATION_NORMAL
+            || rdx_online_record.state != RDX_ONLINE_RECORD_STOP_PENDING
+            || event->session_id != rdx_online_record.session_id
+            || event->capture_generation
+               != rdx_online_record.capture_generation) {
+            printf("[RDX][ONLINE] stop_ack_ignored session=%u capture=%u"
+                   " state=%u result=%u mode=%u\n",
+                   (unsigned int)event->session_id,
+                   (unsigned int)event->capture_generation,
+                   rdx_online_record.state, event->result,
+                   event->termination_mode);
+            return;
+        }
+
+        /* Reference V23 reports record#0 after the capture cut and before
+         * saving its file index.  SN/name were reserved at START, so keep
+         * the same long state form without claiming media commit here. */
+        rdx_online_record.wire_state = 0;
+        rdx_online_record.stop_ack_ready = 1;
+        if (rdx_v23_record_context
+            && rdx_protocol_session_can_send(
+                &rdx_v23_record_context->session)) {
+            ack_ret = rdx_v23_record_send_state(0, 1);
+            if (!ack_ret) {
+                rdx_online_record.stop_ack_sent = 1;
+            }
+        }
+        printf("[RDX][ONLINE] stop_ack_ready session=%u capture=%u"
+               " ret=%d committed=0\n",
+               (unsigned int)event->session_id,
+               (unsigned int)event->capture_generation, ack_ret);
+        return;
+    }
+
     if (event->type == RDX_RECORD_ENGINE_SESSION_STOPPED) {
         uint8_t notify = event->cause != RDX_RECORD_CAUSE_LINK_LOST
                     && event->cause != RDX_RECORD_CAUSE_CCC_OFF
@@ -604,28 +727,33 @@ static void rdx_v23_record_engine_event(
         uint8_t artifact_committed =
             event->result == RDX_RECORD_RESULT_OK
             && event->termination_mode == RDX_RECORD_TERMINATION_NORMAL;
+        uint8_t stop_ack_sent = rdx_online_record.stop_ack_sent;
 
         rdx_transport_set_record_streaming(0);
         rdx_online_record.state = RDX_ONLINE_RECORD_IDLE;
         rdx_online_record.wire_state = 0;
         rdx_online_record.tx_count = 0;
+        rdx_online_record.tx_waiting = 0;
 #if RDX_CFG_RECORD_MARK_ENABLE
         rdx_session_metadata_end(event->session_id);
 #endif
-        if (notify && rdx_protocol_session_can_send(
+        if (!stop_ack_sent && notify && rdx_v23_record_context
+            && rdx_protocol_session_can_send(
                 &rdx_v23_record_context->session)) {
-            /* Engine emits SESSION_STOPPED only after synchronous seal()
-             * has returned.  The long STOP form is therefore the final
-             * committed-Artifact acknowledgement; every failure/forced
-             * termination uses the identity-free form. */
+            /* Forced termination and non-Artifact destinations do not emit
+             * STOP_ACK_READY.  Retain their legacy terminal state response;
+             * a successful Artifact path has already acknowledged APP. */
             rdx_v23_record_send_state(0, artifact_committed);
         }
         rdx_v23_record_clear_identity();
+        rdx_online_record.stop_ack_ready = 0;
+        rdx_online_record.stop_ack_sent = 0;
         printf("[RDX][ONLINE] stopped session=%u mode=%u cause=%u"
-               " result=%u notify=%u committed=%u\n",
+               " result=%u notify=%u ack_early=%u committed=%u\n",
                (unsigned int)event->session_id,
                event->termination_mode, event->cause,
-               event->result, notify, artifact_committed);
+               event->result, notify, stop_ack_sent,
+               artifact_committed);
     }
 }
 
@@ -654,6 +782,8 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
 
     memset(&request, 0, sizeof(request));
     rdx_v23_record_clear_identity();
+    rdx_online_record.stop_ack_ready = 0;
+    rdx_online_record.stop_ack_sent = 0;
     request.request_id = rdx_v23_record_next_request_id();
     request.type = RDX_RECORD_REQUEST_START;
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
@@ -774,9 +904,21 @@ static void rdx_v23_record_stop(void)
         return;
     }
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
-        /* The first STOP owns the final completion.  Do not queue another
-         * request or emit a premature success acknowledgement. */
-        printf("[RDX][ONLINE] duplicate_stop state=pending\n");
+        int ack_ret = -1;
+
+        /* The first STOP still owns commit.  Once the capture cut is ready,
+         * retries only repeat the idempotent V23 state acknowledgement. */
+        if (rdx_online_record.stop_ack_ready
+            && rdx_protocol_session_can_send(
+                &rdx_v23_record_context->session)) {
+            ack_ret = rdx_v23_record_send_state(0, 1);
+            if (!ack_ret) {
+                rdx_online_record.stop_ack_sent = 1;
+            }
+        }
+        printf("[RDX][ONLINE] duplicate_stop state=pending"
+               " ack_ready=%u ret=%d\n",
+               rdx_online_record.stop_ack_ready, ack_ret);
         return;
     }
 

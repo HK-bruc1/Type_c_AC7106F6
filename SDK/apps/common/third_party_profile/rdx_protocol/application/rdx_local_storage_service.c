@@ -9,10 +9,24 @@
 #if CONFIG_CPU_BR56
 #include "task.h"
 #include "user_cfg.h"
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE && TCFG_RESOURCE_MONITOR_ENABLE
+#include "resource_monitor.h"
+#define service_diag_failure(reason)                 \
+    do {                                             \
+        resource_monitor_snapshot((reason));         \
+        resource_monitor_dump_key_tasks((reason));  \
+    } while (0)
+#else
+#define service_diag_failure(reason)
+#endif
 #define RDX_LOCAL_STORAGE_TASK_NAME       "rdx_storage"
 #define RDX_LOCAL_STORAGE_TASK_WAKE       0x52445802
-#define RDX_LOCAL_STORAGE_PUMP_BUDGET     4
+#define RDX_LOCAL_STORAGE_PUMP_BUDGET     RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES
 #define RDX_LOCAL_STORAGE_SEAL_WAIT_TICKS 100
+#endif
+
+#ifndef service_diag_failure
+#define service_diag_failure(reason)
 #endif
 
 #define RDX_COMPAT_FILENAME_ATTEMPTS      64
@@ -58,9 +72,25 @@ static void service_unlock(struct rdx_local_storage_service *service)
 
 static void service_wake(struct rdx_local_storage_service *service)
 {
-    if (service && service->worker_created) {
-        os_taskq_post_msg(RDX_LOCAL_STORAGE_TASK_NAME, 1,
-                          RDX_LOCAL_STORAGE_TASK_WAKE);
+    uint8_t post = 0;
+    int ret;
+
+    service_lock(service);
+    if (service && service->worker_created && !service->worker_stop
+        && !service->worker_wake_pending) {
+        service->worker_wake_pending = 1;
+        post = 1;
+    }
+    service_unlock(service);
+    if (!post) {
+        return;
+    }
+    ret = os_taskq_post_msg(RDX_LOCAL_STORAGE_TASK_NAME, 1,
+                            RDX_LOCAL_STORAGE_TASK_WAKE);
+    if (ret) {
+        service_lock(service);
+        service->worker_wake_pending = 0;
+        service_unlock(service);
     }
 }
 #else
@@ -93,6 +123,38 @@ static int service_ids_match(const struct rdx_local_storage_service *service,
 {
     return service && service->active && service->session_id == session_id
            && service->capture_generation == capture_generation;
+}
+
+static uint8_t service_native_batch_frame_limit(
+    const struct rdx_local_storage_service *service)
+{
+    uint32_t limit;
+
+    if (!service || !service->artifact.spec.payload_size) {
+        return 1;
+    }
+    limit = RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES
+            / service->artifact.spec.payload_size;
+    if (!limit) {
+        limit = 1;
+    }
+    if (limit > RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES) {
+        limit = RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES;
+    }
+    return (uint8_t)limit;
+}
+
+static uint8_t service_write_ready_locked(
+    const struct rdx_local_storage_service *service)
+{
+    if (!service || !service->active || !service->queue_count) {
+        return 0;
+    }
+    if (service->seal_requested
+        || service->backend != RDX_LOCAL_STORAGE_BACKEND_NATIVE) {
+        return 1;
+    }
+    return service->queue_count >= service_native_batch_frame_limit(service);
 }
 
 static void service_fill_marker(
@@ -484,7 +546,7 @@ static void rdx_local_storage_service_task(void *priv)
 
         service_lock(service);
         has_operation = service->operation_pending;
-        has_work = service->active && service->queue_count;
+        has_work = service_write_ready_locked(service);
         service_unlock(service);
         if (has_operation) {
             service_process_operation(service);
@@ -501,6 +563,9 @@ static void rdx_local_storage_service_task(void *priv)
             continue;
         }
         os_taskq_pend(NULL, msg, ARRAY_SIZE(msg));
+        service_lock(service);
+        service->worker_wake_pending = 0;
+        service_unlock(service);
     }
 }
 #endif
@@ -992,6 +1057,7 @@ enum rdx_storage_result rdx_local_storage_service_consume(
     const struct rdx_record_frame *frame)
 {
     struct rdx_local_storage_frame_slot *slot;
+    uint8_t wake_worker;
 
     if (!service || !frame || !service_ids_match(
                                 service, frame->session_id,
@@ -1024,6 +1090,7 @@ enum rdx_storage_result rdx_local_storage_service_consume(
         service->artifact.rejected_frame_count++;
         service->artifact.dropped_frame_count++;
         rdx_artifact_fail(&service->artifact, RDX_RECORD_CAUSE_QUEUE_FULL);
+        service_diag_failure("local_queue_full");
         service_unlock(service);
         return RDX_STORAGE_RESULT_QUEUE_FULL;
     }
@@ -1041,8 +1108,11 @@ enum rdx_storage_result rdx_local_storage_service_consume(
     service->queue_tail = (service->queue_tail + 1)
                           % RDX_LOCAL_STORAGE_QUEUE_DEPTH;
     service->queue_count++;
+    wake_worker = service_write_ready_locked(service);
     service_unlock(service);
-    service_wake(service);
+    if (wake_worker) {
+        service_wake(service);
+    }
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -1055,39 +1125,82 @@ static enum rdx_storage_result service_pump_locked(
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     while (service->queue_count && (!budget || pumped < budget)) {
-        struct rdx_local_storage_frame_slot *slot =
-            &service->queue[service->queue_head];
+        uint8_t batch_frames = 1;
+        uint32_t batch_bytes;
         uint32_t written = 0;
         enum rdx_storage_result result;
 
         if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE) {
+            uint8_t index = service->queue_head;
+
+            batch_frames = 0;
+            batch_bytes = 0;
+            while (batch_frames < service->queue_count
+                   && batch_frames
+                      < RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES
+                   && (!budget || pumped + batch_frames < budget)) {
+                struct rdx_local_storage_frame_slot *slot =
+                    &service->queue[index];
+
+                if (slot->frame.payload_len
+                    > sizeof(service->scratch.write_batch) - batch_bytes) {
+                    break;
+                }
+                memcpy(service->scratch.write_batch + batch_bytes,
+                       slot->payload,
+                       slot->frame.payload_len);
+                batch_bytes += slot->frame.payload_len;
+                batch_frames++;
+                index = (index + 1) % RDX_LOCAL_STORAGE_QUEUE_DEPTH;
+            }
+            if (!batch_frames) {
+                return service_fail(service,
+                                    RDX_STORAGE_RESULT_BAD_ARGUMENT,
+                                    RDX_RECORD_CAUSE_STORAGE_ERROR);
+            }
             result = service->native_ops->append(
-                service->artifact_handle, slot->payload,
-                slot->frame.payload_len, &written);
+                service->artifact_handle, service->scratch.write_batch,
+                batch_bytes, &written);
         } else {
+            struct rdx_local_storage_frame_slot *slot =
+                &service->queue[service->queue_head];
+
+            batch_bytes = slot->frame.payload_len;
             result = service->legacy_ops->raw_write(
                 &service->file_id, slot->payload,
                 slot->frame.payload_len, &written);
         }
         if (result != RDX_STORAGE_RESULT_READY
-            || written != slot->frame.payload_len
-            || rdx_artifact_persist_frame(
-                   &service->artifact, slot->frame.payload_len,
-                   service_crc32_update(service->artifact.audio_crc,
-                                        service->artifact.persisted_frame_count,
-                                        slot->payload,
-                                        slot->frame.payload_len))) {
+            || written != batch_bytes) {
             return service_fail(service,
                                 result == RDX_STORAGE_RESULT_READY
                                     ? RDX_STORAGE_RESULT_IO_ERROR : result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
-        service->queue_head = (service->queue_head + 1)
-                              % RDX_LOCAL_STORAGE_QUEUE_DEPTH;
-        service->queue_count--;
-        pumped++;
+        while (batch_frames) {
+            struct rdx_local_storage_frame_slot *slot =
+                &service->queue[service->queue_head];
+
+            if (rdx_artifact_persist_frame(
+                    &service->artifact, slot->frame.payload_len,
+                    service_crc32_update(
+                        service->artifact.audio_crc,
+                        service->artifact.persisted_frame_count,
+                        slot->payload, slot->frame.payload_len))) {
+                return service_fail(service,
+                                    RDX_STORAGE_RESULT_BAD_STATE,
+                                    RDX_RECORD_CAUSE_STORAGE_ERROR);
+            }
+            service->queue_head = (service->queue_head + 1)
+                                  % RDX_LOCAL_STORAGE_QUEUE_DEPTH;
+            service->queue_count--;
+            pumped++;
+            batch_frames--;
+        }
     }
-    if (pumped && service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
+    if (RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE
+        && pumped
+        && service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE
         && service->native_ops->store_marker
         && ((uint64_t)(service->artifact.persisted_frame_count
                        - service->checkpoint_persisted_frame_count)

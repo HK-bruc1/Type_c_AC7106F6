@@ -88,6 +88,16 @@ static void rdx_runtime_local_storage_completion(
 static int rdx_runtime_check_storage_structure(void)
 {
     int backend_ready = 0;
+
+#if TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
+    printf("[RDX][O0] checkpoint=%u nonterminal_readback=%u"
+           " local_only=%u diag=%u heap_trace=%u\n",
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE,
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE,
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY,
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE,
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS);
+#endif
 #if RDX_STORAGE_BACKEND_NATIVE
     backend_ready = rdx_storage_backend_sd0_jl_br56_init() == 0;
     if (!backend_ready) {
@@ -144,7 +154,11 @@ static int rdx_runtime_check_storage_structure(void)
 #if RDX_CFG_LOCAL_RECORDING_ENABLE
     if (rdx_record_coordinator_init(
             &rdx_record_coordinator, &rdx_local_storage,
+#if RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY
+            NULL, NULL)
+#else
             rdx_protocol_v23_record_online_destination_ops(), NULL)
+#endif
         || rdx_protocol_v23_record_bind_coordinator(
                &rdx_record_coordinator)) {
         printf("[RDX][CAP] boot=failed cap=local_recording"

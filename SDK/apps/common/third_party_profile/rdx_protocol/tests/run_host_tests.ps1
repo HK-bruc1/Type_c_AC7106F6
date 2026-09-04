@@ -117,11 +117,36 @@ $specs = @(
             (Join-Path $applicationDir 'rdx_record_composite_destination.c'),
             (Join-Path $applicationDir 'rdx_record_coordinator.c')
         )),
+    (New-RdxTestSpec -Name 'local_storage_checkpoint_enabled' `
+        -Defines @('RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE=1') `
+        -Includes @($publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_local_storage_service_test.c'),
+            (Join-Path $moduleDir 'domain\rdx_artifact.c'),
+            (Join-Path $applicationDir 'rdx_local_storage_service.c'),
+            (Join-Path $applicationDir 'rdx_record_local_destination.c'),
+            (Join-Path $applicationDir 'rdx_record_composite_destination.c'),
+            (Join-Path $applicationDir 'rdx_record_coordinator.c')
+        )),
     (New-RdxTestSpec -Name 'protocol_v23_record_storage' `
         -Defines @(
             'RDX_CFG_ONLINE_RECORDING_ENABLE=1',
             'RDX_CFG_LOCAL_RECORDING_ENABLE=1',
-            'RDX_STORAGE_BACKEND_NATIVE=1'
+            'RDX_STORAGE_BACKEND_NATIVE=1',
+            'RDX_CFG_BLE_TX_CAN_SEND_ENABLE=1'
+        ) `
+        -Includes @($testInclude, $publicInclude, $profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_protocol_v23_record_storage_test.c'),
+            (Join-Path $protocolDir 'rdx_protocol_v23_record.c')
+        )),
+    (New-RdxTestSpec -Name 'protocol_v23_record_storage_diag' `
+        -Defines @(
+            'RDX_CFG_ONLINE_RECORDING_ENABLE=1',
+            'RDX_CFG_LOCAL_RECORDING_ENABLE=1',
+            'RDX_STORAGE_BACKEND_NATIVE=1',
+            'RDX_CFG_BLE_TX_CAN_SEND_ENABLE=1',
+            'RDX_CFG_BLE_TX_DIAG_ENABLE=1'
         ) `
         -Includes @($testInclude, $publicInclude, $profileRoot) `
         -Sources @(

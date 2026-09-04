@@ -14,7 +14,6 @@
 #include "rdx_protocol/protocol/v23/rdx_protocol_v23_internal.h"
 
 #define RDX_LOCAL_WIRE_FILE_MAX             32u
-#define RDX_LOCAL_WIRE_LIST_BUFFER_SIZE     8192u
 #define RDX_LOCAL_WIRE_LIST_CHUNK_SIZE      96u
 #define RDX_LOCAL_WIRE_FILE_CHUNK_SIZE      80u
 #define RDX_LOCAL_WIRE_TX_PACKET_SIZE       192u
@@ -44,6 +43,7 @@ struct rdx_local_wire_context {
     uint32_t operation_connection_generation;
     uint32_t tx_token;
     uint32_t tx_connection_generation;
+    uint32_t list_count;
     uint32_t list_length;
     uint32_t list_pack_count;
     uint32_t list_request_pack;
@@ -65,8 +65,16 @@ struct rdx_local_wire_context {
     uint8_t list_valid;
     struct rdx_storage_file_info files[RDX_LOCAL_WIRE_FILE_MAX];
     uint8_t file_chunk[RDX_LOCAL_WIRE_FILE_CHUNK_SIZE];
-    char list_json[RDX_LOCAL_WIRE_LIST_BUFFER_SIZE];
     uint8_t tx_packet[RDX_LOCAL_WIRE_TX_PACKET_SIZE];
+};
+
+struct rdx_local_wire_json_emitter {
+    uint8_t *target;
+    uint32_t target_offset;
+    uint32_t target_capacity;
+    uint32_t target_length;
+    uint32_t encoded_length;
+    uint8_t complete;
 };
 
 static struct rdx_local_storage_service *rdx_local_wire_bound_service;
@@ -102,91 +110,203 @@ static const char *rdx_local_wire_basename(const char *name)
     return slash ? slash + 1 : name;
 }
 
-static int rdx_local_wire_escape_filename(const char *name,
-                                          char *escaped,
-                                          uint32_t capacity)
+static int rdx_local_wire_json_emit(
+    struct rdx_local_wire_json_emitter *emitter,
+    const char *data, uint32_t length)
+{
+    uint32_t segment_start;
+    uint32_t segment_end;
+    uint32_t copy_start;
+    uint32_t copy_end;
+
+    if (!emitter || (!data && length)
+        || emitter->encoded_length > UINT32_MAX - length) {
+        return -1;
+    }
+    if (emitter->complete) {
+        return 0;
+    }
+    segment_start = emitter->encoded_length;
+    segment_end = segment_start + length;
+    if (emitter->target && emitter->target_capacity) {
+        copy_start = segment_start > emitter->target_offset
+                         ? segment_start : emitter->target_offset;
+        copy_end = segment_end;
+        if (copy_end > emitter->target_offset
+                       + emitter->target_capacity) {
+            copy_end = emitter->target_offset
+                       + emitter->target_capacity;
+        }
+        if (copy_end > copy_start) {
+            uint32_t copy_length = copy_end - copy_start;
+
+            memcpy(emitter->target + emitter->target_length,
+                   data + copy_start - segment_start, copy_length);
+            emitter->target_length += copy_length;
+        }
+        if (emitter->target_length == emitter->target_capacity) {
+            emitter->complete = 1;
+        }
+    }
+    emitter->encoded_length = segment_end;
+    return 0;
+}
+
+static int rdx_local_wire_json_emit_literal(
+    struct rdx_local_wire_json_emitter *emitter, const char *literal)
+{
+    if (!literal) {
+        return -1;
+    }
+    return rdx_local_wire_json_emit(
+        emitter, literal, (uint32_t)strlen(literal));
+}
+
+static int rdx_local_wire_json_emit_u32(
+    struct rdx_local_wire_json_emitter *emitter, uint32_t value)
+{
+    char number[16];
+    int length;
+
+    if (!emitter) {
+        return -1;
+    }
+    if (emitter->complete) {
+        return 0;
+    }
+    length = snprintf(number, sizeof(number), "%lu",
+                      (unsigned long)value);
+    if (length <= 0 || (uint32_t)length >= sizeof(number)) {
+        return -1;
+    }
+    return rdx_local_wire_json_emit(
+        emitter, number, (uint32_t)length);
+}
+
+static int rdx_local_wire_json_emit_filename(
+    struct rdx_local_wire_json_emitter *emitter, const char *name)
 {
     uint32_t source = 0;
-    uint32_t target = 0;
 
-    if (!name || !escaped || !capacity
+    if (!emitter || !name
         || !memchr(name, '\0', RDX_STORAGE_NAME_MAX)) {
         return -1;
     }
     while (name[source]) {
-        uint8_t value = (uint8_t)name[source++];
+        char value = name[source++];
 
-        if (value < 0x20 || value > 0x7e) {
+        if ((uint8_t)value < 0x20 || (uint8_t)value > 0x7e) {
             return -1;
         }
-        if (value == '"' || value == '\\') {
-            if (target + 2 >= capacity) {
-                return -1;
-            }
-            escaped[target++] = '\\';
-        } else if (target + 1 >= capacity) {
+        if ((value == '"' || value == '\\')
+            && rdx_local_wire_json_emit_literal(emitter, "\\")) {
             return -1;
         }
-        escaped[target++] = (char)value;
+        if (rdx_local_wire_json_emit(emitter, &value, 1)) {
+            return -1;
+        }
+        if (emitter->complete) {
+            return 0;
+        }
     }
-    escaped[target] = 0;
     return 0;
 }
 
-static int rdx_local_wire_build_list(uint32_t count)
+static int rdx_local_wire_encode_list(
+    uint32_t count, struct rdx_local_wire_json_emitter *emitter)
 {
-    uint32_t length = 0;
     uint32_t i;
 
-    rdx_local_wire.list_length = 0;
-    rdx_local_wire.list_pack_count = 0;
-    rdx_local_wire.list_valid = 0;
+    if (!emitter || count > RDX_LOCAL_WIRE_FILE_MAX) {
+        return -1;
+    }
     if (!count) {
-        rdx_local_wire.list_valid = 1;
         return 0;
     }
-    rdx_local_wire.list_json[length++] = '[';
+    if (rdx_local_wire_json_emit_literal(emitter, "[")) {
+        return -1;
+    }
     for (i = 0; i < count; i++) {
         const struct rdx_storage_file_info *file =
             &rdx_local_wire.files[i];
         const char *basename = rdx_local_wire_basename(file->file_id.name);
-        char escaped[RDX_STORAGE_NAME_MAX * 2];
-        int written;
 
         if (!file->file_id.serial_number || !basename || !basename[0]
-            || file->file_size > UINT32_MAX
-            || rdx_local_wire_escape_filename(
-                   basename, escaped, sizeof(escaped))) {
+            || file->file_size > UINT32_MAX) {
             return -1;
         }
-        written = snprintf(
-            rdx_local_wire.list_json + length,
-            sizeof(rdx_local_wire.list_json) - length,
-            "%s{\"sn\":%u,\"name\":\"%s\",\"size\":%u,"
-            "\"scene\":0,\"start_time\":0,\"end_time\":0,"
-            "\"crc\":\"%lu\",\"frame_size\":%u,\"opus\":%lu,"
-            "\"marks\":[]}",
-            i ? "," : "", (unsigned int)file->file_id.serial_number,
-            escaped, (unsigned int)file->file_size,
-            (unsigned long)file->audio_crc,
-            (unsigned int)RDX_LOCAL_WIRE_FRAME_SIZE,
-            (unsigned long)RDX_LOCAL_WIRE_OPUS_FORMAT);
-        if (written <= 0
-            || (uint32_t)written
-               >= sizeof(rdx_local_wire.list_json) - length) {
+        if (rdx_local_wire_json_emit_literal(
+                emitter, i ? ",{\"sn\":" : "{\"sn\":")
+            || rdx_local_wire_json_emit_u32(
+                   emitter, file->file_id.serial_number)
+            || rdx_local_wire_json_emit_literal(emitter, ",\"name\":\"")
+            || rdx_local_wire_json_emit_filename(emitter, basename)
+            || rdx_local_wire_json_emit_literal(emitter, "\",\"size\":")
+            || rdx_local_wire_json_emit_u32(
+                   emitter, (uint32_t)file->file_size)
+            || rdx_local_wire_json_emit_literal(
+                   emitter,
+                   ",\"scene\":0,\"start_time\":0,\"end_time\":0,"
+                   "\"crc\":\"")
+            || rdx_local_wire_json_emit_u32(emitter, file->audio_crc)
+            || rdx_local_wire_json_emit_literal(
+                   emitter, "\",\"frame_size\":")
+            || rdx_local_wire_json_emit_u32(
+                   emitter, RDX_LOCAL_WIRE_FRAME_SIZE)
+            || rdx_local_wire_json_emit_literal(emitter, ",\"opus\":")
+            || rdx_local_wire_json_emit_u32(
+                   emitter, RDX_LOCAL_WIRE_OPUS_FORMAT)
+            || rdx_local_wire_json_emit_literal(
+                   emitter, ",\"marks\":[]}")) {
             return -1;
         }
-        length += (uint32_t)written;
+        if (emitter->complete) {
+            return 0;
+        }
     }
-    if (length + 1 > sizeof(rdx_local_wire.list_json)) {
+    return rdx_local_wire_json_emit_literal(emitter, "]");
+}
+
+static int rdx_local_wire_build_list(uint32_t count)
+{
+    struct rdx_local_wire_json_emitter emitter;
+
+    rdx_local_wire.list_count = 0;
+    rdx_local_wire.list_length = 0;
+    rdx_local_wire.list_pack_count = 0;
+    rdx_local_wire.list_valid = 0;
+    memset(&emitter, 0, sizeof(emitter));
+    if (rdx_local_wire_encode_list(count, &emitter)) {
         return -1;
     }
-    rdx_local_wire.list_json[length++] = ']';
-    rdx_local_wire.list_length = length;
+    rdx_local_wire.list_count = count;
+    rdx_local_wire.list_length = emitter.encoded_length;
     rdx_local_wire.list_pack_count =
-        (length + RDX_LOCAL_WIRE_LIST_CHUNK_SIZE - 1)
+        (rdx_local_wire.list_length
+         + RDX_LOCAL_WIRE_LIST_CHUNK_SIZE - 1)
         / RDX_LOCAL_WIRE_LIST_CHUNK_SIZE;
     rdx_local_wire.list_valid = 1;
+    return 0;
+}
+
+static int rdx_local_wire_encode_list_range(
+    uint32_t offset, uint8_t *target, uint32_t length)
+{
+    struct rdx_local_wire_json_emitter emitter;
+
+    if (!target || !length || offset > UINT32_MAX - length
+        || offset + length > rdx_local_wire.list_length) {
+        return -1;
+    }
+    memset(&emitter, 0, sizeof(emitter));
+    emitter.target = target;
+    emitter.target_offset = offset;
+    emitter.target_capacity = length;
+    if (rdx_local_wire_encode_list(
+            rdx_local_wire.list_count, &emitter)
+        || emitter.target_length != length) {
+        return -1;
+    }
     return 0;
 }
 
@@ -228,8 +348,18 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
         if (chunk_length > RDX_LOCAL_WIRE_LIST_CHUNK_SIZE) {
             chunk_length = RDX_LOCAL_WIRE_LIST_CHUNK_SIZE;
         }
+        if (rdx_local_wire_encode_list_range(
+                offset,
+                rdx_local_wire.tx_packet
+                    + sizeof(rdx_local_wire.tx_packet)
+                      - RDX_LOCAL_WIRE_LIST_CHUNK_SIZE,
+                chunk_length)) {
+            return -1;
+        }
         crc = rdx_local_wire_crc32(
-            (const uint8_t *)rdx_local_wire.list_json + offset,
+            rdx_local_wire.tx_packet
+                + sizeof(rdx_local_wire.tx_packet)
+                  - RDX_LOCAL_WIRE_LIST_CHUNK_SIZE,
             chunk_length);
         header_length = snprintf(
             (char *)rdx_local_wire.tx_packet,
@@ -242,8 +372,11 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
                > sizeof(rdx_local_wire.tx_packet)) {
             return -1;
         }
-        memcpy(rdx_local_wire.tx_packet + header_length,
-               rdx_local_wire.list_json + offset, chunk_length);
+        memmove(rdx_local_wire.tx_packet + header_length,
+                rdx_local_wire.tx_packet
+                    + sizeof(rdx_local_wire.tx_packet)
+                      - RDX_LOCAL_WIRE_LIST_CHUNK_SIZE,
+                chunk_length);
         *packet_length = (uint16_t)(header_length + chunk_length);
         return 0;
     case RDX_LOCAL_WIRE_TX_CAPACITY:

@@ -17,6 +17,8 @@ static unsigned int prepare_calls;
 static unsigned int cancel_calls;
 static unsigned int submit_calls;
 static unsigned int send_calls;
+static unsigned int can_send_request_calls;
+static int send_result;
 static uint8_t last_wire[128];
 static uint16_t last_wire_len;
 
@@ -125,6 +127,15 @@ int rdx_protocol_v23_send(struct rdx_protocol_v23_context *context,
     last_wire[len] = 0;
     last_wire_len = len;
     send_calls++;
+    return send_result;
+}
+
+int rdx_transport_request_can_send_now(
+    uint32_t session_id, uint32_t capture_generation)
+{
+    assert(session_id);
+    assert(capture_generation);
+    can_send_request_calls++;
     return 0;
 }
 
@@ -194,6 +205,8 @@ static void reset_test_state(void)
     cancel_calls = 0;
     submit_calls = 0;
     send_calls = 0;
+    can_send_request_calls = 0;
+    send_result = RDX_TRANSPORT_ACCEPTED;
     memset(last_wire, 0, sizeof(last_wire));
     last_wire_len = 0;
 }
@@ -228,6 +241,82 @@ static void emit_stopped(void)
     event.termination_mode = RDX_RECORD_TERMINATION_NORMAL;
     event.cause = RDX_RECORD_CAUSE_USER_REQUEST;
     engine_callback(engine_callback_priv, &event);
+}
+
+static void emit_stop_ack_ready(void)
+{
+    struct rdx_record_engine_event event;
+
+    assert(engine_callback);
+    memset(&event, 0, sizeof(event));
+    event.type = RDX_RECORD_ENGINE_STOP_ACK_READY;
+    event.session_id = 23;
+    event.capture_generation = 5;
+    event.result = RDX_RECORD_RESULT_OK;
+    event.termination_mode = RDX_RECORD_TERMINATION_NORMAL;
+    event.cause = RDX_RECORD_CAUSE_USER_REQUEST;
+    engine_callback(engine_callback_priv, &event);
+}
+
+static void test_online_backpressure_wait_gate(void)
+{
+    uint8_t payload[80] = {0};
+    struct rdx_record_coordinator coordinator;
+    struct rdx_protocol_v23_context context;
+    struct rdx_record_frame frame;
+    const struct rdx_record_destination_ops *online_ops;
+    unsigned int requests_before;
+    unsigned int sends_before;
+    unsigned int i;
+    static const uint8_t start[] = "*APP#record#1#0#1#";
+
+    reset_test_state();
+    memset(&coordinator, 0, sizeof(coordinator));
+    memset(&context, 0, sizeof(context));
+    memset(&frame, 0, sizeof(frame));
+    assert(rdx_protocol_v23_record_bind_coordinator(&coordinator) == 0);
+    assert(rdx_protocol_v23_record_init(&context) == 0);
+    assert(rdx_protocol_v23_record_handle_command(
+               start, sizeof(start) - 1) == 1);
+    assert(last_request.prepare_start(last_request.prepare_priv,
+                                      &last_request)
+           == RDX_RECORD_RESULT_OK);
+    online_ops = rdx_protocol_v23_record_online_destination_ops();
+    assert(online_ops);
+    assert(online_ops->poll);
+    assert(online_ops->attach(NULL, 23, 5) == 0);
+    emit_start_result(RDX_RECORD_RESULT_OK, RDX_RECORD_CAUSE_NONE);
+
+    frame.session_id = 23;
+    frame.capture_generation = 5;
+    frame.payload = payload;
+    frame.payload_len = sizeof(payload);
+    sends_before = send_calls;
+    requests_before = can_send_request_calls;
+    send_result = RDX_TRANSPORT_RETRYABLE;
+
+    assert(online_ops->consume(NULL, &frame) == 0);
+    assert(send_calls == sends_before + 1);
+    assert(can_send_request_calls == requests_before + 1);
+    for (i = 1; i < 7; i++) {
+        frame.session_frame_seq = i;
+        frame.capture_frame_seq = i;
+        assert(online_ops->consume(NULL, &frame) == 0);
+    }
+    /* Source frames may keep the waiter armed, but must not re-enter ATT
+     * while the previous retryable result is still awaiting CAN_SEND. */
+    assert(send_calls == sends_before + 1);
+    assert(can_send_request_calls == requests_before + 7);
+
+    send_result = RDX_TRANSPORT_ACCEPTED;
+    online_ops->poll(NULL, 23, 5);
+    assert(send_calls == sends_before + 2);
+    assert(can_send_request_calls == requests_before + 8);
+
+    online_ops->cancel(NULL, 23, 5);
+    emit_stopped();
+    rdx_protocol_v23_record_exit();
+    assert(rdx_protocol_v23_record_bind_coordinator(NULL) == 0);
 }
 
 int main(void)
@@ -314,8 +403,8 @@ int main(void)
     assert(!strcmp((char *)last_wire,
                    "*DEV#record#1#0#1#0#1#0#23#42b595.raw#"));
 
-    /* The retry is accepted.  A duplicate while its final completion is
-     * pending must neither resubmit nor emit a premature STOP ACK. */
+    /* The retry is accepted.  A duplicate before the Engine establishes
+     * the STOP cut must neither resubmit nor emit a premature STOP ACK. */
     submit_result = RDX_RECORD_RESULT_OK;
     sends_before = send_calls;
     assert(rdx_protocol_v23_record_handle_command(
@@ -328,7 +417,28 @@ int main(void)
     assert(submit_calls == 6);
     assert(send_calls == sends_before);
 
+    /* Once capture is closed and all pre-cut candidates are owned by the
+     * Destination, report the long V23 STOP state without waiting for the
+     * Artifact commit.  If ATT rejects the first attempt, a later STOP
+     * retry repeats only that ACK and does not resubmit commit. */
+    send_result = RDX_TRANSPORT_RETRYABLE;
+    emit_stop_ack_ready();
+    assert(send_calls == sends_before + 1);
+    assert(!strcmp((char *)last_wire,
+                   "*DEV#record#0#0#1#0#1#0#23#42b595.raw#"));
+    send_result = RDX_TRANSPORT_ACCEPTED;
+    assert(rdx_protocol_v23_record_handle_command(
+               stop, sizeof(stop) - 1) == 1);
+    assert(submit_calls == 6);
+    assert(send_calls == sends_before + 2);
+    assert(!strcmp((char *)last_wire,
+                   "*DEV#record#0#0#1#0#1#0#23#42b595.raw#"));
+
+    /* Successful commit closes the internal lifecycle but does not send a
+     * second STOP notification after the early V23 state ACK. */
+    sends_before = send_calls;
     emit_stopped();
+    assert(send_calls == sends_before);
     assert(!strcmp((char *)last_wire,
                    "*DEV#record#0#0#1#0#1#0#23#42b595.raw#"));
 
@@ -344,5 +454,6 @@ int main(void)
 
     rdx_protocol_v23_record_exit();
     assert(rdx_protocol_v23_record_bind_coordinator(NULL) == 0);
+    test_online_backpressure_wait_gate();
     return 0;
 }

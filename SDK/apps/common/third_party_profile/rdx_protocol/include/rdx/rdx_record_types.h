@@ -135,6 +135,7 @@ enum rdx_record_engine_event_type {
     RDX_RECORD_ENGINE_PAUSE_COMPLETE = 3,
     RDX_RECORD_ENGINE_RESUME_COMPLETE = 4,
     RDX_RECORD_ENGINE_MARK_COMPLETE = 5,
+    RDX_RECORD_ENGINE_STOP_ACK_READY = 6,
 };
 
 enum rdx_record_mark_source {
