@@ -188,17 +188,19 @@
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         1
 #endif
 /* JL dispatches ATT_EVENT_CAN_SEND_NOW through the shared multi-profile
- * packet path.  While Online streaming is active, accepted ATT packets
- * already produce those readiness events; issuing another global native
- * request for every retry can congest btprofile.  The adapter still issues
- * one bounded native fallback after CAN_SEND_TIMEOUT.  Keep the old
- * per-waiter behavior as an explicit diagnostic rollback switch, not as the
- * production default. */
+ * packet path.  Online streaming registers one logical waiter before each
+ * send and consumes one packet per owned ready grant.  Accepted ATT packets
+ * already produce those readiness events, so another global native request
+ * for every packet can congest btprofile; the adapter only issues one bounded
+ * native fallback after CAN_SEND_TIMEOUT.  Keep the old per-waiter behavior
+ * as an explicit diagnostic rollback switch, not as the production default. */
 #ifndef RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING
 #define RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING  0
 #endif
 #ifndef RDX_CFG_BLE_TX_BURST_BUDGET
-#define RDX_CFG_BLE_TX_BURST_BUDGET            4
+/* BR56 att_send uses a private list.  One packet per owned ready grant keeps
+ * the RDX side aligned with the reference protocol worker's credit model. */
+#define RDX_CFG_BLE_TX_BURST_BUDGET            1
 #endif
 #ifndef RDX_CFG_BLE_TX_QUEUE_DEPTH
 /*
@@ -213,9 +215,8 @@
 #define RDX_CFG_BLE_TX_CAN_SEND_TIMEOUT_MS     100
 #endif
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE && \
-    ((RDX_CFG_BLE_TX_BURST_BUDGET < 1) || \
-     (RDX_CFG_BLE_TX_BURST_BUDGET > 16))
-#error "RDX BLE TX burst budget must be between 1 and 16"
+    (RDX_CFG_BLE_TX_BURST_BUDGET != 1)
+#error "BR56 RDX BLE TX requires one packet per ATT ready grant"
 #endif
 #if (RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING != 0) && \
     (RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING != 1)

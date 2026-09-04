@@ -286,6 +286,10 @@ static void test_online_backpressure_wait_gate(void)
     assert(online_ops->poll);
     assert(online_ops->attach(NULL, 23, 5) == 0);
     emit_start_result(RDX_RECORD_RESULT_OK, RDX_RECORD_CAUSE_NONE);
+    /* START ACK owns the first ATT credit.  Its ready event must arrive before
+     * stream data is allowed into the same private send list. */
+    assert(can_send_request_calls == 1);
+    online_ops->poll(NULL, 23, 5);
 
     frame.session_id = 23;
     frame.capture_generation = 5;
@@ -312,6 +316,16 @@ static void test_online_backpressure_wait_gate(void)
     online_ops->poll(NULL, 23, 5);
     assert(send_calls == sends_before + 2);
     assert(can_send_request_calls == requests_before + 8);
+
+    /* An accepted stream packet also closes the gate.  A later source frame
+     * queues without probing ATT until the next owned ready grant. */
+    sends_before = send_calls;
+    frame.session_frame_seq = 7;
+    frame.capture_frame_seq = 7;
+    assert(online_ops->consume(NULL, &frame) == 0);
+    assert(send_calls == sends_before);
+    online_ops->poll(NULL, 23, 5);
+    assert(send_calls == sends_before + 1);
 
     online_ops->cancel(NULL, 23, 5);
     emit_stopped();

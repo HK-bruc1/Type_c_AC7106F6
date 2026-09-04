@@ -203,6 +203,9 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
 {
     int ret = 0;
     uint8_t sent_now = 0;
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+    uint8_t waiter_armed = 0;
+#endif
 
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
     rdx_online_record.drain_count++;
@@ -226,6 +229,21 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
     while (rdx_online_record.tx_count && sent_now < budget) {
         uint8_t head = rdx_online_record.tx_head;
 
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+        /* Register ownership before entering app_ble so an immediate shared
+         * CAN_SEND event cannot race ahead of our waiter.  Keep one accepted
+         * notification per ready grant, matching the reference send worker's
+         * semaphore/credit discipline and bounding the BR56 ATT list. */
+        rdx_online_record.tx_waiting = 1;
+        if (rdx_transport_request_can_send_now(
+                rdx_online_record.session_id,
+                rdx_online_record.capture_generation)) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+            rdx_online_record.arm_fail_count++;
+#endif
+        }
+        waiter_armed = 1;
+#endif
         ret = rdx_protocol_v23_send(rdx_v23_record_context, rdx_online_record.tx_packet[head],
                             rdx_online_record.tx_len[head]);
         if (ret) {
@@ -244,6 +262,11 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
             (head + 1) % RDX_RECORD_TX_QUEUE_DEPTH;
         rdx_online_record.tx_count--;
         sent_now++;
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+        /* Do not fill the private ATT list from one Record Engine turn.  The
+         * next owned ready event re-opens the gate in destination_poll(). */
+        break;
+#endif
     }
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
     if (sent_now > rdx_online_record.burst_peak) {
@@ -252,7 +275,7 @@ static int rdx_v23_record_drain_queue(uint8_t budget)
 #endif
 #if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
 arm_waiter:
-    if (rdx_online_record.tx_count) {
+    if (rdx_online_record.tx_count && !waiter_armed) {
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
         if (sent_now >= budget) {
             rdx_online_record.budget_hit_count++;
@@ -594,6 +617,18 @@ static void rdx_v23_record_engine_event(
         rdx_session_metadata_begin(event->session_id);
 #endif
         rdx_transport_set_record_streaming(1);
+#if RDX_CFG_BLE_TX_CAN_SEND_ENABLE
+        /* The START state packet shares the same ATT list as stream data.
+         * Own its completion grant before sending so the first Opus frame
+         * cannot overtake an ACK that has only just entered app_ble. */
+        rdx_online_record.tx_waiting = 1;
+        if (rdx_transport_request_can_send_now(
+                event->session_id, event->capture_generation)) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+            rdx_online_record.arm_fail_count++;
+#endif
+        }
+#endif
         ret = rdx_v23_record_send_state(1, 1);
         if (ret) {
             rdx_record_engine_submit_system_event(

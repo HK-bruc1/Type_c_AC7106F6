@@ -40,6 +40,7 @@ struct rdx_ble_app_send_ret_stat {
 struct rdx_ble_transport_tx_stats {
     u32 unavailable_count;
     u32 valid_len_busy_count;
+    u32 app_send_overlap_count;
     u32 app_send_ok_count;
     u32 app_send_error_count;
     u32 app_send_ret_overflow_count;
@@ -87,6 +88,7 @@ typedef struct {
     u8 record_streaming;
     u8 tx_phy;
     u8 rx_phy;
+    u8 app_send_active;
     u8 can_send_pending;
     u32 connection_generation;
     u32 can_send_connection_generation;
@@ -682,22 +684,40 @@ void rdx_transport_exit(void)
 enum rdx_transport_result rdx_transport_send(
     const uint8_t *data, uint16_t len)
 {
+    void *send_hdl;
     int valid_len;
     int ret;
 
     if (!data || !len) {
         return RDX_TRANSPORT_FATAL;
     }
+    spin_lock(&rdx_ble.tx_lock);
     if (!rdx_ble.hdl || !rdx_ble.con_handle || !rdx_ble.tx_ccc) {
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
         if (rdx_ble.record_streaming) {
             rdx_ble.tx_stats.unavailable_count++;
         }
 #endif
+        spin_unlock(&rdx_ble.tx_lock);
         return RDX_TRANSPORT_UNAVAILABLE;
     }
+    /* Record data, control replies and Local Wire completions originate from
+     * different tasks.  Serialize the public app_ble wrapper entry without
+     * blocking any producer or holding a spin lock across the SDK call. */
+    if (rdx_ble.app_send_active) {
+#if RDX_CFG_BLE_TX_DIAG_ENABLE
+        if (rdx_ble.record_streaming) {
+            rdx_ble.tx_stats.app_send_overlap_count++;
+        }
+#endif
+        spin_unlock(&rdx_ble.tx_lock);
+        return RDX_TRANSPORT_RETRYABLE;
+    }
+    rdx_ble.app_send_active = 1;
+    send_hdl = rdx_ble.hdl;
+    spin_unlock(&rdx_ble.tx_lock);
 
-    valid_len = app_ble_att_vaild_len_get(rdx_ble.hdl);
+    valid_len = app_ble_att_vaild_len_get(send_hdl);
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
     if (rdx_ble.record_streaming && valid_len > 0) {
         u16 sample = valid_len > 0xffff ? 0xffff : valid_len;
@@ -718,10 +738,13 @@ enum rdx_transport_result rdx_transport_send(
             rdx_ble.tx_stats.valid_len_busy_count++;
         }
 #endif
+        spin_lock(&rdx_ble.tx_lock);
+        rdx_ble.app_send_active = 0;
+        spin_unlock(&rdx_ble.tx_lock);
         return RDX_TRANSPORT_RETRYABLE;
     }
 
-    ret = app_ble_att_send_data(rdx_ble.hdl, RDX_HANDLE_TX, (u8 *)data,
+    ret = app_ble_att_send_data(send_hdl, RDX_HANDLE_TX, (u8 *)data,
                                 len, ATT_OP_AUTO_READ_CCC);
 #if RDX_CFG_BLE_TX_DIAG_ENABLE
     if (rdx_ble.record_streaming) {
@@ -733,6 +756,9 @@ enum rdx_transport_result rdx_transport_send(
         }
     }
 #endif
+    spin_lock(&rdx_ble.tx_lock);
+    rdx_ble.app_send_active = 0;
+    spin_unlock(&rdx_ble.tx_lock);
     if (!ret) {
         return RDX_TRANSPORT_ACCEPTED;
     }
@@ -870,10 +896,11 @@ void rdx_transport_tx_diagnostics_log(void)
 
     rdx_ble_tx_stats_get(&stats);
     printf("[RDX][TXQ] ble unavailable=%u busy_valid_len=%u"
-           " app_ok=%u app_error=%u valid_samples=%u"
+           " send_overlap=%u app_ok=%u app_error=%u valid_samples=%u"
            " valid_min=%u valid_max=%u\n",
            (unsigned int)stats.unavailable_count,
            (unsigned int)stats.valid_len_busy_count,
+           (unsigned int)stats.app_send_overlap_count,
            (unsigned int)stats.app_send_ok_count,
            (unsigned int)stats.app_send_error_count,
            (unsigned int)stats.valid_len_sample_count,

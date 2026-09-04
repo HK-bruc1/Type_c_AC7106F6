@@ -3,10 +3,6 @@
 
 #include <stdint.h>
 
-#if CONFIG_CPU_BR56
-#include "system/includes.h"
-#endif
-
 #include "rdx/domain/rdx_artifact.h"
 #include "rdx/ports/rdx_legacy_uxfile_port.h"
 #include "rdx/ports/rdx_native_artifact_port.h"
@@ -167,10 +163,10 @@ struct rdx_local_storage_service {
     uint8_t operation_pending;
     uint8_t operation_running;
 #if CONFIG_CPU_BR56
-    /* The target service owns one worker and serializes all backend calls.
-     * Host tests intentionally compile without the SDK task primitives. */
-    OS_MUTEX lock;
-    uint8_t lock_initialized;
+    /* BR56 synchronization objects are private to the platform implementation
+     * so this public RDX boundary does not expose JL OS types. */
+    void *platform_context;
+    uint8_t platform_initialized;
     uint8_t worker_created;
     uint8_t worker_stop;
     uint8_t worker_wake_pending;
