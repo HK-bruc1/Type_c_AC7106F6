@@ -53,4 +53,16 @@ void rdx_protocol_v23_local_storage_handle_can_send(
     uint32_t owner, uint32_t token);
 void rdx_protocol_v23_local_storage_handle_upload_timeout(void);
 
+#if RDX_CFG_OTA_ENABLE
+int rdx_protocol_v23_ota_init(
+    struct rdx_protocol_v23_context *context);
+void rdx_protocol_v23_ota_exit(void);
+void rdx_protocol_v23_ota_handle_link_change(
+    uint8_t connected, uint32_t connection_generation);
+void rdx_protocol_v23_ota_handle_session_change(void);
+void rdx_protocol_v23_ota_handle_write(
+    const uint8_t *data, uint16_t len,
+    uint32_t connection_generation);
+#endif
+
 #endif

@@ -13,6 +13,8 @@
 #define RDX_CMD_DL_BLE_NAME_SET                 "*APP#blename#"
 #define RDX_CMD_DL_MIC_GAIN_QUERY               "*APP#cmicgain#"
 #define RDX_CMD_DL_MIC_GAIN_SET                 "*APP#micgain#"
+#define RDX_CMD_DL_OTA_UPGRADE                  "*APP#upgrade#"
+#define RDX_CMD_DL_OTA_DATA                     "*APP#ota#"
 
 /* Device -> APP management responses. */
 #define RDX_CMD_UP_AUTH_SN                      "*DEV#authsn#"
@@ -24,6 +26,8 @@
 #define RDX_CMD_UP_BLE_NAME_SET                 "*DEV#blename#"
 #define RDX_CMD_UP_MIC_GAIN_QUERY               "*DEV#cmicgain#"
 #define RDX_CMD_UP_MIC_GAIN_SET                 "*DEV#micgain#"
+#define RDX_CMD_UP_OTA_UPGRADE                  "*DEV#upgrade#"
+#define RDX_CMD_UP_OTA_DATA_REQUEST             "*DEV#otareq#"
 
 /* BLE name wire/storage contract: printable ASCII, excluding '#'. */
 #define RDX_BLE_NAME_MAX_LEN                    \

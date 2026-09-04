@@ -5,6 +5,7 @@
 #include "app_config.h"
 
 #if TCFG_RDX_ENABLE
+#include "rdx/ports/rdx_device_identity_port.h"
 #include "rdx/ports/rdx_factory_identity_port.h"
 #include "rdx/ports/rdx_product_profile_port.h"
 #include "rdx/rdx_device_state_service.h"
@@ -22,16 +23,111 @@ static uint16_t rdx_read_value_len;
 
 static void rdx_identity_build_read_value(void);
 
-static void rdx_identity_set_zero_factory_identity(void)
+/*
+ * A development image may be programmed with a literal zero marker when the
+ * production identity is not available yet.  The burner can store that
+ * marker as either "0" or "0\0" (and some older flows use an all-zero text
+ * field).  Keep this check deliberately narrow so explicit zero markers can
+ * be diagnosed separately; other malformed records use the common fallback.
+ */
+static uint8_t rdx_identity_is_zero_placeholder(const uint8_t *payload,
+                                                uint16_t payload_len)
 {
-    memset(rdx_ble_mac, 0, sizeof(rdx_ble_mac));
-    memset(rdx_ble_mac_string, '0', sizeof(rdx_ble_mac_string) - 1);
-    rdx_ble_mac_string[sizeof(rdx_ble_mac_string) - 1] = '\0';
+    uint16_t i;
+
+    if (!payload || !payload_len) {
+        return 0;
+    }
+
+    if (payload_len <= RDX_FACTORY_IDENTITY_RECORD_LEN + 1) {
+        uint8_t all_zero_text = 1;
+
+        for (i = 0; i < payload_len; i++) {
+            if (payload[i] != '0' && payload[i] != '\0') {
+                all_zero_text = 0;
+                break;
+            }
+        }
+        if (all_zero_text) {
+            return 1;
+        }
+    }
+
+    /* Also accept the canonical 24,12,16 zero record with its delimiters. */
+    if (payload_len == RDX_FACTORY_IDENTITY_RECORD_LEN
+        || (payload_len == RDX_FACTORY_IDENTITY_RECORD_LEN + 1
+            && payload[RDX_FACTORY_IDENTITY_RECORD_LEN] == '\0')) {
+        if (payload[RDX_FACTORY_IDENTITY_AUTH_KEY_LEN] != ','
+            || payload[RDX_FACTORY_IDENTITY_AUTH_KEY_LEN + 1
+                       + RDX_FACTORY_IDENTITY_MAC_TEXT_LEN] != ',') {
+            return 0;
+        }
+        for (i = 0; i < RDX_FACTORY_IDENTITY_AUTH_KEY_LEN; i++) {
+            if (payload[i] != '0') {
+                return 0;
+            }
+        }
+        for (i = 0; i < RDX_FACTORY_IDENTITY_MAC_TEXT_LEN; i++) {
+            if (payload[RDX_FACTORY_IDENTITY_AUTH_KEY_LEN + 1 + i] != '0') {
+                return 0;
+            }
+        }
+        for (i = 0; i < RDX_FACTORY_IDENTITY_LABEL_SN_LEN; i++) {
+            if (payload[RDX_FACTORY_IDENTITY_AUTH_KEY_LEN + 1
+                       + RDX_FACTORY_IDENTITY_MAC_TEXT_LEN + 1 + i] != '0') {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static void rdx_identity_set_fallback_identity(void)
+{
+    uint8_t default_ble_mac[RDX_DEVICE_IDENTITY_BLE_MAC_SIZE];
+    int ret;
+
+    /* Keep the SDK/controller address when only the factory identity is
+     * unavailable.  It is already allocated by the BLE stack at this point,
+     * and is a safer development fallback than advertising 00:00:00:00:00:00. */
+    ret = rdx_device_identity_read_ble_mac(default_ble_mac);
+    if (!ret) {
+        uint8_t i;
+
+        memcpy(rdx_ble_mac, default_ble_mac, sizeof(rdx_ble_mac));
+        for (i = 0; i < RDX_FACTORY_IDENTITY_BLE_MAC_LEN; i++) {
+            uint8_t byte = rdx_ble_mac[
+                RDX_FACTORY_IDENTITY_BLE_MAC_LEN - 1 - i];
+            static const char hex[] = "0123456789ABCDEF";
+            rdx_ble_mac_string[i * 2] = hex[byte >> 4];
+            rdx_ble_mac_string[i * 2 + 1] = hex[byte & 0x0f];
+        }
+        rdx_ble_mac_string[RDX_FACTORY_IDENTITY_MAC_TEXT_LEN] = '\0';
+    } else {
+        memset(rdx_ble_mac, 0, sizeof(rdx_ble_mac));
+        memset(rdx_ble_mac_string, '0', sizeof(rdx_ble_mac_string) - 1);
+        rdx_ble_mac_string[sizeof(rdx_ble_mac_string) - 1] = '\0';
+        printf("[RDX][WARN] default BLE MAC read failed=%d; using zero MAC\n",
+               ret);
+    }
     memset(rdx_auth_key, '0', sizeof(rdx_auth_key) - 1);
     rdx_auth_key[sizeof(rdx_auth_key) - 1] = '\0';
     memset(rdx_label_sn, '0', sizeof(rdx_label_sn) - 1);
     rdx_label_sn[sizeof(rdx_label_sn) - 1] = '\0';
     rdx_identity_build_read_value();
+}
+
+static void rdx_identity_use_fallback_identity(const char *reason)
+{
+    rdx_identity_set_fallback_identity();
+    printf("[RDX][WARN] factory identity %s; using default BLE MAC and zero identity\n",
+           reason);
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
+    printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
+    printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
+    printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
+#endif
 }
 
 static void rdx_identity_build_read_value(void)
@@ -70,6 +166,7 @@ int rdx_identity_init(void)
 {
     uint8_t auth_code[RDX_AUTH_CODE_MAX_PAYLOAD_LEN];
     uint16_t auth_code_len = 0;
+    uint16_t identity_len;
     struct rdx_factory_identity factory_identity;
     int ret;
 
@@ -84,23 +181,37 @@ int rdx_identity_init(void)
                                       &auth_code_len);
     if (ret) {
         if (ret == RDX_AUTH_CODE_ERR_NOT_PRESENT) {
-            rdx_identity_set_zero_factory_identity();
-            printf("[RDX][WARN] factory identity not present; using zero identity\n");
-#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
-            printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
-            printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
-            printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
-#endif
+            rdx_identity_use_fallback_identity("not present");
             return 0;
         }
         printf("[RDX] factory identity invalid stage=block code=%d\n", ret);
-        return ret;
+        rdx_identity_use_fallback_identity("unavailable");
+        return 0;
     }
-    ret = rdx_factory_identity_parse(auth_code, auth_code_len,
+    if (rdx_identity_is_zero_placeholder(auth_code, auth_code_len)) {
+        rdx_identity_use_fallback_identity("zero placeholder");
+        return 0;
+    }
+
+    /* The legacy BR28 implementation always copied the first 54 bytes from
+     * the auth-code area into its temporary buffer, regardless of the block
+     * header length.  Some burner/tool versions therefore leave a trailing
+     * NUL, line ending, or padded bytes in the block.  Keep the block CRC and
+     * bounds checks strict in the Provider, but parse the fixed RDX record
+     * prefix just like the reference implementation. */
+    identity_len = auth_code_len;
+    if (identity_len > RDX_FACTORY_IDENTITY_RECORD_LEN) {
+        printf("[RDX][WARN] factory identity payload len=%u; parsing first %u bytes\n",
+               identity_len, RDX_FACTORY_IDENTITY_RECORD_LEN);
+        identity_len = RDX_FACTORY_IDENTITY_RECORD_LEN;
+    }
+    ret = rdx_factory_identity_parse(auth_code, identity_len,
                                      &factory_identity);
     if (ret) {
-        printf("[RDX] factory identity invalid stage=record code=%d\n", ret);
-        return ret;
+        printf("[RDX] factory identity invalid stage=record code=%d len=%u\n",
+               ret, auth_code_len);
+        rdx_identity_use_fallback_identity("unavailable");
+        return 0;
     }
 
     memcpy(rdx_ble_mac, factory_identity.ble_mac, sizeof(rdx_ble_mac));
@@ -110,8 +221,8 @@ int rdx_identity_init(void)
     memcpy(rdx_label_sn, factory_identity.label_sn, sizeof(rdx_label_sn));
     rdx_identity_build_read_value();
 
-#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
     printf("[RDX] factory identity loaded\n");
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
     printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
     printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
     printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);

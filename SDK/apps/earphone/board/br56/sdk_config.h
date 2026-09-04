@@ -74,7 +74,7 @@
 #endif // TCFG_CFG_TOOL_ENABLE
 
 #define CONFIG_SPI_DATA_WIDTH                     4                // flash通信
-#define CONFIG_FLASH_SIZE                         0x100000         // flash容量
+#define CONFIG_FLASH_SIZE                         0x200000         // flash容量
 #define TCFG_VM_SIZE                              40               // VM大小(K)
 #define TCFG_JLSTREAM_EFFICIENT_MODE              0                // 音频流高效模式
 
@@ -163,7 +163,7 @@
 
 #define TCFG_IOKEY_ENABLE                         0                // IO按键配置
 
-#define TCFG_ADKEY_ENABLE                         0                // AD按键配置
+#define TCFG_ADKEY_ENABLE                         1                // AD按键配置
 
 #define TCFG_MICKEY_ENABLE                        1                // MIC按键配置
 
@@ -298,15 +298,15 @@
 // ------------功能配置.json------------
 
 // ------------升级配置.json------------
-#define TCFG_UPDATE_ENABLE                        0                // 升级选择
+#define TCFG_UPDATE_ENABLE                        1                // 升级选择
 #if TCFG_UPDATE_ENABLE
 #define TCFG_UPDATE_STORAGE_DEV_EN                0                // 设备升级
-#define TCFG_UPDATE_BLE_TEST_EN                   1                // ble蓝牙升级
-#define TCFG_UPDATE_BT_LMP_EN                     1                // edr蓝牙升级
-#define TCFG_TEST_BOX_ENABLE                      1                // 测试盒串口升级
+#define TCFG_UPDATE_BLE_TEST_EN                   0                // ble蓝牙升级
+#define TCFG_UPDATE_BT_LMP_EN                     0                // edr蓝牙升级
+#define TCFG_TEST_BOX_ENABLE                      0                // 测试盒串口升级
 #define TCFG_UPDATE_UART_IO_EN                    0                // 普通io串口升级
 #define TCFG_UPDATE_UART_ROLE                     0                // 串口升级主从机选择
-#define TCFG_DUAL_BANK_ENABLE                     0                // 支持双备份升级
+#define TCFG_DUAL_BANK_ENABLE                     1                // 支持双备份升级
 #define TCFG_DUAL_BANK_UPDATE_NO_ERASE            0                // 允许边升级边播歌
 #define TCFG_UPDATE_COMPRESS                      0                // 压缩双备份
 #endif // TCFG_UPDATE_ENABLE

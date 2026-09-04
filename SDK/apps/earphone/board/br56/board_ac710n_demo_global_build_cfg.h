@@ -46,7 +46,7 @@
 
 /* Following Macros Only For Post Bulid Configuaration */
 
-#define CONFIG_DB_UPDATE_DATA_GENERATE_EN       0       //是否生成db_data.bin(用于第三方协议接入使用)
+#define CONFIG_DB_UPDATE_DATA_GENERATE_EN       1       //是否生成db_data.bin(用于第三方协议接入使用)
 #define CONFIG_ONLY_GRENERATE_ALIGN_4K_CODE     0    	//ufw只生成1份4K对齐的代码
 
 //config for supported chip version

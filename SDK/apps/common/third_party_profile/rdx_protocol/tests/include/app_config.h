@@ -17,6 +17,9 @@
 #ifndef RDX_CFG_RECORD_MARK_ENABLE
 #define RDX_CFG_RECORD_MARK_ENABLE              0
 #endif
+#ifndef RDX_CFG_OTA_ENABLE
+#define RDX_CFG_OTA_ENABLE                      0
+#endif
 #ifndef RDX_CFG_RTC_ENABLE
 #define RDX_CFG_RTC_ENABLE                      0
 #endif

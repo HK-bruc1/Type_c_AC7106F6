@@ -37,6 +37,7 @@
       RDX_ABILITY_RECORD_PAUSE_RESUME) != 0)
 #define RDX_CFG_RECORD_MARK_ENABLE             \
     ((RDX_COMPAT_DEVICE_ABILITY & RDX_ABILITY_RECORD_MARK) != 0)
+#define RDX_CFG_OTA_ENABLE                     (RDX_COMPAT_OTA_ENABLE != 0)
 
 /* Local storage follows the Product Profile.  The Type-C Product Profile now
  * enables the formal Stage-D ability and selects Native; other products may
@@ -275,7 +276,8 @@
  * describes the Adapter sources selected into this exact firmware build.
  */
 #define RDX_REQUIRED_PORT_CAPS                 \
-    RDX_REQUIRED_CAPS_FROM_ABILITY(RDX_COMPAT_DEVICE_ABILITY)
+    (RDX_REQUIRED_CAPS_FROM_ABILITY(RDX_COMPAT_DEVICE_ABILITY) | \
+     (RDX_CFG_OTA_ENABLE ? RDX_CAP_OTA_UPDATE : RDX_CAP_NONE))
 
 #if RDX_CFG_RTC_ENABLE
 #define RDX_CFG_RTC_COMPILED_CAPS              RDX_CAP_RTC
@@ -304,12 +306,19 @@
 #define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS    RDX_CAP_NONE
 #endif
 
+#if RDX_CFG_OTA_ENABLE
+#define RDX_CFG_OTA_COMPILED_CAPS              RDX_CAP_OTA_UPDATE
+#else
+#define RDX_CFG_OTA_COMPILED_CAPS              RDX_CAP_NONE
+#endif
+
 #define RDX_PORT_COMPILED_CAPS                 \
     (RDX_REQUIRED_BASE_CAPS                   | \
      RDX_CFG_RTC_COMPILED_CAPS                | \
      RDX_CFG_MEETING_COMPILED_CAPS            | \
      RDX_CFG_CALL_COMPILED_CAPS                | \
-     RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS)
+     RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS       | \
+     RDX_CFG_OTA_COMPILED_CAPS)
 
 #if (RDX_REQUIRED_PORT_CAPS & ~RDX_JL_BR56_AVAILABLE_CAPS)
 #error "RDX Product Ability requires a capability unavailable in JL BR56 Adapter"
@@ -341,6 +350,22 @@
 
 #if RDX_CFG_RECORD_MARK_ENABLE && !RDX_CFG_ONLINE_RECORDING_ENABLE
 #error "RDX record mark ability requires an online recording ability"
+#endif
+
+#if RDX_CFG_OTA_ENABLE && !TCFG_UPDATE_ENABLE
+#error "RDX OTA requires the SDK update subsystem"
+#endif
+#if RDX_CFG_OTA_ENABLE && !TCFG_DUAL_BANK_ENABLE
+#error "RDX OTA requires dual-bank update support"
+#endif
+#if RDX_CFG_OTA_ENABLE && !CONFIG_DOUBLE_BANK_ENABLE
+#error "RDX OTA requires the dual-bank flash layout"
+#endif
+#if RDX_CFG_OTA_ENABLE && \
+    (TCFG_UPDATE_BLE_TEST_EN || TCFG_UPDATE_BT_LMP_EN || \
+     TCFG_TEST_BOX_ENABLE || TCFG_UPDATE_STORAGE_DEV_EN || \
+     TCFG_UPDATE_UART_IO_EN)
+#error "RDX OTA owns firmware update; disable JL native OTA entry points"
 #endif
 
 /* RDX RTC calendar policy; products may override these before this include. */
@@ -418,6 +443,8 @@
 #define RDX_LEGACY_UXFILE_ABI_READY             0
 #define RDX_LEGACY_UXFILE_ADAPTER_IMPLEMENTED   0
 #define RDX_CFG_LOCAL_STORAGE_COMPILED_CAPS     0
+#define RDX_CFG_OTA_ENABLE                     0
+#define RDX_CFG_OTA_COMPILED_CAPS              0
 #define RDX_PRODUCT_SUPPORTED_ABILITY          0
 #define RDX_REQUIRED_PORT_CAPS                 0
 #define RDX_PORT_COMPILED_CAPS                 0

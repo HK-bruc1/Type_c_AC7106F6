@@ -276,6 +276,7 @@ static void test_online_backpressure_wait_gate(void)
     memset(&frame, 0, sizeof(frame));
     assert(rdx_protocol_v23_record_bind_coordinator(&coordinator) == 0);
     assert(rdx_protocol_v23_record_init(&context) == 0);
+    context.initialized = 1;
     assert(rdx_protocol_v23_record_handle_command(
                start, sizeof(start) - 1) == 1);
     assert(last_request.prepare_start(last_request.prepare_priv,
@@ -348,6 +349,7 @@ int main(void)
     assert(rdx_protocol_v23_record_init(&context) != 0);
     assert(rdx_protocol_v23_record_bind_coordinator(&coordinator) == 0);
     assert(rdx_protocol_v23_record_init(&context) == 0);
+    context.initialized = 1;
 
     submit_result = RDX_RECORD_RESULT_CONTROL_QUEUE_FULL;
     assert(rdx_protocol_v23_record_handle_command(

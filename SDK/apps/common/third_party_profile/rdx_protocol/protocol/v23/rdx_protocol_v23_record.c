@@ -6,7 +6,11 @@
 
 #if TCFG_RDX_ENABLE && RDX_CFG_ONLINE_RECORDING_ENABLE
 #include "rdx/rdx_record_engine.h"
+#include "rdx/rdx_online_record_service.h"
 #include "rdx/rdx_session_metadata_service.h"
+#if RDX_CFG_OTA_ENABLE
+#include "rdx/rdx_ota_service.h"
+#endif
 #include "rdx/ports/rdx_transport_port.h"
 #if RDX_CFG_LOCAL_RECORDING_ENABLE
 #include "rdx/rdx_record_coordinator.h"
@@ -800,19 +804,44 @@ static enum rdx_record_format_id rdx_v23_record_format_for_scene(
            : RDX_RECORD_FORMAT_MEETING_V1;
 }
 
-static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
+static int rdx_v23_record_start_scene_request(
+    enum rdx_record_scene scene,
+    enum rdx_record_request_source source)
 {
     struct rdx_record_request request;
     int ret;
 
+    if (scene != RDX_RECORD_SCENE_MEETING
+        && scene != RDX_RECORD_SCENE_CALL) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (source != RDX_RECORD_SOURCE_KEY
+        && source != RDX_RECORD_SOURCE_APP) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (!rdx_v23_record_context
+        || !rdx_v23_record_context->initialized) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (!rdx_protocol_v23_query_ready(rdx_v23_record_context,
+                                      "record", 0)) {
+        return RDX_RECORD_RESULT_LINK_LOST;
+    }
+#if RDX_CFG_OTA_ENABLE
+    if (rdx_ota_service_is_active()) {
+        printf("[RDX][ONLINE] start_rejected reason=ota_active\n");
+        return RDX_RECORD_RESULT_BUSY;
+    }
+#endif
+
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STREAMING) {
         rdx_v23_record_send_state(rdx_online_record.wire_state, 1);
-        return;
+        return RDX_RECORD_RESULT_OK;
     }
     if (rdx_online_record.state != RDX_ONLINE_RECORD_IDLE) {
         printf("[RDX][ONLINE] duplicate_start state=%u\n",
                rdx_online_record.state);
-        return;
+        return RDX_RECORD_RESULT_BUSY;
     }
 
     memset(&request, 0, sizeof(request));
@@ -824,6 +853,7 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
     request.controller_id = RDX_RECORD_CONTROLLER_ONLINE;
     request.scene = scene;
     request.format_id = rdx_v23_record_format_for_scene(scene);
+    request.source = source;
     rdx_online_record.scene = scene;
 #if RDX_CFG_LOCAL_RECORDING_ENABLE
     request.prepare_start = rdx_record_coordinator_prepare_engine_start;
@@ -838,16 +868,21 @@ static void rdx_v23_record_start_scene(enum rdx_record_scene scene)
         printf("[RDX][ONLINE] start_submit_failed request=%u ret=%d\n",
                (unsigned int)request.request_id, ret);
         rdx_v23_record_send_state(0, 0);
+        return ret;
     }
+    return RDX_RECORD_RESULT_OK;
 }
 
 static void rdx_v23_record_start(void)
 {
-    rdx_v23_record_start_scene(RDX_RECORD_SCENE_MEETING);
+    rdx_online_record_request_start(RDX_RECORD_SCENE_MEETING,
+                                    RDX_RECORD_SOURCE_APP);
 }
 
 #if RDX_CFG_RECORD_PAUSE_RESUME_ENABLE
-static void rdx_v23_record_control(enum rdx_record_request_type type)
+static void rdx_v23_record_control(
+    enum rdx_record_request_type type,
+    enum rdx_record_request_source source)
 {
     struct rdx_record_request request;
     int ret;
@@ -885,6 +920,7 @@ static void rdx_v23_record_control(enum rdx_record_request_type type)
     request.scene = rdx_online_record.scene;
     request.format_id = rdx_v23_record_format_for_scene(
         rdx_online_record.scene);
+    request.source = source;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
         rdx_online_record.state = type == RDX_RECORD_REQUEST_PAUSE
@@ -929,14 +965,23 @@ static void rdx_v23_record_mark(void)
 }
 #endif
 
-static void rdx_v23_record_stop(void)
+static int rdx_v23_record_stop_request(enum rdx_record_request_source source)
 {
     struct rdx_record_request request;
+    uint8_t previous_state;
     int ret;
 
+    if (source != RDX_RECORD_SOURCE_KEY
+        && source != RDX_RECORD_SOURCE_APP) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (!rdx_v23_record_context
+        || !rdx_v23_record_context->initialized) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
     if (rdx_online_record.state == RDX_ONLINE_RECORD_IDLE) {
         rdx_v23_record_send_state(0, 0);
-        return;
+        return RDX_RECORD_RESULT_OK;
     }
     if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
         int ack_ret = -1;
@@ -954,7 +999,7 @@ static void rdx_v23_record_stop(void)
         printf("[RDX][ONLINE] duplicate_stop state=pending"
                " ack_ready=%u ret=%d\n",
                rdx_online_record.stop_ack_ready, ack_ret);
-        return;
+        return RDX_RECORD_RESULT_OK;
     }
 
     memset(&request, 0, sizeof(request));
@@ -964,22 +1009,86 @@ static void rdx_v23_record_stop(void)
     request.scene = rdx_online_record.scene;
     request.format_id = rdx_v23_record_format_for_scene(
         rdx_online_record.scene);
+    request.source = source;
+    previous_state = rdx_online_record.state;
     rdx_online_record.state = RDX_ONLINE_RECORD_STOP_PENDING;
     ret = rdx_record_engine_submit(&request);
     if (ret) {
         /* Submission did not transfer ownership to Engine.  Restore the
          * observable recording state so APP can retry STOP instead of
          * leaving Protocol permanently stuck in STOP_PENDING. */
-        rdx_online_record.state = rdx_online_record.wire_state == 2
-                                  ? RDX_ONLINE_RECORD_PAUSED
-                                  : RDX_ONLINE_RECORD_STREAMING;
+        rdx_online_record.state = previous_state;
         printf("[RDX][ONLINE] stop_submit_failed request=%u ret=%d\n",
                (unsigned int)request.request_id, ret);
         if (rdx_protocol_session_can_send(
                 &rdx_v23_record_context->session)) {
             rdx_v23_record_send_state(rdx_online_record.wire_state, 1);
         }
+        return ret;
     }
+    return RDX_RECORD_RESULT_OK;
+}
+
+/* Public Online Record Service facade.  The V23 runtime and destination are
+ * still colocated in this adapter for the current migration step; callers
+ * depend only on the neutral service header above. */
+int rdx_online_record_request_start(
+    enum rdx_record_scene scene,
+    enum rdx_record_request_source source)
+{
+    return rdx_v23_record_start_scene_request(scene, source);
+}
+
+int rdx_online_record_request_stop(enum rdx_record_request_source source)
+{
+    return rdx_v23_record_stop_request(source);
+}
+
+int rdx_online_record_request_toggle(
+    enum rdx_record_scene scene,
+    enum rdx_record_request_source source)
+{
+    int ret;
+
+    if (source != RDX_RECORD_SOURCE_KEY
+        && source != RDX_RECORD_SOURCE_APP) {
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (!rdx_v23_record_context
+        || !rdx_v23_record_context->initialized) {
+        printf("[RDX][RECORD] toggle_rejected reason=service_not_ready"
+               " scene=%u source=%u\n", scene, source);
+        return RDX_RECORD_RESULT_BAD_STATE;
+    }
+    if (rdx_online_record.state == RDX_ONLINE_RECORD_IDLE) {
+        ret = rdx_online_record_request_start(scene, source);
+        if (ret) {
+            printf("[RDX][RECORD] toggle_rejected reason=start ret=%d"
+                   " scene=%u source=%u\n", ret, scene, source);
+        }
+        return ret;
+    }
+
+    if (rdx_online_record.scene != scene) {
+        printf("[RDX][RECORD] toggle_rejected reason=other_scene"
+               " current=%u requested=%u state=%u source=%u\n",
+               rdx_online_record.scene, scene, rdx_online_record.state,
+               source);
+        return RDX_RECORD_RESULT_BUSY;
+    }
+
+    if (rdx_online_record.state == RDX_ONLINE_RECORD_STOP_PENDING) {
+        printf("[RDX][RECORD] toggle_ignored reason=stop_pending"
+               " scene=%u source=%u\n", scene, source);
+        return RDX_RECORD_RESULT_BUSY;
+    }
+
+    ret = rdx_online_record_request_stop(source);
+    if (ret) {
+        printf("[RDX][RECORD] toggle_rejected reason=stop ret=%d"
+               " scene=%u source=%u\n", ret, scene, source);
+    }
+    return ret;
 }
 
 static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
@@ -1002,9 +1111,6 @@ static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
     static const uint8_t resume_call[] = "*APP#record#3#1#";
     static const uint8_t resume_call_16k[] = "*APP#record#3#1#1#";
 
-    if (!rdx_protocol_v23_query_ready(rdx_v23_record_context, "record", len)) {
-        return;
-    }
     if (rdx_protocol_v23_data_equals(data, len, stop, sizeof(stop) - 1)
         || rdx_protocol_v23_data_equals(data, len, stop_meeting_16k,
                                 sizeof(stop_meeting_16k) - 1)
@@ -1012,14 +1118,15 @@ static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
                                 sizeof(stop_call) - 1)
         || rdx_protocol_v23_data_equals(data, len, stop_call_16k,
                                 sizeof(stop_call_16k) - 1)) {
-        rdx_v23_record_stop();
+        rdx_online_record_request_stop(RDX_RECORD_SOURCE_APP);
         return;
     }
     if (rdx_protocol_v23_data_equals(data, len, start_call,
                              sizeof(start_call) - 1)
         || rdx_protocol_v23_data_equals(data, len, start_call_16k,
                                 sizeof(start_call_16k) - 1)) {
-        rdx_v23_record_start_scene(RDX_RECORD_SCENE_CALL);
+        rdx_online_record_request_start(RDX_RECORD_SCENE_CALL,
+                                        RDX_RECORD_SOURCE_APP);
         return;
     }
     if (rdx_protocol_v23_data_equals(data, len, start, sizeof(start) - 1)
@@ -1038,7 +1145,8 @@ static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
                                 sizeof(pause_call) - 1)
         || rdx_protocol_v23_data_equals(data, len, pause_call_16k,
                                 sizeof(pause_call_16k) - 1)) {
-        rdx_v23_record_control(RDX_RECORD_REQUEST_PAUSE);
+        rdx_v23_record_control(RDX_RECORD_REQUEST_PAUSE,
+                               RDX_RECORD_SOURCE_APP);
         return;
     }
     if (rdx_protocol_v23_data_equals(data, len, resume, sizeof(resume) - 1)
@@ -1048,7 +1156,8 @@ static void rdx_v23_handle_record(const uint8_t *data, uint16_t len)
                                 sizeof(resume_call) - 1)
         || rdx_protocol_v23_data_equals(data, len, resume_call_16k,
                                 sizeof(resume_call_16k) - 1)) {
-        rdx_v23_record_control(RDX_RECORD_REQUEST_RESUME);
+        rdx_v23_record_control(RDX_RECORD_REQUEST_RESUME,
+                               RDX_RECORD_SOURCE_APP);
         return;
     }
 #endif

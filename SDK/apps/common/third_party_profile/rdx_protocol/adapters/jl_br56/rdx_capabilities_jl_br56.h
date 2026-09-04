@@ -14,6 +14,7 @@
      RDX_CAP_CALL_CAPTURE                       | \
      RDX_CAP_LOCAL_STORAGE                      | \
      RDX_CAP_STORAGE_BACKEND_NATIVE             | \
-     RDX_CAP_STORAGE_SERVICE)
+     RDX_CAP_STORAGE_SERVICE                    | \
+     RDX_CAP_OTA_UPDATE)
 
 #endif /* RDX_CAPABILITIES_JL_BR56_H */

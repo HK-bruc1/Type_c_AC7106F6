@@ -455,8 +455,8 @@
        "eventField": [],
        "saveWay": "macro",
        "uuid": "CONFIG_FLASH_SIZE",
-       "defaultValue": "0x100000",
-       "originValue": "0x100000"
+       "defaultValue": "0x200000",
+       "originValue": "0x200000"
       },
       "__slot__": {
        "options": [

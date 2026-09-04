@@ -27,6 +27,8 @@ enum rdx_transport_event_type {
     RDX_TRANSPORT_EVENT_CCC_CHANGED,
     RDX_TRANSPORT_EVENT_RX,
     RDX_TRANSPORT_EVENT_CAN_SEND_NOW,
+    RDX_TRANSPORT_EVENT_OTA_CCC_CHANGED,
+    RDX_TRANSPORT_EVENT_OTA_RX,
 };
 
 struct rdx_transport_rx_event {
@@ -58,6 +60,9 @@ int rdx_transport_init(rdx_transport_event_callback_t event_callback,
 void rdx_transport_exit(void);
 enum rdx_transport_result rdx_transport_send(
     const uint8_t *data, uint16_t len);
+enum rdx_transport_result rdx_transport_ota_send(
+    const uint8_t *data, uint16_t len,
+    uint32_t connection_generation);
 int rdx_transport_request_can_send_now(
     uint32_t session_id, uint32_t capture_generation);
 int rdx_transport_set_record_streaming(uint8_t enabled);

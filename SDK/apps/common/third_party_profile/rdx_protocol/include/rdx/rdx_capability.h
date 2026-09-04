@@ -20,6 +20,7 @@
 #define RDX_CAP_STORAGE_BACKEND_NATIVE         (1UL << 8)
 #define RDX_CAP_STORAGE_BACKEND_LEGACY_UXFILE  (1UL << 9)
 #define RDX_CAP_STORAGE_SERVICE                 (1UL << 10)
+#define RDX_CAP_OTA_UPDATE                      (1UL << 11)
 
 #define RDX_REQUIRED_BASE_CAPS                  \
     (RDX_CAP_TRANSPORT                         | \

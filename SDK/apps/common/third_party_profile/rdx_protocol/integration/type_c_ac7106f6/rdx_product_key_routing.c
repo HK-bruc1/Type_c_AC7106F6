@@ -6,9 +6,14 @@
 #include "app_main.h"
 #include "key_driver.h"
 #include "rdx_product_key_routing.h"
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+#include "rdx/rdx_online_record_service.h"
+#endif
 
 enum rdx_key_dispatch_result {
     RDX_KEY_DISPATCH_POSTED,
+    RDX_KEY_DISPATCH_RECORD_TOGGLED,
+    RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED,
     RDX_KEY_DISPATCH_IGNORED,
     RDX_KEY_DISPATCH_INVALID_ACTION,
 };
@@ -38,11 +43,39 @@ static const int rdx_mic_num2_map[KEY_ACTION_MAX] = {
     [KEY_ACTION_CLICK]           = APP_MSG_DOWN_KEY_LIFT,
     [KEY_ACTION_UP]              = APP_MSG_DOWN_KEY_LIFT,
 };
+#endif
+
+#if TCFG_ADKEY_ENABLE
+/*
+ * The two physical keys on T2622 are KEY_AD_NUM0 (S3, 0 ohm) and
+ * KEY_AD_NUM1 (S1, 20 kohm).  Their click actions are dispatched to the
+ * RDX recording business below; every other ADKEY action stays null.
+ */
+static const int rdx_ad_num0_map[KEY_ACTION_MAX] = {
+    [KEY_ACTION_CLICK]         = APP_MSG_NULL,
+    [KEY_ACTION_LONG]          = APP_MSG_NULL,
+    [KEY_ACTION_DOUBLE_CLICK]  = APP_MSG_NULL,
+};
+
+static const int rdx_ad_num1_map[KEY_ACTION_MAX] = {
+    [KEY_ACTION_CLICK]         = APP_MSG_NULL,
+    [KEY_ACTION_LONG]          = APP_MSG_NULL,
+    [KEY_ACTION_HOLD]          = APP_MSG_NULL,
+};
+#endif
+
+#if TCFG_MICKEY_ENABLE || TCFG_ADKEY_ENABLE
 
 static const struct rdx_key_route rdx_key_routes[] = {
+#if TCFG_ADKEY_ENABLE
+    { KEY_AD_NUM0, rdx_ad_num0_map },
+    { KEY_AD_NUM1, rdx_ad_num1_map },
+#endif
+#if TCFG_MICKEY_ENABLE
     { KEY_MIC_NUM0, rdx_mic_num0_map },
     { KEY_MIC_NUM1, rdx_mic_num1_map },
     { KEY_MIC_NUM2, rdx_mic_num2_map },
+#endif
 };
 #endif
 
@@ -53,6 +86,11 @@ static bool rdx_key_is_owned(u8 key_value)
     }
 
     switch (key_value) {
+#if TCFG_ADKEY_ENABLE
+    case KEY_AD_NUM0:
+    case KEY_AD_NUM1:
+        return true;
+#endif
 #if TCFG_MICKEY_ENABLE
     case KEY_MIC_NUM0:
     case KEY_MIC_NUM1:
@@ -67,7 +105,7 @@ static bool rdx_key_is_owned(u8 key_value)
 
 static const struct rdx_key_route *rdx_key_find_route(u8 key_value)
 {
-#if TCFG_MICKEY_ENABLE
+#if TCFG_MICKEY_ENABLE || TCFG_ADKEY_ENABLE
     u8 i;
 
     for (i = 0; i < ARRAY_SIZE(rdx_key_routes); i++) {
@@ -85,8 +123,10 @@ rdx_key_dispatch(u8 key_value, u8 key_action, int source, int *routed_app_msg)
 {
     const struct rdx_key_route *route;
     int app_msg;
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+    int record_ret;
+#endif
 
-    (void)source;
     *routed_app_msg = APP_MSG_NULL;
 
     if (key_action >= KEY_ACTION_MAX) {
@@ -97,6 +137,45 @@ rdx_key_dispatch(u8 key_value, u8 key_action, int source, int *routed_app_msg)
     if (!route) {
         return RDX_KEY_DISPATCH_IGNORED;
     }
+
+#if RDX_CFG_ONLINE_RECORDING_ENABLE
+    if (key_action == KEY_ACTION_CLICK) {
+        switch (key_value) {
+        case KEY_AD_NUM0:
+#if RDX_CFG_CONFERENCE_RECORDING_ENABLE
+            if (source != 0) {
+                printf("[RDX][KEY] record_toggle_rejected reason=non_local"
+                       " scene=%u source=%d\n",
+                       RDX_RECORD_SCENE_MEETING, source);
+                return RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED;
+            }
+            record_ret = rdx_online_record_request_toggle(
+                RDX_RECORD_SCENE_MEETING, RDX_RECORD_SOURCE_KEY);
+            return record_ret == 0
+                   ? RDX_KEY_DISPATCH_RECORD_TOGGLED
+                   : RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED;
+#endif
+            break;
+        case KEY_AD_NUM1:
+#if RDX_CFG_CALL_RECORDING_ENABLE
+            if (source != 0) {
+                printf("[RDX][KEY] record_toggle_rejected reason=non_local"
+                       " scene=%u source=%d\n",
+                       RDX_RECORD_SCENE_CALL, source);
+                return RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED;
+            }
+            record_ret = rdx_online_record_request_toggle(
+                RDX_RECORD_SCENE_CALL, RDX_RECORD_SOURCE_KEY);
+            return record_ret == 0
+                   ? RDX_KEY_DISPATCH_RECORD_TOGGLED
+                   : RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED;
+#endif
+            break;
+        default:
+            break;
+        }
+    }
+#endif
 
     app_msg = route->action_map[key_action];
     if (app_msg == APP_MSG_NULL) {
@@ -114,6 +193,12 @@ static const char *rdx_key_dispatch_result_name(enum rdx_key_dispatch_result res
     switch (result) {
     case RDX_KEY_DISPATCH_POSTED:
         return "posted";
+
+    case RDX_KEY_DISPATCH_RECORD_TOGGLED:
+        return "record_toggled";
+
+    case RDX_KEY_DISPATCH_RECORD_TOGGLE_REJECTED:
+        return "record_toggle_rejected";
 
     case RDX_KEY_DISPATCH_IGNORED:
         return "ignored";

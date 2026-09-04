@@ -44,6 +44,14 @@ enum rdx_record_controller_id {
     RDX_RECORD_CONTROLLER_ONLINE = 1,
 };
 
+/* Origin of a normal Online Record Service request.  This is deliberately
+ * separate from the record controller: local keys and APP Wire commands may
+ * operate on the same Online session while retaining their audit source. */
+enum rdx_record_request_source {
+    RDX_RECORD_SOURCE_KEY = 0,
+    RDX_RECORD_SOURCE_APP = 1,
+};
+
 enum rdx_record_request_type {
     RDX_RECORD_REQUEST_START = 1,
     RDX_RECORD_REQUEST_STOP = 2,

@@ -194,22 +194,32 @@ $specs = @(
             (Join-Path $testDir 'rdx_audio_capture_fake.c')
         )),
     (New-RdxTestSpec -Name 'protocol_v23' `
+        -Defines @('RDX_CFG_OTA_ENABLE=1') `
         -Includes @($testInclude, $publicInclude, $profileRoot) `
         -Sources @(
             (Join-Path $testDir 'rdx_protocol_v23_host_test.c'),
             (Join-Path $testDir 'rdx_transport_fake.c'),
+            (Join-Path $testDir 'rdx_firmware_update_fake.c'),
+            (Join-Path $applicationDir 'rdx_ota_service.c'),
             (Join-Path $protocolDir 'rdx_protocol_v23.c'),
+            (Join-Path $protocolDir 'rdx_protocol_v23_ota.c'),
             (Join-Path $protocolDir 'rdx_protocol_v23_management.c'),
             (Join-Path $protocolDir 'rdx_protocol_session.c'),
             (Join-Path $integrationDir 'rdx_product_profile_type_c.c')
         )),
     (New-RdxTestSpec -Name 'protocol_v23_sensitive_diag' `
-        -Defines @('RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE=1') `
+        -Defines @(
+            'RDX_CFG_OTA_ENABLE=1',
+            'RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE=1'
+        ) `
         -Includes @($testInclude, $publicInclude, $profileRoot) `
         -Sources @(
             (Join-Path $testDir 'rdx_protocol_v23_host_test.c'),
             (Join-Path $testDir 'rdx_transport_fake.c'),
+            (Join-Path $testDir 'rdx_firmware_update_fake.c'),
+            (Join-Path $applicationDir 'rdx_ota_service.c'),
             (Join-Path $protocolDir 'rdx_protocol_v23.c'),
+            (Join-Path $protocolDir 'rdx_protocol_v23_ota.c'),
             (Join-Path $protocolDir 'rdx_protocol_v23_management.c'),
             (Join-Path $protocolDir 'rdx_protocol_session.c'),
             (Join-Path $integrationDir 'rdx_product_profile_type_c.c')

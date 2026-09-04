@@ -84,6 +84,7 @@ typedef struct {
     u16 dle_tx_octets;
     u16 dle_tx_time;
     u8 tx_ccc;
+    u8 ota_tx_ccc;
     u8 initialized;
     u8 record_streaming;
     u8 tx_phy;
@@ -225,7 +226,7 @@ static const u8 rdx_profile_data[] = {
     0x08, 0x00, 0x12, 0x01, 0x0e, 0x00, 0x19, 0x2a,
     0x0a, 0x00, 0x0a, 0x01, 0x0f, 0x00, 0x02, 0x29, 0x00, 0x00,
 
-    /* OTA fingerprint only; V23 profile ignores OTA writes. */
+    /* RDX V23 OTA service. */
     0x18, 0x00, 0x02, 0x00, 0x10, 0x00, 0x00, 0x28, 0xb3, 0xa7, 0x88, 0xf5, 0x5a, 0xf0, 0x74, 0x33, 0xbb, 0x89, 0x16, 0xc6, 0x6f, 0x9a, 0x23, 0x00,
     0x1b, 0x00, 0x02, 0x00, 0x11, 0x00, 0x03, 0x28, 0x04, 0x12, 0x00, 0xb3, 0xa7, 0x88, 0xf5, 0x5a, 0xf1, 0x74, 0x33, 0xbb, 0x89, 0x16, 0xc6, 0x7f, 0x9a, 0x23, 0x00,
     0x16, 0x00, 0x04, 0x03, 0x12, 0x00, 0xb3, 0xa7, 0x88, 0xf5, 0x5a, 0xf1, 0x74, 0x33, 0xbb, 0x89, 0x16, 0xc6, 0x7f, 0x9a, 0x23, 0x00,
@@ -365,6 +366,7 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.tx_phy = 1;
             rdx_ble.rx_phy = 1;
             rdx_ble.tx_ccc = 0;
+            rdx_ble.ota_tx_ccc = 0;
             memset(&transport_event, 0, sizeof(transport_event));
             transport_event.type = RDX_TRANSPORT_EVENT_CONNECTED;
             rdx_ble_emit_event(&transport_event);
@@ -490,6 +492,7 @@ static void rdx_ble_packet_handler(void *hdl, u8 packet_type, u16 channel, u8 *p
             rdx_ble.con_handle = 0;
             rdx_ble_clear_can_send();
             rdx_ble.tx_ccc = 0;
+            rdx_ble.ota_tx_ccc = 0;
             memset(&transport_event, 0, sizeof(transport_event));
             transport_event.type = RDX_TRANSPORT_EVENT_LINK_LOST;
             rdx_ble_emit_event(&transport_event);
@@ -595,11 +598,28 @@ static int rdx_ble_att_write_callback(void *hdl, u16 connection_handle, u16 att_
             transport_event.data.ccc_enabled = rdx_ble.tx_ccc;
             rdx_ble_emit_event(&transport_event);
             printf("[RDX] tx ccc=%u\n", rdx_ble.tx_ccc);
+        } else if (att_handle == RDX_HANDLE_OTA_TX_CCC) {
+            rdx_ble.ota_tx_ccc = !!(ccc & 0x0001);
+            memset(&transport_event, 0, sizeof(transport_event));
+            transport_event.type = RDX_TRANSPORT_EVENT_OTA_CCC_CHANGED;
+            transport_event.data.ccc_enabled = rdx_ble.ota_tx_ccc;
+            rdx_ble_emit_event(&transport_event);
+            printf("[RDX][OTA] tx ccc=%u\n", rdx_ble.ota_tx_ccc);
         }
         break;
 
     case RDX_HANDLE_OTA_RX:
-        printf("[RDX] OTA write ignored len=%u\n", buffer_size);
+        if (transaction_mode || offset) {
+            printf("[RDX][OTA] write_rejected transaction=%u"
+                   " offset=%u len=%u\n",
+                   transaction_mode, offset, buffer_size);
+            break;
+        }
+        memset(&transport_event, 0, sizeof(transport_event));
+        transport_event.type = RDX_TRANSPORT_EVENT_OTA_RX;
+        transport_event.data.rx.data = buffer;
+        transport_event.data.rx.len = buffer_size;
+        rdx_ble_emit_event(&transport_event);
         break;
 
     default:
@@ -759,6 +779,38 @@ enum rdx_transport_result rdx_transport_send(
     spin_lock(&rdx_ble.tx_lock);
     rdx_ble.app_send_active = 0;
     spin_unlock(&rdx_ble.tx_lock);
+    if (!ret) {
+        return RDX_TRANSPORT_ACCEPTED;
+    }
+    if (ret == BLE_CMD_RET_BUSY || ret == BLE_BUFFER_FULL) {
+        return RDX_TRANSPORT_RETRYABLE;
+    }
+    if (ret == BLE_CMD_STACK_NOT_RUN || ret == BLE_CMD_CCC_FAIL) {
+        return RDX_TRANSPORT_UNAVAILABLE;
+    }
+    return RDX_TRANSPORT_FATAL;
+}
+
+enum rdx_transport_result rdx_transport_ota_send(
+    const uint8_t *data, uint16_t len,
+    uint32_t connection_generation)
+{
+    int valid_len;
+    int ret;
+
+    if (!data || !len || !rdx_ble.hdl || !rdx_ble.con_handle
+        || !rdx_ble.ota_tx_ccc
+        || !connection_generation
+        || connection_generation != rdx_ble.connection_generation) {
+        return RDX_TRANSPORT_UNAVAILABLE;
+    }
+    valid_len = app_ble_att_vaild_len_get(rdx_ble.hdl);
+    if (valid_len <= 0 || len > valid_len) {
+        return RDX_TRANSPORT_RETRYABLE;
+    }
+    ret = app_ble_att_send_data(rdx_ble.hdl, RDX_HANDLE_OTA_TX,
+                                (u8 *)data, len,
+                                ATT_OP_AUTO_READ_CCC);
     if (!ret) {
         return RDX_TRANSPORT_ACCEPTED;
     }
