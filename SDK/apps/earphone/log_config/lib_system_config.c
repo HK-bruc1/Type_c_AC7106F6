@@ -21,14 +21,14 @@ const int config_printf_time         = 1;
 
 ///异常中断，asser打印开启
 #if CONFIG_DEBUG_ENABLE || CONFIG_DEBUG_LITE_ENABLE
-#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
-#define RDX_O0_EXCEPTION_TRACE  BIT(2)
+#if TCFG_RESOURCE_MONITOR_EXCEPTION_BACKTRACE_ENABLE
+#define RESOURCE_MONITOR_EXCEPTION_TRACE  BIT(2)
 #else
-#define RDX_O0_EXCEPTION_TRACE  0
+#define RESOURCE_MONITOR_EXCEPTION_TRACE  0
 #endif
 const int config_asser          = TCFG_EXCEPTION_LOG_ENABLE
-                                  | RDX_O0_EXCEPTION_TRACE;  // non 0:使能异常打印; BIT(1):使能当前CPU打印另一个CPU的寄存器信息; BIT(2):使能栈分析回溯函数调用
-#undef RDX_O0_EXCEPTION_TRACE
+                                  | RESOURCE_MONITOR_EXCEPTION_TRACE;  // non 0:使能异常打印; BIT(1):使能当前CPU打印另一个CPU的寄存器信息; BIT(2):使能栈分析回溯函数调用
+#undef RESOURCE_MONITOR_EXCEPTION_TRACE
 const int config_exception_reset_enable = TCFG_EXCEPTION_RESET_ENABLE;
 const int CONFIG_LOG_OUTPUT_ENABLE = 1;
 const int config_ulog_enable = 1;
@@ -101,13 +101,12 @@ const int CONFIG_CPU_UNMASK_IRQ_ENABLE = 1;
 //          使能建议设置为256（表示最大记录256项）//
 //          通过void mem_unfree_dump()输出        //
 //================================================//
-/* Keep the high-overhead allocator trace independent from normal O0 event
- * diagnostics.  Fault-baseline images can set the RDX knob to 256 without
- * changing JL allocator code; the default checkpoint-off image stays at 0. */
+/* High-overhead JL allocator tracing is owned by the public resource monitor
+ * policy and remains independent from protocol-specific diagnostics. */
 const u32 CONFIG_HEAP_MEMORY_TRACE =
-    RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS;
+    RESOURCE_MONITOR_HEAP_TRACE_RECORDS;
 const u32 CONFIG_HEAP_MEMORY_MINIMAL_VALUE =
-    RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES;
+    RESOURCE_MONITOR_HEAP_TRACE_LOW_WATER_BYTES;
 
 //================================================//
 //   timer_no_response打印对应任务堆栈            //

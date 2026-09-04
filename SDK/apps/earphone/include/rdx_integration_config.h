@@ -125,8 +125,9 @@
 
 /* Event snapshots and bounded FAT latency histograms are retained for fault
  * reproduction but compiled out of submission/release images by default.
- * TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE enables the normal diagnostic set;
- * JL heap tracing remains a separate, higher-overhead opt-in knob. */
+ * TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE enables the normal RDX diagnostic
+ * set. Public JL resource and allocator monitoring is configured only in
+ * resource_monitor.h. */
 #ifndef RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
 #define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE  \
     TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
@@ -134,12 +135,6 @@
 #ifndef RDX_CFG_RECORD_PERF_DIAG_ENABLE
 #define RDX_CFG_RECORD_PERF_DIAG_ENABLE       \
     TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
-#endif
-#ifndef RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS
-#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS            0
-#endif
-#ifndef RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES
-#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES    (20 * 1024)
 #endif
 
 /* O2 Native write batching.  Six 80 B Opus frames form one 480 B fwrite,
@@ -171,11 +166,6 @@
 #if (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 0) && \
     (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 1)
 #error "RDX Record performance diagnostics policy must be 0 or 1"
-#endif
-#if (RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS != 0) && \
-    ((RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS < 16) || \
-     (RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS > 512))
-#error "RDX heap trace record count must be 0 or between 16 and 512"
 #endif
 #if (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES < 128) || \
     (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES > 1024)
@@ -432,8 +422,6 @@
 #define RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY                0
 #define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE               0
 #define RDX_CFG_RECORD_PERF_DIAG_ENABLE                    0
-#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS            0
-#define RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_LOW_WATER_BYTES    (20 * 1024)
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES              480
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES              6
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0

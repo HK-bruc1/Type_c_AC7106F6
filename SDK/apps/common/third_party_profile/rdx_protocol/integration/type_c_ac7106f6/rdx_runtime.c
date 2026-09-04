@@ -91,12 +91,11 @@ static int rdx_runtime_check_storage_structure(void)
 
 #if TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
     printf("[RDX][O0] checkpoint=%u nonterminal_readback=%u"
-           " local_only=%u diag=%u heap_trace=%u\n",
+           " local_only=%u diag=%u\n",
            (unsigned int)RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE,
            (unsigned int)RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE,
            (unsigned int)RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY,
-           (unsigned int)RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE,
-           (unsigned int)RDX_CFG_LOCAL_STORAGE_HEAP_TRACE_RECORDS);
+           (unsigned int)RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE);
 #endif
 #if RDX_STORAGE_BACKEND_NATIVE
     backend_ready = rdx_storage_backend_sd0_jl_br56_init() == 0;

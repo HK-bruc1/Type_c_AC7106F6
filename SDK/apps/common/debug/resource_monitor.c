@@ -18,6 +18,7 @@
  * and are not an atomic snapshot.
  */
 #include "app_config.h"
+#include "resource_monitor.h"
 
 #if TCFG_RESOURCE_MONITOR_ENABLE
 
@@ -27,7 +28,6 @@
 #include "system/init.h"
 #include "system/timer.h"
 #include "malloc.h"
-#include "resource_monitor.h"
 #include "task.h"
 
 #define RESOURCE_BYTES_TO_KB(value)    ((u32)((value) / 1024))
@@ -36,7 +36,22 @@ static u16 resource_monitor_timer_id;
 static u32 resource_monitor_min_ram0_free = 0xffffffffUL;
 static u32 resource_monitor_min_ram1_free = 0xffffffffUL;
 static u32 resource_monitor_min_aggregate_free = 0xffffffffUL;
-static SIMPLE_TASK_INFO resource_monitor_task_snapshot[24];
+static SIMPLE_TASK_INFO resource_monitor_task_snapshot[
+    RESOURCE_MONITOR_TASK_SNAPSHOT_CAPACITY];
+
+typedef struct {
+    const char *name;
+    u8 prefix;
+} resource_monitor_task_filter_t;
+
+#define RESOURCE_MONITOR_EXACT_TASK(name)   { name, 0 },
+#define RESOURCE_MONITOR_PREFIX_TASK(name)  { name, 1 },
+static const resource_monitor_task_filter_t resource_monitor_task_filters[] = {
+    RESOURCE_MONITOR_KEY_TASK_LIST(RESOURCE_MONITOR_EXACT_TASK,
+                                   RESOURCE_MONITOR_PREFIX_TASK)
+};
+#undef RESOURCE_MONITOR_EXACT_TASK
+#undef RESOURCE_MONITOR_PREFIX_TASK
 
 static void resource_monitor_dump_flash_code(void)
 {
@@ -107,11 +122,27 @@ void resource_monitor_observe(void)
 
 static u8 resource_monitor_is_key_task(const char *name)
 {
+    u16 i;
+
     if (!name) {
         return 0;
     }
-    return !strcmp(name, "rdx_record") || !strcmp(name, "rdx_storage")
-           || !strcmp(name, "btstack") || !strncmp(name, "jlstream_", 9);
+    for (i = 0;
+         i < sizeof(resource_monitor_task_filters)
+             / sizeof(resource_monitor_task_filters[0]);
+         i++) {
+        const resource_monitor_task_filter_t *filter =
+            &resource_monitor_task_filters[i];
+
+        if (filter->prefix) {
+            if (!strncmp(name, filter->name, strlen(filter->name))) {
+                return 1;
+            }
+        } else if (!strcmp(name, filter->name)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void resource_monitor_dump_key_tasks(const char *reason)
