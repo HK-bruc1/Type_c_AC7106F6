@@ -46,12 +46,12 @@ int rdx_appkey_verify(const u8 *payload, u16 len,
 
     (void)expected_keys;
     (void)expected_key_count;
-    if (!payload || len != 32 || payload[0] != 'A'
-        || !plaintext_output
-        || plaintext_output_size < sizeof(plaintext)) {
+    if (!payload || len != 32 || payload[0] != 'A') {
         return -1;
     }
-    memcpy(plaintext_output, plaintext, sizeof(plaintext));
+    if (plaintext_output && plaintext_output_size >= sizeof(plaintext)) {
+        memcpy(plaintext_output, plaintext, sizeof(plaintext));
+    }
     return 0;
 }
 

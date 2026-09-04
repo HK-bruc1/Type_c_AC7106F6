@@ -123,20 +123,6 @@
 #define RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY                0
 #endif
 
-/* Event snapshots and bounded FAT latency histograms are retained for fault
- * reproduction but compiled out of submission/release images by default.
- * TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE enables the normal RDX diagnostic
- * set. Public JL resource and allocator monitoring is configured only in
- * resource_monitor.h. */
-#ifndef RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
-#define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE  \
-    TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
-#endif
-#ifndef RDX_CFG_RECORD_PERF_DIAG_ENABLE
-#define RDX_CFG_RECORD_PERF_DIAG_ENABLE       \
-    TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
-#endif
-
 /* O2 Native write batching.  Six 80 B Opus frames form one 480 B fwrite,
  * reducing FAT allocator churn without crossing the next 512 B allocation
  * step or enlarging the existing REQUIRED Local queue. */
@@ -158,14 +144,6 @@
 #if (RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY != 0) && \
     (RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY != 1)
 #error "RDX O0 local-only policy must be 0 or 1"
-#endif
-#if (RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE != 0) && \
-    (RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE != 1)
-#error "RDX O0 diagnostics policy must be 0 or 1"
-#endif
-#if (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 0) && \
-    (RDX_CFG_RECORD_PERF_DIAG_ENABLE != 1)
-#error "RDX Record performance diagnostics policy must be 0 or 1"
 #endif
 #if (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES < 128) || \
     (RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES > 1024)
@@ -203,24 +181,6 @@
 #if !CONFIG_FATFS_ENABLE
 #error "RDX local storage requires JL FAT/VFS"
 #endif
-#endif
-
-/* Submission builds disable verbose BLE statistics by default. */
-#ifndef RDX_CFG_BLE_TX_DIAG_ENABLE
-#define RDX_CFG_BLE_TX_DIAG_ENABLE  TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
-#endif
-
-/* Submission builds disable key ownership/routing traces by default. */
-#ifndef RDX_CFG_KEY_DIAG_ENABLE
-#define RDX_CFG_KEY_DIAG_ENABLE  TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
-#endif
-
-#if (RDX_CFG_BLE_TX_DIAG_ENABLE != 0) && \
-    (RDX_CFG_BLE_TX_DIAG_ENABLE != 1)
-#error "RDX BLE TX diagnostics policy must be 0 or 1"
-#endif
-#if (RDX_CFG_KEY_DIAG_ENABLE != 0) && (RDX_CFG_KEY_DIAG_ENABLE != 1)
-#error "RDX key diagnostics policy must be 0 or 1"
 #endif
 
 /* Stage 1: wake the existing Record Engine task from ATT can-send events. */
@@ -420,8 +380,6 @@
 #define RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE  0
 #define RDX_CFG_LOCAL_STORAGE_NONTERMINAL_READBACK_ENABLE  1
 #define RDX_CFG_LOCAL_STORAGE_O0_LOCAL_ONLY                0
-#define RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE               0
-#define RDX_CFG_RECORD_PERF_DIAG_ENABLE                    0
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_BYTES              480
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES              6
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
@@ -435,8 +393,6 @@
 #define RDX_PRODUCT_SUPPORTED_ABILITY          0
 #define RDX_REQUIRED_PORT_CAPS                 0
 #define RDX_PORT_COMPILED_CAPS                 0
-#define RDX_CFG_BLE_TX_DIAG_ENABLE             0
-#define RDX_CFG_KEY_DIAG_ENABLE                0
 #define RDX_CFG_BLE_TX_CAN_SEND_ENABLE         0
 #define RDX_CFG_BLE_TX_NATIVE_REQUEST_WHILE_STREAMING  0
 #define RDX_CFG_BLE_TX_BURST_BUDGET            1

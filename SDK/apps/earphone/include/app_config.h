@@ -1392,8 +1392,10 @@
 #define TCFG_AUDIO_DAC_POWER_ON_AT_SETUP    1
 #endif
 
-/* RDX final gate depends on the resolved BLE and Type-C application config. */
+/* RDX 最终门控依赖已经确定的 BLE 与 Type-C 应用配置。 */
 #include "rdx_integration_config.h"
+/* RDX 可裁剪诊断在最终业务门控之后统一派生。 */
+#include "rdx_diagnostic_config.h"
 
 #ifndef __LD__
 #include "bt_profile_cfg.h"

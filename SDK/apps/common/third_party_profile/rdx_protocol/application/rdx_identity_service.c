@@ -86,7 +86,7 @@ int rdx_identity_init(void)
         if (ret == RDX_AUTH_CODE_ERR_NOT_PRESENT) {
             rdx_identity_set_zero_factory_identity();
             printf("[RDX][WARN] factory identity not present; using zero identity\n");
-#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
             printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
             printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);
             printf("[RDX] factory Label_SN=%s\n", rdx_label_sn);
@@ -110,7 +110,7 @@ int rdx_identity_init(void)
     memcpy(rdx_label_sn, factory_identity.label_sn, sizeof(rdx_label_sn));
     rdx_identity_build_read_value();
 
-#if defined(CONFIG_DEBUG_ENABLE) && CONFIG_DEBUG_ENABLE
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
     printf("[RDX] factory identity loaded\n");
     printf("[RDX] factory AuthKey=%s\n", rdx_auth_key);
     printf("[RDX] factory BLE_MAC=%s\n", rdx_ble_mac_string);

@@ -24,7 +24,9 @@
 #endif
 
 #define RDX_APPKEY_PAYLOAD_SIZE                 32
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
 #define RDX_APPKEY_HEX_STRING_SIZE              (RDX_APPKEY_PAYLOAD_SIZE * 2 + 1)
+#endif
 #define RDX_POST_ACK_DISCONNECT_DELAY_MS         100
 
 static const uint8_t rdx_cmd_battery[] = "*APP#battery#";
@@ -66,6 +68,7 @@ static uint32_t rdx_v23_post_ack_generation_seed;
 
 static const char *rdx_v23_post_ack_action_name(uint8_t action);
 
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
 static void rdx_v23_bytes_to_hex(const uint8_t *data, uint16_t len,
                                   char *output, uint16_t output_size)
 {
@@ -84,6 +87,7 @@ static void rdx_v23_bytes_to_hex(const uint8_t *data, uint16_t len,
     }
     output[len * 2] = '\0';
 }
+#endif
 static void rdx_v23_send_battery(void)
 {
     const struct rdx_product_profile *profile = rdx_product_profile_get();
@@ -716,9 +720,11 @@ static void rdx_v23_handle_appkey(const uint8_t *data, uint16_t len)
     const uint16_t request_len = prefix_len + RDX_APPKEY_PAYLOAD_SIZE + 1;
     static const uint8_t success[] = "*DEV#appkey#0#";
     static const uint8_t failure[] = "*DEV#appkey#1#";
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
     char appkey_hex[RDX_APPKEY_HEX_STRING_SIZE];
     char appkey_plaintext[RDX_APPKEY_PLAINTEXT_SIZE + 1];
     char appkey_plaintext_hex[RDX_APPKEY_PLAINTEXT_SIZE * 2 + 1];
+#endif
     int result = -1;
     int send_ret;
 
@@ -729,8 +735,7 @@ static void rdx_v23_handle_appkey(const uint8_t *data, uint16_t len)
         goto reject;
     }
 
-    rdx_v23_bytes_to_hex(data + prefix_len, RDX_APPKEY_PAYLOAD_SIZE,
-                          appkey_hex, sizeof(appkey_hex));
+#if RDX_CFG_SENSITIVE_DATA_DIAG_ENABLE
     result = rdx_appkey_verify(data + prefix_len,
                                RDX_APPKEY_PAYLOAD_SIZE,
                                profile->app_keys,
@@ -741,9 +746,18 @@ static void rdx_v23_handle_appkey(const uint8_t *data, uint16_t len)
                           RDX_APPKEY_PLAINTEXT_SIZE,
                           appkey_plaintext_hex,
                           sizeof(appkey_plaintext_hex));
+    rdx_v23_bytes_to_hex(data + prefix_len, RDX_APPKEY_PAYLOAD_SIZE,
+                          appkey_hex, sizeof(appkey_hex));
     printf("[RDX][RX] cmd=appkey wire_payload=%s appkey=%s appkey_hex=%s len=%u app_ready=%u\n",
            appkey_hex, appkey_plaintext, appkey_plaintext_hex,
            len, rdx_v23_management.context->session.authenticated);
+#else
+    result = rdx_appkey_verify(data + prefix_len,
+                               RDX_APPKEY_PAYLOAD_SIZE,
+                               profile->app_keys,
+                               profile->app_key_count,
+                               NULL, 0);
+#endif
     if (result) {
         printf("[RDX][AUTH] verify=failed\n");
         goto reject;

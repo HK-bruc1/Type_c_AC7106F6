@@ -89,7 +89,7 @@ static int rdx_runtime_check_storage_structure(void)
 {
     int backend_ready = 0;
 
-#if TCFG_PRODUCT_DIAGNOSTIC_BUILD_ENABLE
+#if RDX_CFG_DIAGNOSTIC_ENABLE
     printf("[RDX][O0] checkpoint=%u nonterminal_readback=%u"
            " local_only=%u diag=%u\n",
            (unsigned int)RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE,
