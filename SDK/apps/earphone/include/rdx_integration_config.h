@@ -138,6 +138,11 @@
 #ifndef RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS
 #define RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS     120000
 #endif
+/* O4 upload cursors are closed after the final packet, disconnect, format,
+ * replacement, or this bounded idle interval. */
+#ifndef RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS
+#define RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS             30000
+#endif
 
 #if (RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE != 0) && \
     (RDX_CFG_LOCAL_STORAGE_PERIODIC_CHECKPOINT_ENABLE != 1)
@@ -167,6 +172,10 @@
      RDX_CFG_LOCAL_STORAGE_COMMAND_TIMEOUT_MS) || \
     (RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS > 600000)
 #error "RDX Local Storage long command timeout is invalid"
+#endif
+#if (RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS < 1000) || \
+    (RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS > 300000)
+#error "RDX Local upload session timeout must be between 1 and 300 seconds"
 #endif
 
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE && \
@@ -400,6 +409,7 @@
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES              6
 #define RDX_CFG_LOCAL_STORAGE_COMMAND_TIMEOUT_MS            5000
 #define RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS     120000
+#define RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS             30000
 #define RDX_LOCAL_STORAGE_DEV_TEST_ENABLE       0
 #define RDX_LOCAL_STORAGE_WIRE_DEV_TEST_ENABLE  0
 #define RDX_STORAGE_BACKEND_NATIVE              0

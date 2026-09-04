@@ -44,11 +44,15 @@ enum rdx_sd0_diag_operation {
     RDX_SD0_DIAG_CLOSE_VERIFY,
     RDX_SD0_DIAG_PUBLISH,
     RDX_SD0_DIAG_INDEX_COMMIT,
+    RDX_SD0_DIAG_UPLOAD_OPEN,
+    RDX_SD0_DIAG_UPLOAD_READ,
+    RDX_SD0_DIAG_UPLOAD_CLOSE,
     RDX_SD0_DIAG_OPERATION_COUNT,
 };
 
 struct rdx_sd0_diag_metric {
     uint32_t count;
+    uint32_t total_ms;
     uint32_t max_ms;
     uint32_t buckets[RDX_SD0_DIAG_BUCKET_COUNT];
 };
@@ -60,7 +64,8 @@ static const uint32_t rdx_sd0_diag_bucket_upper_ms[
 static const char *const rdx_sd0_diag_operation_name[
     RDX_SD0_DIAG_OPERATION_COUNT] = {
     "open", "append", "marker_write", "marker_verify", "close_verify",
-    "publish", "index_commit"
+    "publish", "index_commit", "upload_open", "upload_read",
+    "upload_close"
 };
 static struct rdx_sd0_diag_metric rdx_sd0_diag_metrics[
     RDX_SD0_DIAG_OPERATION_COUNT];
@@ -80,6 +85,11 @@ static void rdx_sd0_diag_record(enum rdx_sd0_diag_operation operation,
     }
     metric = &rdx_sd0_diag_metrics[operation];
     metric->count++;
+    if (UINT32_MAX - metric->total_ms >= elapsed_ms) {
+        metric->total_ms += elapsed_ms;
+    } else {
+        metric->total_ms = UINT32_MAX;
+    }
     if (elapsed_ms > metric->max_ms) {
         metric->max_ms = elapsed_ms;
     }
@@ -123,10 +133,17 @@ static void rdx_sd0_diag_dump(const char *reason)
     for (i = 0; i < RDX_SD0_DIAG_OPERATION_COUNT; i++) {
         const struct rdx_sd0_diag_metric *metric = &rdx_sd0_diag_metrics[i];
 
+        uint32_t average_ms_x100 = metric->count
+            ? (uint32_t)(((uint64_t)metric->total_ms * 100)
+                         / metric->count)
+            : 0;
+
         printf("[RDX][O0][FAT] reason=%s op=%s count=%u max_ms=%u"
+               " avg_ms_x100=%u"
                " p50_le_ms=%u p95_le_ms=%u p99_le_ms=%u\n",
                reason ? reason : "unknown", rdx_sd0_diag_operation_name[i],
                (unsigned int)metric->count, (unsigned int)metric->max_ms,
+               (unsigned int)average_ms_x100,
                (unsigned int)rdx_sd0_diag_percentile_bound(metric, 50),
                (unsigned int)rdx_sd0_diag_percentile_bound(metric, 95),
                (unsigned int)rdx_sd0_diag_percentile_bound(metric, 99));
@@ -170,10 +187,18 @@ struct rdx_sd0_open_file {
     uint8_t pending_rename;
 };
 
+struct rdx_sd0_reader {
+    FILE *file;
+    struct rdx_storage_file_id file_id;
+    uint64_t file_size;
+    uint64_t next_offset;
+};
+
 struct rdx_sd0_backend {
     char root[RDX_SD0_PATH_MAX];
     uint8_t initialized;
     struct rdx_sd0_open_file open;
+    struct rdx_sd0_reader reader;
     /* The backend is single-owner. Keep the maximum index image and marker
      * write/readback objects off the storage worker stack. Marker scratch is
      * smaller than the index image, so this union adds no static RAM. */
@@ -384,36 +409,91 @@ static enum rdx_storage_result sd0_capacity(uint64_t *total_bytes,
     return RDX_STORAGE_RESULT_READY;
 }
 
-static enum rdx_storage_result sd0_read(
-    const struct rdx_storage_file_id *file_id, uint64_t offset,
-    uint8_t *buf, uint32_t len, uint32_t *read_len)
+static enum rdx_storage_result sd0_open_reader(
+    const struct rdx_storage_file_info *file_info, void **reader)
 {
     FILE *file;
     char path[RDX_SD0_PATH_MAX];
-    int count;
+    uint64_t file_size;
 
-    if (!file_id || !buf || !read_len || offset > 0xffffffffULL) {
+    if (!file_info || !file_info->file_id.artifact_id.value
+        || !file_info->file_id.serial_number || !reader) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     if (sd0_ready() != RDX_STORAGE_RESULT_READY) {
         return RDX_STORAGE_RESULT_NOT_READY;
     }
-    if (sd0_path(file_id->name, path, sizeof(path))) {
-        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    if (rdx_sd0.reader.file
+        || sd0_path(file_info->file_id.name, path, sizeof(path))) {
+        return rdx_sd0.reader.file ? RDX_STORAGE_RESULT_BUSY
+                                   : RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+    rdx_sd0_diag_reset();
+    RDX_SD0_DIAG_BEGIN(start_ms);
     file = fopen(path, "r");
-    if (!file || fseek(file, (u32)offset, SEEK_SET)) {
-        if (file) {
-            fclose(file);
-        }
+    if (!file) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_OPEN, start_ms);
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
-    count = fread(buf, 1, len, file);
-    fclose(file);
+    file_size = flen(file);
+    if (file_size != file_info->file_size) {
+        fclose(file);
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_OPEN, start_ms);
+        return RDX_STORAGE_RESULT_CORRUPT;
+    }
+    memset(&rdx_sd0.reader, 0, sizeof(rdx_sd0.reader));
+    rdx_sd0.reader.file = file;
+    rdx_sd0.reader.file_id = file_info->file_id;
+    rdx_sd0.reader.file_size = file_size;
+    *reader = &rdx_sd0.reader;
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_OPEN, start_ms);
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_read_reader(
+    void *reader, uint64_t offset, uint8_t *buf,
+    uint32_t len, uint32_t *read_len)
+{
+    struct rdx_sd0_reader *open = reader;
+    int count;
+
+    if (open != &rdx_sd0.reader || !open->file || !buf || !read_len
+        || !len || offset > 0xffffffffULL
+        || offset >= open->file_size) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    RDX_SD0_DIAG_BEGIN(start_ms);
+    if (offset != open->next_offset
+        && fseek(open->file, (u32)offset, SEEK_SET)) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_READ, start_ms);
+        return RDX_STORAGE_RESULT_IO_ERROR;
+    }
+    count = fread(buf, 1, len, open->file);
     if (count < 0) {
+        RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_READ, start_ms);
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     *read_len = (uint32_t)count;
+    open->next_offset = offset + (uint32_t)count;
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_READ, start_ms);
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_close_reader(void *reader)
+{
+    struct rdx_sd0_reader *open = reader;
+
+    if (open != &rdx_sd0.reader) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    RDX_SD0_DIAG_BEGIN(start_ms);
+    if (open->file) {
+        fclose(open->file);
+    }
+    memset(open, 0, sizeof(*open));
+    RDX_SD0_DIAG_END(RDX_SD0_DIAG_UPLOAD_CLOSE, start_ms);
+    rdx_sd0_diag_dump("upload_close");
+    rdx_sd0_diag_resource("upload_close", 1);
     return RDX_STORAGE_RESULT_READY;
 }
 
@@ -442,7 +522,8 @@ static enum rdx_storage_result sd0_stat(
 }
 
 static enum rdx_storage_result sd0_enumerate(
-    struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count)
+    struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count,
+    uint32_t *generation)
 {
     struct rdx_storage_index_snapshot snapshot;
 
@@ -465,6 +546,9 @@ static enum rdx_storage_result sd0_enumerate(
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     *count = snapshot.count;
+    if (generation) {
+        *generation = snapshot.generation;
+    }
     if (capacity < snapshot.count) {
         return RDX_STORAGE_RESULT_NO_SPACE;
     }
@@ -1401,7 +1485,9 @@ static const struct rdx_storage_media_ops sd0_media_ops = {
     .ensure_ready = sd0_ensure_ready,
     .quiesce = sd0_quiesce,
     .get_capacity = sd0_capacity,
-    .read = sd0_read,
+    .open_reader = sd0_open_reader,
+    .read_reader = sd0_read_reader,
+    .close_reader = sd0_close_reader,
     .stat = sd0_stat,
     .enumerate = sd0_enumerate,
     .delete = sd0_delete,

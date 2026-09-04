@@ -143,6 +143,12 @@ static enum rdx_storage_result service_quiesce_executor(
     struct rdx_local_storage_service *service, uint16_t timeout_ms);
 static enum rdx_storage_result service_shutdown_executor(
     struct rdx_local_storage_service *service, uint16_t timeout_ms);
+static enum rdx_storage_result service_upload_close_executor(
+    struct rdx_local_storage_service *service,
+    uint32_t connection_generation, uint32_t session_token,
+    uint8_t force);
+static void service_process_upload_close(
+    struct rdx_local_storage_service *service);
 
 #if CONFIG_CPU_BR56
 
@@ -440,6 +446,15 @@ static enum rdx_storage_result service_execute_command(
     struct rdx_local_storage_service *service,
     struct service_command *command)
 {
+    enum rdx_storage_result close_result;
+
+    /* A synchronous lifecycle/media command supersedes an idle upload
+     * session.  Closing here preserves the single FAT owner and avoids a
+     * persistent reader blocking recording, format, quiesce or shutdown. */
+    close_result = service_upload_close_executor(service, 0, 0, 1);
+    if (close_result != RDX_STORAGE_RESULT_READY) {
+        return close_result;
+    }
     switch (command->type) {
     case SERVICE_COMMAND_RECOVER:
         return service_recover_executor(service);
@@ -661,7 +676,8 @@ static enum rdx_storage_result service_run_command_internal(
 
         service_state_lock(service);
         if (service_command_busy_locked(service)
-            || service->operation_pending || service->operation_running) {
+            || service->operation_pending || service->operation_running
+            || service->upload_close_pending) {
             service_state_unlock(service);
             return RDX_STORAGE_RESULT_BUSY;
         }
@@ -857,6 +873,76 @@ static uint8_t service_operation_busy(
            && (service->operation_pending || service->operation_running);
 }
 
+static enum rdx_storage_result service_upload_close_executor(
+    struct rdx_local_storage_service *service,
+    uint32_t connection_generation, uint32_t session_token,
+    uint8_t force)
+{
+    struct rdx_storage_file_info file;
+    enum rdx_storage_result result;
+    void *reader;
+    uint32_t reads;
+
+    if (!service) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    service_state_lock(service);
+    if (!service->upload_reader
+        || (!force
+            && (service->upload_connection_generation
+                    != connection_generation
+                || service->upload_session_token != session_token))) {
+        service_state_unlock(service);
+        return RDX_STORAGE_RESULT_READY;
+    }
+    reader = service->upload_reader;
+    file = service->upload_file;
+    reads = service->upload_session_read_count;
+    service->upload_reader = NULL;
+    memset(&service->upload_file, 0, sizeof(service->upload_file));
+    service->upload_connection_generation = 0;
+    service->upload_session_token = 0;
+    service->upload_session_read_count = 0;
+    service->upload_close_count++;
+    service_state_unlock(service);
+
+    result = service->media_ops && service->media_ops->close_reader
+                 ? service->media_ops->close_reader(reader)
+                 : RDX_STORAGE_RESULT_UNSUPPORTED;
+    printf("[RDX][LOCAL_UPLOAD] close result=%u sn=%u reads=%u"
+           " resolves=%u opens=%u closes=%u\n",
+           result, (unsigned int)file.file_id.serial_number,
+           (unsigned int)reads,
+           (unsigned int)service->upload_identity_resolve_count,
+           (unsigned int)service->upload_open_count,
+           (unsigned int)service->upload_close_count);
+    return result;
+}
+
+static void service_process_upload_close(
+    struct rdx_local_storage_service *service)
+{
+    uint32_t connection_generation;
+    uint32_t session_token;
+
+    service_state_lock(service);
+    if (!service || !service->upload_close_pending) {
+        service_state_unlock(service);
+        return;
+    }
+    connection_generation = service->upload_close_connection_generation;
+    session_token = service->upload_close_session_token;
+    service->upload_close_pending = 0;
+    service->upload_close_connection_generation = 0;
+    service->upload_close_session_token = 0;
+    service_state_unlock(service);
+
+    service_executor_lock(service);
+    (void)service_upload_close_executor(
+        service, connection_generation, session_token, 0);
+    service_executor_unlock(service);
+}
+
 static int service_ids_match(const struct rdx_local_storage_service *service,
                              uint32_t session_id,
                              uint32_t capture_generation)
@@ -996,7 +1082,13 @@ static void service_remove_native_index_entry(
                         * sizeof(snapshot.entries[0]));
             }
             snapshot.count--;
-            (void)service->native_ops->commit_index(&snapshot);
+            if (service->native_ops->commit_index(&snapshot)
+                == RDX_STORAGE_RESULT_READY
+                && snapshot.generation != UINT32_MAX) {
+                service_state_lock(service);
+                service->index_generation = snapshot.generation + 1;
+                service_state_unlock(service);
+            }
             return;
         }
     }
@@ -1082,26 +1174,41 @@ static enum rdx_storage_result service_fail(
 }
 
 static enum rdx_storage_result service_operation_enumerate_scratch(
-    struct rdx_local_storage_service *service, uint32_t *count)
+    struct rdx_local_storage_service *service, uint32_t *count,
+    uint32_t *generation)
 {
     uint32_t capacity = sizeof(service->scratch.file_items)
                         / sizeof(service->scratch.file_items[0]);
+    enum rdx_storage_result result;
+    uint32_t current_generation = 0;
 
     memset(service->scratch.file_items, 0,
            sizeof(service->scratch.file_items));
-    return service->media_ops->enumerate(
-        service->scratch.file_items, capacity, count);
+    result = service->media_ops->enumerate(
+        service->scratch.file_items, capacity, count,
+        &current_generation);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        service_state_lock(service);
+        service->index_generation = current_generation;
+        service_state_unlock(service);
+        if (generation) {
+            *generation = current_generation;
+        }
+    }
+    return result;
 }
 
 static struct rdx_storage_file_info *service_operation_find_file(
     struct rdx_local_storage_service *service, uint32_t serial_number,
-    const char *filename, enum rdx_storage_result *result)
+    const char *filename, enum rdx_storage_result *result,
+    uint32_t *generation)
 {
     struct rdx_storage_file_info *match = NULL;
     uint32_t count = 0;
     uint32_t i;
 
-    *result = service_operation_enumerate_scratch(service, &count);
+    *result = service_operation_enumerate_scratch(
+        service, &count, generation);
     if (*result != RDX_STORAGE_RESULT_READY) {
         return NULL;
     }
@@ -1127,6 +1234,97 @@ static struct rdx_storage_file_info *service_operation_find_file(
         *result = RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     return match;
+}
+
+static enum rdx_storage_result service_operation_upload_read(
+    struct rdx_local_storage_service *service,
+    const struct rdx_local_storage_operation_request *request,
+    struct rdx_local_storage_operation_completion *completion)
+{
+    const uint32_t requested_length = request->data.read.length;
+    enum rdx_storage_result result = RDX_STORAGE_RESULT_READY;
+    struct rdx_storage_file_info *file = NULL;
+    uint32_t expected_length;
+    void *reader = NULL;
+
+    if (!service->media_ops->open_reader
+        || !service->media_ops->read_reader
+        || !service->media_ops->close_reader) {
+        return RDX_STORAGE_RESULT_UNSUPPORTED;
+    }
+    if (request->data.read.open_session) {
+        result = service_upload_close_executor(service, 0, 0, 1);
+        if (result != RDX_STORAGE_RESULT_READY) {
+            return result;
+        }
+        service->upload_identity_resolve_count++;
+        file = service_operation_find_file(
+            service, request->data.read.serial_number, NULL,
+            &result, &completion->storage_generation);
+        if (!file) {
+            return result;
+        }
+        completion->file = *file;
+        if (request->data.read.offset >= file->file_size) {
+            return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+        }
+        result = service->media_ops->open_reader(
+            file, &reader);
+        if (result != RDX_STORAGE_RESULT_READY
+            || !reader) {
+            return result == RDX_STORAGE_RESULT_READY
+                       ? RDX_STORAGE_RESULT_IO_ERROR : result;
+        }
+        service_state_lock(service);
+        service->upload_reader = reader;
+        service->upload_file = *file;
+        service->upload_connection_generation =
+            request->data.read.connection_generation;
+        service->upload_session_token =
+            request->data.read.session_token;
+        service->upload_open_count++;
+        service->upload_session_read_count = 0;
+        service_state_unlock(service);
+    } else {
+        if (!service->upload_reader
+            || service->upload_connection_generation
+                   != request->data.read.connection_generation
+            || service->upload_session_token
+                   != request->data.read.session_token
+            || service->upload_file.file_id.serial_number
+                   != request->data.read.serial_number) {
+            return RDX_STORAGE_RESULT_BAD_STATE;
+        }
+        completion->file = service->upload_file;
+        completion->storage_generation = service->index_generation;
+    }
+
+    if (request->data.read.offset >= service->upload_file.file_size) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    expected_length = (uint32_t)(
+        service->upload_file.file_size - request->data.read.offset);
+    if (expected_length > requested_length) {
+        expected_length = requested_length;
+    }
+    result = service->media_ops->read_reader(
+        service->upload_reader, request->data.read.offset,
+        request->data.read.buffer, requested_length,
+        &completion->read_length);
+    if (result == RDX_STORAGE_RESULT_READY
+        && completion->read_length != expected_length) {
+        result = RDX_STORAGE_RESULT_IO_ERROR;
+    }
+    if (result == RDX_STORAGE_RESULT_READY) {
+        service->upload_read_count++;
+        service->upload_session_read_count++;
+        completion->upload_session_token =
+            service->upload_session_token;
+        completion->file = service->upload_file;
+        return result;
+    }
+    (void)service_upload_close_executor(service, 0, 0, 1);
+    return result;
 }
 
 static void service_operation_update_readiness(
@@ -1174,6 +1372,17 @@ static enum rdx_storage_result service_format_and_recover(
         result = service->media_ops->get_capacity(
             total_bytes, free_bytes);
     }
+    if (result == RDX_STORAGE_RESULT_READY
+        && service->media_ops->enumerate) {
+        uint32_t count = 0;
+        uint32_t generation = 0;
+
+        result = service_operation_enumerate_scratch(
+            service, &count, &generation);
+        if (result == RDX_STORAGE_RESULT_READY && count) {
+            result = RDX_STORAGE_RESULT_CORRUPT;
+        }
+    }
     if (result == RDX_STORAGE_RESULT_READY) {
         service->readiness = RDX_STORAGE_READINESS_READY;
         service->recovery_checked = 1;
@@ -1214,6 +1423,13 @@ static void service_process_operation(
     completion.token = request.token;
     completion.result = RDX_STORAGE_RESULT_UNSUPPORTED;
     service_executor_lock(service);
+    if (request.type != RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ) {
+        completion.result = service_upload_close_executor(
+            service, 0, 0, 1);
+        if (completion.result != RDX_STORAGE_RESULT_READY) {
+            goto operation_complete;
+        }
+    }
     switch (request.type) {
     case RDX_LOCAL_STORAGE_OPERATION_CAPACITY:
         if (service->media_ops->get_capacity) {
@@ -1225,29 +1441,20 @@ static void service_process_operation(
         if (service->media_ops->enumerate) {
             completion.result = service->media_ops->enumerate(
                 request.data.enumerate.items,
-                request.data.enumerate.capacity, &completion.count);
+                request.data.enumerate.capacity, &completion.count,
+                &completion.storage_generation);
+            if (completion.result == RDX_STORAGE_RESULT_READY) {
+                service_state_lock(service);
+                service->index_generation =
+                    completion.storage_generation;
+                service_state_unlock(service);
+            }
         }
         break;
-    case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
-        if (service->media_ops->enumerate && service->media_ops->read) {
-            enum rdx_storage_result find_result;
-            struct rdx_storage_file_info *file;
-
-            file = service_operation_find_file(
-                service, request.data.read.serial_number, NULL,
-                &find_result);
-            completion.result = find_result;
-            if (file) {
-                completion.file = *file;
-                if (request.data.read.offset >= file->file_size) {
-                    completion.result = RDX_STORAGE_RESULT_BAD_ARGUMENT;
-                } else {
-                    completion.result = service->media_ops->read(
-                        &file->file_id, request.data.read.offset,
-                        request.data.read.buffer, request.data.read.length,
-                        &completion.read_length);
-                }
-            }
+    case RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ:
+        if (service->media_ops->enumerate) {
+            completion.result = service_operation_upload_read(
+                service, &request, &completion);
         }
         break;
     case RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY:
@@ -1257,12 +1464,21 @@ static void service_process_operation(
 
             file = service_operation_find_file(
                 service, request.data.delete_file.serial_number,
-                request.data.delete_file.filename, &find_result);
+                request.data.delete_file.filename, &find_result,
+                &completion.storage_generation);
             completion.result = find_result;
             if (file) {
                 completion.file = *file;
                 completion.result = service->media_ops->delete(
                     &file->file_id);
+                if (completion.result == RDX_STORAGE_RESULT_READY
+                    && completion.storage_generation != UINT32_MAX) {
+                    completion.storage_generation++;
+                    service_state_lock(service);
+                    service->index_generation =
+                        completion.storage_generation;
+                    service_state_unlock(service);
+                }
             }
         }
         break;
@@ -1276,6 +1492,7 @@ static void service_process_operation(
         completion.result = RDX_STORAGE_RESULT_BAD_ARGUMENT;
         break;
     }
+operation_complete:
     service_executor_unlock(service);
 
     service_state_lock(service);
@@ -1303,6 +1520,7 @@ static void rdx_local_storage_service_task(void *priv)
         struct rdx_local_storage_platform_context *context;
         uint8_t has_command;
         uint8_t has_operation;
+        uint8_t has_upload_close;
         uint8_t has_work;
 
         service_state_lock(service);
@@ -1313,6 +1531,7 @@ static void rdx_local_storage_service_task(void *priv)
                           || context->command_slot.state
                               == RDX_STORAGE_COMMAND_SLOT_ABANDONED);
         has_operation = service->operation_pending;
+        has_upload_close = service->upload_close_pending;
         has_work = service_write_ready_locked(service);
         service_state_unlock(service);
         if (has_command) {
@@ -1321,6 +1540,10 @@ static void rdx_local_storage_service_task(void *priv)
         }
         if (has_operation) {
             service_process_operation(service);
+            continue;
+        }
+        if (has_upload_close) {
+            service_process_upload_close(service);
             continue;
         }
         if (has_work) {
@@ -1653,6 +1876,9 @@ static enum rdx_storage_result service_reserve_artifact_executor(
         }
         return result;
     }
+    service_state_lock(service);
+    service->index_generation = snapshot.generation + 1;
+    service_state_unlock(service);
     printf("[RDX][LOCAL] reserved artifact=%08X sn=%u format=%u"
            " temp=%s final=%s\n",
            (unsigned int)spec->artifact_id.value,
@@ -2290,6 +2516,9 @@ static enum rdx_storage_result service_seal_executor(
             return service_fail(service, result,
                                 RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
+        service_state_lock(service);
+        service->index_generation = snapshot.generation + 1;
+        service_state_unlock(service);
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_INDEXED,
                             &marker);
         result = service->native_ops->store_marker(&marker);
@@ -2425,6 +2654,9 @@ static enum rdx_storage_result service_enumerate_executor(
     struct rdx_local_storage_service *service,
     struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count)
 {
+    enum rdx_storage_result result;
+    uint32_t generation = 0;
+
     if (!service || service->active || service_operation_busy(service)
         || !service->media_ops
         || !service->media_ops->enumerate) {
@@ -2435,7 +2667,14 @@ static enum rdx_storage_result service_enumerate_executor(
     if (service->active || service_operation_busy(service)) {
         return RDX_STORAGE_RESULT_BUSY;
     }
-    return service->media_ops->enumerate(items, capacity, count);
+    result = service->media_ops->enumerate(
+        items, capacity, count, &generation);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        service_state_lock(service);
+        service->index_generation = generation;
+        service_state_unlock(service);
+    }
+    return result;
 }
 
 enum rdx_storage_result rdx_local_storage_service_enumerate(
@@ -2537,8 +2776,10 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
             return RDX_STORAGE_RESULT_BAD_ARGUMENT;
         }
         break;
-    case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
+    case RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ:
         if (!request->data.read.serial_number
+            || !request->data.read.connection_generation
+            || !request->data.read.session_token
             || !request->data.read.buffer || !request->data.read.length) {
             return RDX_STORAGE_RESULT_BAD_ARGUMENT;
         }
@@ -2557,7 +2798,8 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
 
     service_state_lock(service);
     if (service->active || service_operation_busy(service)
-        || service_command_busy_locked(service)) {
+        || service_command_busy_locked(service)
+        || service->upload_close_pending) {
         service_state_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
@@ -2578,6 +2820,56 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     service_process_operation(service);
 #endif
     return RDX_STORAGE_RESULT_READY;
+}
+
+enum rdx_storage_result rdx_local_storage_service_close_upload(
+    struct rdx_local_storage_service *service,
+    uint32_t connection_generation, uint32_t session_token)
+{
+    uint8_t matching_operation = 0;
+    uint8_t matching_reader = 0;
+
+    if (!service || !connection_generation || !session_token) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    service_state_lock(service);
+    matching_reader = service->upload_reader
+        && service->upload_connection_generation == connection_generation
+        && service->upload_session_token == session_token;
+    matching_operation = service_operation_busy(service)
+        && service->operation.type
+               == RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ
+        && service->operation.data.read.connection_generation
+               == connection_generation
+        && service->operation.data.read.session_token == session_token;
+    if (!matching_reader && !matching_operation) {
+        service_state_unlock(service);
+        return RDX_STORAGE_RESULT_READY;
+    }
+    service->upload_close_connection_generation = connection_generation;
+    service->upload_close_session_token = session_token;
+    service->upload_close_pending = 1;
+    service_state_unlock(service);
+#if CONFIG_CPU_BR56
+    service_wake(service);
+#else
+    service_process_upload_close(service);
+#endif
+    return RDX_STORAGE_RESULT_READY;
+}
+
+uint32_t rdx_local_storage_service_index_generation(
+    struct rdx_local_storage_service *service)
+{
+    uint32_t generation;
+
+    if (!service) {
+        return 0;
+    }
+    service_state_lock(service);
+    generation = service->index_generation;
+    service_state_unlock(service);
+    return generation;
 }
 
 static enum rdx_storage_result service_quiesce_executor(

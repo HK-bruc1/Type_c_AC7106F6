@@ -51,5 +51,6 @@ uint8_t rdx_protocol_v23_local_storage_handle_command(
     const uint8_t *data, uint16_t len);
 void rdx_protocol_v23_local_storage_handle_can_send(
     uint32_t owner, uint32_t token);
+void rdx_protocol_v23_local_storage_handle_upload_timeout(void);
 
 #endif

@@ -73,7 +73,7 @@ enum rdx_local_storage_operation_type {
     RDX_LOCAL_STORAGE_OPERATION_NONE = 0,
     RDX_LOCAL_STORAGE_OPERATION_CAPACITY,
     RDX_LOCAL_STORAGE_OPERATION_ENUMERATE,
-    RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL,
+    RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ,
     RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY,
     RDX_LOCAL_STORAGE_OPERATION_FORMAT,
 };
@@ -88,9 +88,12 @@ struct rdx_local_storage_operation_request {
         } enumerate;
         struct {
             uint32_t serial_number;
+            uint32_t connection_generation;
+            uint32_t session_token;
             uint64_t offset;
             uint8_t *buffer;
             uint32_t length;
+            uint8_t open_session;
         } read;
         struct {
             uint32_t serial_number;
@@ -106,6 +109,8 @@ struct rdx_local_storage_operation_completion {
     uint64_t total_bytes;
     uint64_t free_bytes;
     uint32_t count;
+    uint32_t storage_generation;
+    uint32_t upload_session_token;
     uint32_t read_length;
     struct rdx_storage_file_info file;
 };
@@ -176,6 +181,22 @@ struct rdx_local_storage_service {
     void *operation_priv;
     uint8_t operation_pending;
     uint8_t operation_running;
+    /* One persistent, read-only upload cursor.  The opaque handle is owned
+     * and touched only by rdx_storage; connection/session tokens are the
+     * application-level lifetime contract. */
+    void *upload_reader;
+    struct rdx_storage_file_info upload_file;
+    uint32_t upload_connection_generation;
+    uint32_t upload_session_token;
+    uint32_t upload_close_connection_generation;
+    uint32_t upload_close_session_token;
+    uint32_t index_generation;
+    uint32_t upload_identity_resolve_count;
+    uint32_t upload_open_count;
+    uint32_t upload_read_count;
+    uint32_t upload_close_count;
+    uint32_t upload_session_read_count;
+    uint8_t upload_close_pending;
 #if CONFIG_CPU_BR56
     /* BR56 synchronization objects are private to the platform implementation
      * so this public RDX boundary does not expose JL OS types. */
@@ -268,6 +289,14 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     struct rdx_local_storage_service *service,
     const struct rdx_local_storage_operation_request *request,
     rdx_local_storage_operation_callback_t callback, void *priv);
+/* Invalidate an upload session without touching FAT on the caller task.
+ * Target builds defer the actual close to rdx_storage; Host builds execute
+ * the same close path synchronously.  A stale token is harmless. */
+enum rdx_storage_result rdx_local_storage_service_close_upload(
+    struct rdx_local_storage_service *service,
+    uint32_t connection_generation, uint32_t session_token);
+uint32_t rdx_local_storage_service_index_generation(
+    struct rdx_local_storage_service *service);
 enum rdx_storage_result rdx_local_storage_service_quiesce(
     struct rdx_local_storage_service *service, uint16_t timeout_ms);
 /* Stop the target worker and release any active artifact before the runtime

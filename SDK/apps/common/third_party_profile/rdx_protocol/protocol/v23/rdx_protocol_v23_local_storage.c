@@ -5,6 +5,8 @@
 
 #if !CONFIG_CPU_BR56
 #include <stdio.h>
+#else
+#include "system/timer.h"
 #endif
 
 #if TCFG_RDX_ENABLE && RDX_CFG_LOCAL_STORAGE_WIRE_ENABLE
@@ -20,6 +22,9 @@
 #define RDX_LOCAL_WIRE_TX_OWNER             0x4c4f434cUL /* LOCL */
 #define RDX_LOCAL_WIRE_FRAME_SIZE           80u
 #define RDX_LOCAL_WIRE_OPUS_FORMAT          0x40a80800UL
+#ifndef RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS
+#define RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS 30000u
+#endif
 
 enum rdx_local_wire_tx_stage {
     RDX_LOCAL_WIRE_TX_NONE = 0,
@@ -32,6 +37,12 @@ enum rdx_local_wire_tx_stage {
     RDX_LOCAL_WIRE_TX_FORMAT_RESULT,
     RDX_LOCAL_WIRE_TX_DELETE_RESULT,
     RDX_LOCAL_WIRE_TX_FILE_CHUNK,
+    RDX_LOCAL_WIRE_TX_LIST_ERROR,
+    RDX_LOCAL_WIRE_TX_FILE_ERROR,
+    RDX_LOCAL_WIRE_TX_DELETE_ERROR,
+    RDX_LOCAL_WIRE_TX_GETLIST_ERROR,
+    RDX_LOCAL_WIRE_TX_CAPACITY_ERROR,
+    RDX_LOCAL_WIRE_TX_FORMAT_ERROR,
 };
 
 struct rdx_local_wire_context {
@@ -39,6 +50,7 @@ struct rdx_local_wire_context {
     struct rdx_local_storage_service *service;
     enum rdx_local_storage_operation_type operation_type;
     enum rdx_local_wire_tx_stage tx_stage;
+    enum rdx_local_wire_tx_stage deferred_tx_stage;
     uint32_t operation_token;
     uint32_t operation_connection_generation;
     uint32_t tx_token;
@@ -47,14 +59,22 @@ struct rdx_local_wire_context {
     uint32_t list_length;
     uint32_t list_pack_count;
     uint32_t list_request_pack;
+    uint32_t list_generation;
     uint32_t file_request_pack;
     uint32_t file_total_packs;
     uint64_t file_base_offset;
+    uint32_t upload_connection_generation;
+    uint32_t upload_token_seed;
+    uint32_t upload_session_token;
+    uint32_t upload_serial_number;
     struct rdx_storage_file_info upload_file;
     uint64_t total_bytes;
     uint64_t free_bytes;
     uint32_t delete_serial_number;
     char delete_filename[RDX_STORAGE_NAME_MAX];
+    uint32_t error_serial_number;
+    uint32_t error_request_pack;
+    char error_filename[RDX_STORAGE_NAME_MAX];
     uint32_t file_chunk_length;
     uint8_t getlist_result;
     uint8_t format_ack_result;
@@ -62,7 +82,11 @@ struct rdx_local_wire_context {
     uint8_t format_completed;
     uint8_t delete_result;
     uint8_t file_auto_delete;
+    uint8_t upload_session_valid;
     uint8_t list_valid;
+#if CONFIG_CPU_BR56
+    uint16_t upload_timeout_id;
+#endif
     struct rdx_storage_file_info files[RDX_LOCAL_WIRE_FILE_MAX];
     uint8_t file_chunk[RDX_LOCAL_WIRE_FILE_CHUNK_SIZE];
     uint8_t tx_packet[RDX_LOCAL_WIRE_TX_PACKET_SIZE];
@@ -334,6 +358,11 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
             sizeof(rdx_local_wire.tx_packet), "*DEV#getlist#%u#",
             rdx_local_wire.getlist_result);
         break;
+    case RDX_LOCAL_WIRE_TX_GETLIST_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet), "*DEV#getlist#1#");
+        break;
     case RDX_LOCAL_WIRE_TX_FLIST:
         header_length = snprintf(
             (char *)rdx_local_wire.tx_packet,
@@ -379,6 +408,13 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
                 chunk_length);
         *packet_length = (uint16_t)(header_length + chunk_length);
         return 0;
+    case RDX_LOCAL_WIRE_TX_LIST_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet),
+            "*DEV#listreq#%u#0#0#",
+            (unsigned int)rdx_local_wire.error_request_pack);
+        break;
     case RDX_LOCAL_WIRE_TX_CAPACITY:
         header_length = snprintf(
             (char *)rdx_local_wire.tx_packet,
@@ -386,11 +422,21 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
             (unsigned int)rdx_local_wire_to_kib(rdx_local_wire.free_bytes),
             (unsigned int)rdx_local_wire_to_kib(rdx_local_wire.total_bytes));
         break;
+    case RDX_LOCAL_WIRE_TX_CAPACITY_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet), "*DEV#mem#0#0#");
+        break;
     case RDX_LOCAL_WIRE_TX_FORMAT_ACK:
         header_length = snprintf(
             (char *)rdx_local_wire.tx_packet,
             sizeof(rdx_local_wire.tx_packet), "*DEV#format#%u#",
             rdx_local_wire.format_ack_result);
+        break;
+    case RDX_LOCAL_WIRE_TX_FORMAT_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet), "*DEV#format#1#");
         break;
     case RDX_LOCAL_WIRE_TX_FORMAT_RESULT:
         header_length = snprintf(
@@ -432,6 +478,22 @@ static int rdx_local_wire_build_tx(uint16_t *packet_length)
         *packet_length = (uint16_t)(
             header_length + rdx_local_wire.file_chunk_length);
         return 0;
+    case RDX_LOCAL_WIRE_TX_FILE_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet),
+            "*DEV#opusfile#%u#0#%u#0#0#",
+            (unsigned int)rdx_local_wire.error_serial_number,
+            (unsigned int)rdx_local_wire.error_request_pack);
+        break;
+    case RDX_LOCAL_WIRE_TX_DELETE_ERROR:
+        header_length = snprintf(
+            (char *)rdx_local_wire.tx_packet,
+            sizeof(rdx_local_wire.tx_packet),
+            "*DEV#delfile#1#%u#%s#",
+            (unsigned int)rdx_local_wire.error_serial_number,
+            rdx_local_wire.error_filename);
+        break;
     default:
         return -1;
     }
@@ -447,10 +509,108 @@ static void rdx_local_wire_operation_completion(
     void *priv,
     const struct rdx_local_storage_operation_completion *completion);
 
+static void rdx_local_wire_forget_upload(
+    const char *reason, uint8_t request_close)
+{
+    uint32_t connection_generation =
+        rdx_local_wire.upload_connection_generation;
+    uint32_t session_token = rdx_local_wire.upload_session_token;
+
+#if CONFIG_CPU_BR56
+    if (rdx_local_wire.upload_timeout_id) {
+        sys_timeout_del(rdx_local_wire.upload_timeout_id);
+        rdx_local_wire.upload_timeout_id = 0;
+    }
+#endif
+    rdx_local_wire.upload_session_valid = 0;
+    rdx_local_wire.upload_connection_generation = 0;
+    rdx_local_wire.upload_session_token = 0;
+    rdx_local_wire.upload_serial_number = 0;
+    if (request_close && connection_generation && session_token
+        && rdx_local_wire.service) {
+        (void)rdx_local_storage_service_close_upload(
+            rdx_local_wire.service, connection_generation,
+            session_token);
+    }
+    if (connection_generation && session_token) {
+        printf("[RDX][LOCAL_WIRE] upload_session_close reason=%s"
+               " connection=%u token=%u\n",
+               reason ? reason : "unknown",
+               (unsigned int)connection_generation,
+               (unsigned int)session_token);
+    }
+}
+
+static void rdx_local_wire_cancel_upload_tx(void)
+{
+    if (rdx_local_wire.tx_stage == RDX_LOCAL_WIRE_TX_FILE_CHUNK) {
+        rdx_local_wire.tx_stage = RDX_LOCAL_WIRE_TX_NONE;
+        rdx_local_wire.deferred_tx_stage = RDX_LOCAL_WIRE_TX_NONE;
+        rdx_local_wire.tx_token = rdx_local_wire_next_token(
+            rdx_local_wire.tx_token);
+    } else if (rdx_local_wire.deferred_tx_stage
+               == RDX_LOCAL_WIRE_TX_FILE_CHUNK) {
+        rdx_local_wire.deferred_tx_stage = RDX_LOCAL_WIRE_TX_NONE;
+    }
+    rdx_local_wire.file_auto_delete = 0;
+}
+
+static void rdx_local_wire_cancel_upload_operation(void)
+{
+    if (rdx_local_wire.operation_type
+        != RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ) {
+        return;
+    }
+    /* The storage worker may already own this read.  Invalidate the Wire
+     * completion token now; close_upload() will close a reader opened by a
+     * late completion on the storage owner instead of emitting stale data. */
+    rdx_local_wire.operation_type = RDX_LOCAL_STORAGE_OPERATION_NONE;
+    rdx_local_wire.operation_token = rdx_local_wire_next_token(
+        rdx_local_wire.operation_token);
+}
+
+#if CONFIG_CPU_BR56
+static void rdx_local_wire_upload_timeout(void *priv)
+{
+    uint32_t session_token = (uint32_t)(uintptr_t)priv;
+
+    rdx_local_wire.upload_timeout_id = 0;
+    if (!rdx_local_wire.upload_session_valid
+        || session_token != rdx_local_wire.upload_session_token) {
+        return;
+    }
+    rdx_local_wire_cancel_upload_tx();
+    rdx_local_wire_forget_upload("timeout", 1);
+}
+#endif
+
+static void rdx_local_wire_refresh_upload_timeout(void)
+{
+#if CONFIG_CPU_BR56
+    uint16_t timer_id;
+
+    if (rdx_local_wire.upload_timeout_id) {
+        sys_timeout_del(rdx_local_wire.upload_timeout_id);
+        rdx_local_wire.upload_timeout_id = 0;
+    }
+    timer_id = sys_timeout_add(
+        (void *)(uintptr_t)rdx_local_wire.upload_session_token,
+        rdx_local_wire_upload_timeout,
+        RDX_CFG_LOCAL_UPLOAD_SESSION_TIMEOUT_MS);
+    rdx_local_wire.upload_timeout_id = timer_id;
+    if (!timer_id) {
+        printf("[RDX][LOCAL_WIRE] upload_timer_failed token=%u\n",
+               (unsigned int)rdx_local_wire.upload_session_token);
+    }
+#endif
+}
+
 static void rdx_local_wire_submit_auto_delete(void)
 {
     struct rdx_local_storage_operation_request request;
     enum rdx_storage_result result;
+    uint32_t upload_connection_generation;
+    uint32_t upload_session_token;
 
     if (!rdx_local_wire.file_auto_delete
         || rdx_local_wire.file_request_pack
@@ -458,6 +618,10 @@ static void rdx_local_wire_submit_auto_delete(void)
         || !rdx_local_wire.upload_file.file_id.serial_number) {
         return;
     }
+    upload_connection_generation =
+        rdx_local_wire.upload_connection_generation;
+    upload_session_token = rdx_local_wire.upload_session_token;
+    rdx_local_wire_forget_upload("auto_delete", 0);
     memset(&request, 0, sizeof(request));
     rdx_local_wire.operation_token = rdx_local_wire_next_token(
         rdx_local_wire.operation_token);
@@ -477,6 +641,9 @@ static void rdx_local_wire_submit_auto_delete(void)
     if (result != RDX_STORAGE_RESULT_READY) {
         rdx_local_wire.operation_type = RDX_LOCAL_STORAGE_OPERATION_NONE;
         rdx_local_wire.file_auto_delete = 0;
+        (void)rdx_local_storage_service_close_upload(
+            rdx_local_wire.service, upload_connection_generation,
+            upload_session_token);
         printf("[RDX][LOCAL_WIRE] auto_delete_submit_failed result=%u"
                " sn=%u\n", result,
                (unsigned int)request.data.delete_file.serial_number);
@@ -485,6 +652,9 @@ static void rdx_local_wire_submit_auto_delete(void)
 
 static void rdx_local_wire_tx_advance(void)
 {
+    enum rdx_local_wire_tx_stage completed_stage =
+        rdx_local_wire.tx_stage;
+
     switch (rdx_local_wire.tx_stage) {
     case RDX_LOCAL_WIRE_TX_GETLIST_ACK:
         rdx_local_wire.tx_stage = rdx_local_wire.getlist_result
@@ -502,11 +672,30 @@ static void rdx_local_wire_tx_advance(void)
         break;
     case RDX_LOCAL_WIRE_TX_FILE_CHUNK:
         rdx_local_wire.tx_stage = RDX_LOCAL_WIRE_TX_NONE;
-        rdx_local_wire_submit_auto_delete();
+        if (rdx_local_wire.file_request_pack
+            == rdx_local_wire.file_total_packs) {
+            if (rdx_local_wire.file_auto_delete) {
+                rdx_local_wire_submit_auto_delete();
+            } else {
+                rdx_local_wire_forget_upload("complete", 1);
+            }
+        }
         break;
     default:
         rdx_local_wire.tx_stage = RDX_LOCAL_WIRE_TX_NONE;
         break;
+    }
+    if (rdx_local_wire.tx_stage == RDX_LOCAL_WIRE_TX_NONE
+        && rdx_local_wire.deferred_tx_stage
+              != RDX_LOCAL_WIRE_TX_NONE) {
+        rdx_local_wire.tx_stage = rdx_local_wire.deferred_tx_stage;
+        rdx_local_wire.deferred_tx_stage = RDX_LOCAL_WIRE_TX_NONE;
+        rdx_local_wire.tx_token = rdx_local_wire_next_token(
+            rdx_local_wire.tx_token);
+        rdx_local_wire.tx_connection_generation =
+            rdx_local_wire.protocol->session.connection_generation;
+        printf("[RDX][LOCAL_WIRE] tx_deferred_resume after=%u stage=%u\n",
+               completed_stage, rdx_local_wire.tx_stage);
     }
 }
 
@@ -548,6 +737,19 @@ static void rdx_local_wire_tx_pump(void)
 
 static void rdx_local_wire_begin_tx(enum rdx_local_wire_tx_stage stage)
 {
+    if (rdx_local_wire.tx_stage != RDX_LOCAL_WIRE_TX_NONE) {
+        if (rdx_local_wire.deferred_tx_stage
+            == RDX_LOCAL_WIRE_TX_NONE) {
+            rdx_local_wire.deferred_tx_stage = stage;
+            printf("[RDX][LOCAL_WIRE] tx_deferred active=%u stage=%u\n",
+                   rdx_local_wire.tx_stage, stage);
+        } else {
+            printf("[RDX][LOCAL_WIRE] tx_busy active=%u deferred=%u"
+                   " rejected=%u\n", rdx_local_wire.tx_stage,
+                   rdx_local_wire.deferred_tx_stage, stage);
+        }
+        return;
+    }
     rdx_local_wire.tx_token = rdx_local_wire_next_token(
         rdx_local_wire.tx_token);
     rdx_local_wire.tx_connection_generation =
@@ -580,8 +782,12 @@ static void rdx_local_wire_operation_completion(
         wire->getlist_result =
             completion->result == RDX_STORAGE_RESULT_READY
             && completion->count <= RDX_LOCAL_WIRE_FILE_MAX
+            && completion->storage_generation
             && !rdx_local_wire_build_list(completion->count)
                 ? 0 : 1;
+        wire->list_generation = wire->getlist_result
+                                    ? 0
+                                    : completion->storage_generation;
         printf("[RDX][LOCAL_WIRE] list result=%u count=%u bytes=%u"
                " packs=%u\n", wire->getlist_result,
                (unsigned int)completion->count,
@@ -603,14 +809,26 @@ static void rdx_local_wire_operation_completion(
                (unsigned int)rdx_local_wire_to_kib(wire->total_bytes));
         rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_CAPACITY);
         break;
-    case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
+    case RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ:
         if (completion->result != RDX_STORAGE_RESULT_READY
             || !completion->read_length
-            || completion->file.file_size <= wire->file_base_offset) {
+            || completion->file.file_size <= wire->file_base_offset
+            || completion->upload_session_token
+                   != wire->upload_session_token
+            || completion->file.file_id.serial_number
+                   != wire->upload_serial_number) {
             printf("[RDX][LOCAL_WIRE] upload_failed result=%u sn=%u"
                    " pack=%u\n", completion->result,
                    (unsigned int)wire->delete_serial_number,
                    (unsigned int)wire->file_request_pack);
+            wire->file_chunk_length = 0;
+            wire->file_total_packs = 0;
+            wire->error_serial_number = wire->upload_serial_number
+                ? wire->upload_serial_number
+                : wire->delete_serial_number;
+            wire->error_request_pack = wire->file_request_pack;
+            rdx_local_wire_forget_upload("read_failed", 1);
+            rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FILE_ERROR);
             break;
         }
         wire->upload_file = completion->file;
@@ -621,8 +839,17 @@ static void rdx_local_wire_operation_completion(
             / RDX_LOCAL_WIRE_FILE_CHUNK_SIZE);
         if (!wire->file_total_packs
             || wire->file_request_pack > wire->file_total_packs) {
+            wire->file_chunk_length = 0;
+            wire->file_total_packs = 0;
+            wire->error_serial_number =
+                wire->upload_file.file_id.serial_number;
+            wire->error_request_pack = wire->file_request_pack;
+            rdx_local_wire_forget_upload("range_failed", 1);
+            rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FILE_ERROR);
             break;
         }
+        wire->upload_session_valid = 1;
+        rdx_local_wire_refresh_upload_timeout();
         if (wire->file_request_pack == 1
             || wire->file_request_pack == wire->file_total_packs
             || !(wire->file_request_pack % 128)) {
@@ -688,6 +915,10 @@ static enum rdx_storage_result rdx_local_wire_submit(
 {
     enum rdx_storage_result result;
 
+    if (rdx_local_wire.operation_type
+        != RDX_LOCAL_STORAGE_OPERATION_NONE) {
+        return RDX_STORAGE_RESULT_BUSY;
+    }
     rdx_local_wire.operation_token = rdx_local_wire_next_token(
         rdx_local_wire.operation_token);
     request->token = rdx_local_wire.operation_token;
@@ -729,59 +960,90 @@ static int rdx_local_wire_parse_u32(const uint8_t **cursor,
     return 0;
 }
 
-static uint8_t rdx_local_wire_idle(void)
+static uint8_t rdx_local_wire_transport_busy(void)
 {
-    return rdx_local_wire.operation_type
-               == RDX_LOCAL_STORAGE_OPERATION_NONE
-           && rdx_local_wire.tx_stage == RDX_LOCAL_WIRE_TX_NONE;
+    return rdx_local_wire.tx_stage != RDX_LOCAL_WIRE_TX_NONE
+           || rdx_local_wire.deferred_tx_stage
+                  != RDX_LOCAL_WIRE_TX_NONE;
 }
 
 static void rdx_local_wire_handle_getlist(void)
 {
     struct rdx_local_storage_operation_request request;
+    enum rdx_storage_result result;
 
+    if (rdx_local_wire_transport_busy()) {
+        printf("[RDX][LOCAL_WIRE] getlist_rejected reason=transport_busy\n");
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_GETLIST_ERROR);
+        return;
+    }
     memset(&request, 0, sizeof(request));
     request.type = RDX_LOCAL_STORAGE_OPERATION_ENUMERATE;
     request.data.enumerate.items = rdx_local_wire.files;
     request.data.enumerate.capacity = RDX_LOCAL_WIRE_FILE_MAX;
     rdx_local_wire.list_valid = 0;
-    if (rdx_local_wire_submit(&request) != RDX_STORAGE_RESULT_READY) {
-        rdx_local_wire.getlist_result = 1;
-        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_GETLIST_ACK);
+    result = rdx_local_wire_submit(&request);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        rdx_local_wire_forget_upload("getlist", 0);
+    } else {
+        rdx_local_wire.list_valid = 0;
+        rdx_local_wire.list_generation = 0;
+        printf("[RDX][LOCAL_WIRE] getlist_rejected result=%u\n", result);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_GETLIST_ERROR);
     }
 }
 
 static void rdx_local_wire_handle_capacity(void)
 {
     struct rdx_local_storage_operation_request request;
+    enum rdx_storage_result result;
 
+    if (rdx_local_wire_transport_busy()) {
+        printf("[RDX][LOCAL_WIRE] capacity_rejected"
+               " reason=transport_busy\n");
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_CAPACITY_ERROR);
+        return;
+    }
     memset(&request, 0, sizeof(request));
     request.type = RDX_LOCAL_STORAGE_OPERATION_CAPACITY;
-    if (rdx_local_wire_submit(&request) != RDX_STORAGE_RESULT_READY) {
-        rdx_local_wire.total_bytes = 0;
-        rdx_local_wire.free_bytes = 0;
-        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_CAPACITY);
+    result = rdx_local_wire_submit(&request);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        rdx_local_wire_forget_upload("capacity", 0);
+    } else {
+        printf("[RDX][LOCAL_WIRE] capacity_rejected result=%u\n", result);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_CAPACITY_ERROR);
     }
 }
 
 static void rdx_local_wire_handle_format(void)
 {
     struct rdx_local_storage_operation_request request;
+    enum rdx_storage_result result;
 
+    if (rdx_local_wire_transport_busy()
+        || rdx_local_wire.operation_type
+               != RDX_LOCAL_STORAGE_OPERATION_NONE) {
+        printf("[RDX][LOCAL_WIRE] format_rejected reason=%s\n",
+               rdx_local_wire_transport_busy()
+                   ? "transport_busy" : "storage_busy");
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FORMAT_ERROR);
+        return;
+    }
     memset(&request, 0, sizeof(request));
     request.type = RDX_LOCAL_STORAGE_OPERATION_FORMAT;
     rdx_local_wire.format_ack_result = 0;
     rdx_local_wire.format_result = 1;
     rdx_local_wire.format_completed = 0;
-    rdx_local_wire.tx_token = rdx_local_wire_next_token(
-        rdx_local_wire.tx_token);
-    rdx_local_wire.tx_connection_generation =
-        rdx_local_wire.protocol->session.connection_generation;
-    rdx_local_wire.tx_stage = RDX_LOCAL_WIRE_TX_FORMAT_ACK;
-    if (rdx_local_wire_submit(&request) != RDX_STORAGE_RESULT_READY) {
-        rdx_local_wire.format_ack_result = 1;
+    result = rdx_local_wire_submit(&request);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        rdx_local_wire_forget_upload("format", 0);
+    } else {
+        printf("[RDX][LOCAL_WIRE] format_rejected result=%u\n", result);
     }
-    rdx_local_wire_tx_pump();
+    rdx_local_wire_begin_tx(
+        result == RDX_STORAGE_RESULT_READY
+            ? RDX_LOCAL_WIRE_TX_FORMAT_ACK
+            : RDX_LOCAL_WIRE_TX_FORMAT_ERROR);
 }
 
 static int rdx_local_wire_handle_listreq(const uint8_t *data,
@@ -803,9 +1065,30 @@ static int rdx_local_wire_handle_listreq(const uint8_t *data,
         rdx_local_wire.list_valid = 0;
         return 0;
     }
+    if (rdx_local_wire_transport_busy()) {
+        rdx_local_wire.error_request_pack = requested_pack;
+        printf("[RDX][LOCAL_WIRE] list_rejected pack=%u"
+               " reason=transport_busy\n",
+               (unsigned int)requested_pack);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_LIST_ERROR);
+        return 0;
+    }
     if (!rdx_local_wire.list_valid
-        || requested_pack > rdx_local_wire.list_pack_count) {
-        return -1;
+        || requested_pack > rdx_local_wire.list_pack_count
+        || !rdx_local_wire.list_generation
+        || rdx_local_wire.list_generation
+               != rdx_local_storage_service_index_generation(
+                      rdx_local_wire.service)) {
+        printf("[RDX][LOCAL_WIRE] list_invalid pack=%u snapshot=%u"
+               " current=%u\n", (unsigned int)requested_pack,
+               (unsigned int)rdx_local_wire.list_generation,
+               (unsigned int)rdx_local_storage_service_index_generation(
+                   rdx_local_wire.service));
+        rdx_local_wire.list_valid = 0;
+        rdx_local_wire.list_generation = 0;
+        rdx_local_wire.error_request_pack = requested_pack;
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_LIST_ERROR);
+        return 0;
     }
     rdx_local_wire.list_request_pack = requested_pack;
     rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_LIST_CHUNK);
@@ -822,6 +1105,7 @@ static int rdx_local_wire_handle_delete(const uint8_t *data,
     const uint8_t *filename_start;
     uint32_t filename_length;
     uint32_t serial_number;
+    enum rdx_storage_result result;
 
     if (rdx_local_wire_parse_u32(&cursor, end, &serial_number)
         || !serial_number) {
@@ -844,13 +1128,35 @@ static int rdx_local_wire_handle_delete(const uint8_t *data,
     request.data.delete_file.serial_number = serial_number;
     memcpy(request.data.delete_file.filename, filename_start,
            filename_length);
+    if (rdx_local_wire_transport_busy()
+        || rdx_local_wire.operation_type
+               != RDX_LOCAL_STORAGE_OPERATION_NONE) {
+        rdx_local_wire.error_serial_number = serial_number;
+        memcpy(rdx_local_wire.error_filename, filename_start,
+               filename_length);
+        rdx_local_wire.error_filename[filename_length] = 0;
+        printf("[RDX][LOCAL_WIRE] delete_rejected reason=%s sn=%u\n",
+               rdx_local_wire_transport_busy()
+                   ? "transport_busy" : "storage_busy",
+               (unsigned int)serial_number);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_DELETE_ERROR);
+        return 0;
+    }
     rdx_local_wire.delete_serial_number = serial_number;
     memcpy(rdx_local_wire.delete_filename, filename_start,
            filename_length);
     rdx_local_wire.delete_filename[filename_length] = 0;
-    if (rdx_local_wire_submit(&request) != RDX_STORAGE_RESULT_READY) {
-        rdx_local_wire.delete_result = 1;
-        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_DELETE_RESULT);
+    result = rdx_local_wire_submit(&request);
+    if (result == RDX_STORAGE_RESULT_READY) {
+        rdx_local_wire_forget_upload("delete", 0);
+    } else {
+        printf("[RDX][LOCAL_WIRE] delete_rejected result=%u sn=%u\n",
+               result, (unsigned int)serial_number);
+        rdx_local_wire.error_serial_number = serial_number;
+        strncpy(rdx_local_wire.error_filename,
+                rdx_local_wire.delete_filename,
+                sizeof(rdx_local_wire.error_filename) - 1);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_DELETE_ERROR);
     }
     return 0;
 }
@@ -868,6 +1174,9 @@ static int rdx_local_wire_handle_opusfile(const uint8_t *data,
     uint32_t auto_delete;
     uint32_t file_offset = 0;
     uint64_t read_offset;
+    uint32_t connection_generation;
+    uint8_t open_session;
+    enum rdx_storage_result result;
 
     if (rdx_local_wire_parse_u32(&cursor, end, &previous_pack)
         || rdx_local_wire_parse_u32(&cursor, end, &serial_number)
@@ -882,29 +1191,75 @@ static int rdx_local_wire_handle_opusfile(const uint8_t *data,
     }
     (void)previous_pack;
     if (!requested_pack) {
-        rdx_local_wire.file_auto_delete = 0;
+        rdx_local_wire_cancel_upload_tx();
+        rdx_local_wire_cancel_upload_operation();
+        rdx_local_wire_forget_upload("cancel", 1);
         return 0;
     }
     if (!serial_number || auto_delete > 1
         || requested_pack > UINT32_MAX / RDX_LOCAL_WIRE_FILE_CHUNK_SIZE) {
         return -1;
     }
+    if (rdx_local_wire_transport_busy()
+        || rdx_local_wire.operation_type
+               != RDX_LOCAL_STORAGE_OPERATION_NONE) {
+        rdx_local_wire.error_serial_number = serial_number;
+        rdx_local_wire.error_request_pack = requested_pack;
+        printf("[RDX][LOCAL_WIRE] upload_rejected reason=%s sn=%u"
+               " pack=%u open=0\n",
+               rdx_local_wire_transport_busy()
+                   ? "transport_busy" : "storage_busy",
+               (unsigned int)serial_number,
+               (unsigned int)requested_pack);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FILE_ERROR);
+        return 0;
+    }
     read_offset = (uint64_t)file_offset
                   + (uint64_t)(requested_pack - 1)
                     * RDX_LOCAL_WIRE_FILE_CHUNK_SIZE;
+    connection_generation =
+        rdx_local_wire.protocol->session.connection_generation;
+    open_session = !rdx_local_wire.upload_session_valid
+        || rdx_local_wire.upload_connection_generation
+               != connection_generation
+        || rdx_local_wire.upload_serial_number != serial_number;
+    if (open_session) {
+        rdx_local_wire.upload_token_seed = rdx_local_wire_next_token(
+            rdx_local_wire.upload_token_seed);
+        rdx_local_wire.upload_connection_generation =
+            connection_generation;
+        rdx_local_wire.upload_session_token =
+            rdx_local_wire.upload_token_seed;
+        rdx_local_wire.upload_serial_number = serial_number;
+        rdx_local_wire.upload_session_valid = 1;
+    }
     memset(&request, 0, sizeof(request));
-    request.type = RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL;
+    request.type = RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ;
     request.data.read.serial_number = serial_number;
+    request.data.read.connection_generation = connection_generation;
+    request.data.read.session_token =
+        rdx_local_wire.upload_session_token;
     request.data.read.offset = read_offset;
     request.data.read.buffer = rdx_local_wire.file_chunk;
     request.data.read.length = sizeof(rdx_local_wire.file_chunk);
+    request.data.read.open_session = open_session;
     rdx_local_wire.file_request_pack = requested_pack;
     rdx_local_wire.file_base_offset = file_offset;
     rdx_local_wire.file_auto_delete = (uint8_t)auto_delete;
     rdx_local_wire.delete_serial_number = serial_number;
-    if (rdx_local_wire_submit(&request) != RDX_STORAGE_RESULT_READY) {
+    result = rdx_local_wire_submit(&request);
+    if (result != RDX_STORAGE_RESULT_READY) {
+        printf("[RDX][LOCAL_WIRE] upload_rejected result=%u sn=%u"
+               " pack=%u open=%u\n", result,
+               (unsigned int)serial_number,
+               (unsigned int)requested_pack, open_session);
         rdx_local_wire.file_auto_delete = 0;
-        return -1;
+        rdx_local_wire.file_chunk_length = 0;
+        rdx_local_wire.file_total_packs = 0;
+        rdx_local_wire.error_serial_number = serial_number;
+        rdx_local_wire.error_request_pack = requested_pack;
+        rdx_local_wire_forget_upload("submit_failed", 1);
+        rdx_local_wire_begin_tx(RDX_LOCAL_WIRE_TX_FILE_ERROR);
     }
     return 0;
 }
@@ -930,6 +1285,7 @@ int rdx_protocol_v23_local_storage_init(
 
 void rdx_protocol_v23_local_storage_exit(void)
 {
+    rdx_local_wire_forget_upload("exit", 1);
     memset(&rdx_local_wire, 0, sizeof(rdx_local_wire));
 }
 
@@ -938,10 +1294,21 @@ void rdx_protocol_v23_local_storage_handle_link_change(uint8_t connected)
     if (connected) {
         return;
     }
+    rdx_local_wire_forget_upload("disconnect", 1);
     rdx_local_wire.operation_type = RDX_LOCAL_STORAGE_OPERATION_NONE;
     rdx_local_wire.tx_stage = RDX_LOCAL_WIRE_TX_NONE;
+    rdx_local_wire.deferred_tx_stage = RDX_LOCAL_WIRE_TX_NONE;
     rdx_local_wire.list_valid = 0;
+    rdx_local_wire.list_generation = 0;
     rdx_local_wire.file_auto_delete = 0;
+}
+
+void rdx_protocol_v23_local_storage_handle_upload_timeout(void)
+{
+    if (rdx_local_wire.upload_session_valid) {
+        rdx_local_wire_cancel_upload_tx();
+        rdx_local_wire_forget_upload("timeout_test", 1);
+    }
 }
 
 void rdx_protocol_v23_local_storage_handle_ccc_change(void)
@@ -1000,12 +1367,6 @@ uint8_t rdx_protocol_v23_local_storage_handle_command(
             rdx_local_wire.protocol, command, len)) {
         return 1;
     }
-    if (!rdx_local_wire_idle()) {
-        printf("[RDX][DROP] cmd=%s reason=local_storage_busy len=%u\n",
-               command, len);
-        return 1;
-    }
-
     if (!strcmp(command, "getlist")) {
         rdx_local_wire_handle_getlist();
     } else if (!strcmp(command, "listreq")) {

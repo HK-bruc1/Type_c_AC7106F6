@@ -36,7 +36,18 @@ struct test_state {
     uint32_t delete_count;
     uint32_t format_count;
     uint32_t list_file_count;
+    uint32_t storage_generation;
+    uint32_t upload_connection_generation;
+    uint32_t upload_session_token;
+    uint32_t upload_serial_number;
+    uint32_t upload_identity_resolve_count;
+    uint32_t upload_open_count;
+    uint32_t upload_read_count;
+    uint32_t upload_close_count;
+    enum rdx_storage_result submit_result_once;
+    enum rdx_storage_result completion_result_once;
     uint8_t file_present;
+    uint8_t upload_active;
 };
 
 static struct test_state test_state;
@@ -69,11 +80,29 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     assert(service);
     assert(request);
     assert(callback);
+    if (test_state.submit_result_once != RDX_STORAGE_RESULT_READY) {
+        enum rdx_storage_result result = test_state.submit_result_once;
+
+        test_state.submit_result_once = RDX_STORAGE_RESULT_READY;
+        return result;
+    }
     memset(&completion, 0, sizeof(completion));
     completion.type = request->type;
     completion.token = request->token;
     completion.result = RDX_STORAGE_RESULT_READY;
     test_state.operation_count++;
+    if (test_state.completion_result_once != RDX_STORAGE_RESULT_READY) {
+        completion.result = test_state.completion_result_once;
+        test_state.completion_result_once = RDX_STORAGE_RESULT_READY;
+        callback(priv, &completion);
+        return RDX_STORAGE_RESULT_READY;
+    }
+
+    if (request->type != RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ
+        && test_state.upload_active) {
+        test_state.upload_active = 0;
+        test_state.upload_close_count++;
+    }
 
     switch (request->type) {
     case RDX_LOCAL_STORAGE_OPERATION_CAPACITY:
@@ -83,6 +112,7 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
                                     : 8ULL * 1024 * 1024;
         break;
     case RDX_LOCAL_STORAGE_OPERATION_ENUMERATE:
+        completion.storage_generation = test_state.storage_generation;
         if (test_state.file_present) {
             assert(request->data.enumerate.capacity
                    >= test_state.list_file_count);
@@ -93,12 +123,40 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
             completion.count = test_state.list_file_count;
         }
         break;
-    case RDX_LOCAL_STORAGE_OPERATION_READ_BY_SERIAL:
-        assert(test_state.file_present);
-        assert(request->data.read.serial_number
-               == test_state.file.file_id.serial_number);
-        assert(request->data.read.offset < test_state.file.file_size);
+    case RDX_LOCAL_STORAGE_OPERATION_UPLOAD_READ:
+        if (!test_state.file_present
+            || request->data.read.serial_number
+                   != test_state.file.file_id.serial_number
+            || request->data.read.offset >= test_state.file.file_size) {
+            completion.result = RDX_STORAGE_RESULT_BAD_ARGUMENT;
+            break;
+        }
+        if (request->data.read.open_session) {
+            if (test_state.upload_active) {
+                test_state.upload_close_count++;
+            }
+            test_state.upload_active = 1;
+            test_state.upload_connection_generation =
+                request->data.read.connection_generation;
+            test_state.upload_session_token =
+                request->data.read.session_token;
+            test_state.upload_serial_number =
+                request->data.read.serial_number;
+            test_state.upload_identity_resolve_count++;
+            test_state.upload_open_count++;
+        } else {
+            assert(test_state.upload_active);
+            assert(test_state.upload_connection_generation
+                   == request->data.read.connection_generation);
+            assert(test_state.upload_session_token
+                   == request->data.read.session_token);
+            assert(test_state.upload_serial_number
+                   == request->data.read.serial_number);
+        }
         completion.file = test_state.file;
+        completion.storage_generation = test_state.storage_generation;
+        completion.upload_session_token =
+            test_state.upload_session_token;
         available = (uint32_t)test_state.file.file_size
                     - (uint32_t)request->data.read.offset;
         completion.read_length = request->data.read.length;
@@ -108,6 +166,7 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
         memcpy(request->data.read.buffer,
                test_state.file_data + (uint32_t)request->data.read.offset,
                completion.read_length);
+        test_state.upload_read_count++;
         break;
     case RDX_LOCAL_STORAGE_OPERATION_DELETE_BY_IDENTITY:
         assert(request->data.delete_file.serial_number
@@ -120,11 +179,13 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
         } else {
             test_state.file_present = 0;
             test_state.delete_count++;
+            test_state.storage_generation++;
         }
         break;
     case RDX_LOCAL_STORAGE_OPERATION_FORMAT:
         test_state.file_present = 0;
         test_state.format_count++;
+        test_state.storage_generation++;
         completion.total_bytes = 8ULL * 1024 * 1024;
         completion.free_bytes = completion.total_bytes;
         break;
@@ -134,6 +195,27 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     }
     callback(priv, &completion);
     return RDX_STORAGE_RESULT_READY;
+}
+
+enum rdx_storage_result rdx_local_storage_service_close_upload(
+    struct rdx_local_storage_service *service,
+    uint32_t connection_generation, uint32_t session_token)
+{
+    assert(service);
+    if (test_state.upload_active
+        && test_state.upload_connection_generation == connection_generation
+        && test_state.upload_session_token == session_token) {
+        test_state.upload_active = 0;
+        test_state.upload_close_count++;
+    }
+    return RDX_STORAGE_RESULT_READY;
+}
+
+uint32_t rdx_local_storage_service_index_generation(
+    struct rdx_local_storage_service *service)
+{
+    assert(service);
+    return test_state.storage_generation;
 }
 
 int rdx_protocol_v23_send(struct rdx_protocol_v23_context *context,
@@ -400,6 +482,7 @@ static void test_list_boundaries_and_escaping(void)
     test_state.file_present = 1;
 
     test_state.list_file_count = 1;
+    test_state.storage_generation = 9;
     test_state.list_files[0] = test_state.file;
     strcpy(test_state.list_files[0].file_id.name,
            "dir/a\"b\\c.raw");
@@ -461,6 +544,11 @@ static void test_capacity_and_file_golden_trace(void)
     snprintf(header, sizeof(header), "*DEV#opusfile#7#2#1#80#%lu#",
              (unsigned long)crc);
     assert_binary_packet(0, header, test_state.file_data, 80);
+    assert(test_state.upload_identity_resolve_count == 1);
+    assert(test_state.upload_open_count == 1);
+    assert(test_state.upload_read_count == 1);
+    assert(test_state.upload_close_count == 0);
+    assert(test_state.upload_active);
 }
 
 static void test_long_file_offset_and_auto_delete(void)
@@ -476,6 +564,9 @@ static void test_long_file_offset_and_auto_delete(void)
     uint32_t delete_before = test_state.delete_count;
     uint32_t owner;
     uint32_t token;
+    uint32_t opens_before = test_state.upload_open_count;
+    uint32_t resolves_before = test_state.upload_identity_resolve_count;
+    uint32_t closes_before = test_state.upload_close_count;
 
     /* Freeze the short final-chunk contract first: an 83-byte file is two
      * 80-byte packs and the final packet carries only the remaining bytes. */
@@ -487,6 +578,10 @@ static void test_long_file_offset_and_auto_delete(void)
     snprintf(header, sizeof(header), "*DEV#opusfile#7#2#2#3#%lu#",
              (unsigned long)crc);
     assert_binary_packet(0, header, test_state.file_data + 80, 3);
+    assert(test_state.upload_open_count == opens_before);
+    assert(test_state.upload_identity_resolve_count == resolves_before);
+    assert(test_state.upload_close_count == closes_before + 1);
+    assert(!test_state.upload_active);
 
     /* A resumed transfer computes total packs relative to the supplied base
      * offset while still reading the requested absolute file position. */
@@ -499,6 +594,18 @@ static void test_long_file_offset_and_auto_delete(void)
     snprintf(header, sizeof(header), "*DEV#opusfile#7#3#2#80#%lu#",
              (unsigned long)crc);
     assert_binary_packet(0, header, test_state.file_data + 160, 80);
+    assert(test_state.upload_open_count == opens_before + 1);
+    assert(test_state.upload_identity_resolve_count == resolves_before + 1);
+    assert(test_state.upload_active);
+
+    /* Retransmitting an old/current pack reuses the same verified reader. */
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               offset_middle_pack, sizeof(offset_middle_pack) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_binary_packet(0, header, test_state.file_data + 160, 80);
+    assert(test_state.upload_open_count == opens_before + 1);
+    assert(test_state.upload_identity_resolve_count == resolves_before + 1);
 
     /* Auto-delete is submitted only after the final chunk has been accepted
      * by Transport, so a retryable TX cannot erase an unread recording. */
@@ -524,6 +631,10 @@ static void test_long_file_offset_and_auto_delete(void)
     assert_binary_packet(0, header, test_state.file_data + 240, 5);
     assert(test_state.delete_count == delete_before + 1);
     assert(!test_state.file_present);
+    assert(test_state.upload_open_count == opens_before + 1);
+    assert(test_state.upload_identity_resolve_count == resolves_before + 1);
+    assert(test_state.upload_close_count == closes_before + 2);
+    assert(!test_state.upload_active);
 
     test_state.file.file_size = TEST_FILE_SIZE;
     test_state.file_present = 1;
@@ -579,7 +690,158 @@ static void test_malformed_and_disconnect(void)
     reset_packets();
     assert(rdx_protocol_v23_local_storage_handle_command(
                listreq, sizeof(listreq) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_text_packet(0, "*DEV#listreq#1#0#0#");
+}
+
+static void test_list_generation_and_invalid_pack(void)
+{
+    static const uint8_t getlist[] = "*APP#getlist#";
+    static const uint8_t pack_one[] = "*APP#listreq#0#1#";
+    static const uint8_t invalid_pack[] = "*APP#listreq#1#99#";
+
+    test_state.file_present = 1;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               getlist, sizeof(getlist) - 1) == 1);
+    assert(test_state.packet_count == 2);
+    test_state.storage_generation++;
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               pack_one, sizeof(pack_one) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_text_packet(0, "*DEV#listreq#1#0#0#");
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               getlist, sizeof(getlist) - 1) == 1);
+    assert(test_state.packet_count == 2);
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               invalid_pack, sizeof(invalid_pack) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_text_packet(0, "*DEV#listreq#99#0#0#");
+}
+
+static void test_upload_timeout_disconnect_and_errors(void)
+{
+    static const uint8_t first_pack[] = "*APP#opusfile#0#7#1#0#";
+    static const uint8_t second_pack[] = "*APP#opusfile#1#7#2#0#";
+    static const uint8_t cancel[] = "*APP#opusfile#1#7#0#0#";
+    static const uint8_t invalid_offset[] =
+        "*APP#opusfile#0#7#1#0#999#";
+    uint32_t opens_before;
+    uint32_t closes_before;
+    uint32_t owner;
+    uint32_t token;
+
+    test_state.file_present = 1;
+    test_state.file.file_size = TEST_FILE_CAPACITY;
+    opens_before = test_state.upload_open_count;
+    closes_before = test_state.upload_close_count;
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               first_pack, sizeof(first_pack) - 1) == 1);
+    assert(test_state.packet_count == 1 && test_state.upload_active);
+    rdx_protocol_v23_local_storage_handle_upload_timeout();
+    assert(!test_state.upload_active);
+    assert(test_state.upload_close_count == closes_before + 1);
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               second_pack, sizeof(second_pack) - 1) == 1);
+    assert(test_state.packet_count == 1 && test_state.upload_active);
+    assert(test_state.upload_open_count == opens_before + 2);
+    rdx_protocol_v23_local_storage_handle_link_change(0);
+    assert(!test_state.upload_active);
+    assert(test_state.upload_close_count == closes_before + 2);
+
+    /* The next request after disconnect establishes a fresh cursor and seeks
+     * directly to the requested pack; no stale connection token is reused. */
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               second_pack, sizeof(second_pack) - 1) == 1);
+    assert(test_state.packet_count == 1 && test_state.upload_active);
+    assert(test_state.upload_open_count == opens_before + 3);
+    rdx_protocol_v23_local_storage_handle_upload_timeout();
+    assert(!test_state.upload_active);
+    assert(test_state.upload_close_count == closes_before + 3);
+
+    /* Explicit cancel also revokes a retryable FILE_CHUNK token.  A later
+     * can-send callback must not leak the canceled payload or auto-delete. */
+    reset_packets();
+    test_state.send_result = RDX_TRANSPORT_RETRYABLE;
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               first_pack, sizeof(first_pack) - 1) == 1);
+    assert(test_state.packet_count == 0 && test_state.upload_active);
+    assert(test_state.can_send_request_count == 1);
+    owner = test_state.can_send_owner;
+    token = test_state.can_send_token;
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               cancel, sizeof(cancel) - 1) == 1);
+    assert(!test_state.upload_active);
+    assert(test_state.upload_close_count == closes_before + 4);
+    test_state.send_result = RDX_TRANSPORT_ACCEPTED;
+    rdx_protocol_v23_local_storage_handle_can_send(owner, token);
     assert(test_state.packet_count == 0);
+
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               invalid_offset, sizeof(invalid_offset) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_text_packet(0, "*DEV#opusfile#7#0#1#0#0#");
+
+    test_state.completion_result_once = RDX_STORAGE_RESULT_IO_ERROR;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               first_pack, sizeof(first_pack) - 1) == 1);
+    assert(test_state.packet_count == 1);
+    assert_text_packet(0, "*DEV#opusfile#7#0#1#0#0#");
+    assert(!test_state.upload_active);
+
+    test_state.file.file_size = TEST_FILE_SIZE;
+}
+
+static void test_storage_busy_wire_contract(void)
+{
+    static const uint8_t getlist[] = "*APP#getlist#";
+    static const uint8_t capacity[] = "*APP#mem#";
+    static const uint8_t format[] = "*APP#format#";
+    static const uint8_t delete_file[] = "*APP#delfile#7#abc.raw#";
+    static const uint8_t opusfile[] = "*APP#opusfile#0#7#1#0#";
+
+    test_state.file_present = 1;
+    test_state.submit_result_once = RDX_STORAGE_RESULT_BUSY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               getlist, sizeof(getlist) - 1) == 1);
+    assert_text_packet(0, "*DEV#getlist#1#");
+
+    test_state.submit_result_once = RDX_STORAGE_RESULT_BUSY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               capacity, sizeof(capacity) - 1) == 1);
+    assert_text_packet(0, "*DEV#mem#0#0#");
+
+    test_state.submit_result_once = RDX_STORAGE_RESULT_BUSY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               format, sizeof(format) - 1) == 1);
+    assert_text_packet(0, "*DEV#format#1#");
+
+    test_state.submit_result_once = RDX_STORAGE_RESULT_BUSY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               delete_file, sizeof(delete_file) - 1) == 1);
+    assert_text_packet(0, "*DEV#delfile#1#7#abc.raw#");
+
+    test_state.submit_result_once = RDX_STORAGE_RESULT_BUSY;
+    reset_packets();
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               opusfile, sizeof(opusfile) - 1) == 1);
+    assert_text_packet(0, "*DEV#opusfile#7#0#1#0#0#");
 }
 
 static void test_retryable_can_send(void)
@@ -598,13 +860,20 @@ static void test_retryable_can_send(void)
     owner = test_state.can_send_owner;
     token = test_state.can_send_token;
 
+    /* The second command receives a stable transport-busy mapping deferred
+     * behind the retryable packet; it cannot overwrite the first payload. */
+    assert(rdx_protocol_v23_local_storage_handle_command(
+               capacity, sizeof(capacity) - 1) == 1);
+    assert(test_state.send_attempt_count == 1);
+
     rdx_protocol_v23_local_storage_handle_can_send(owner, token + 1);
     assert(test_state.send_attempt_count == 1);
     test_state.send_result = RDX_TRANSPORT_ACCEPTED;
     rdx_protocol_v23_local_storage_handle_can_send(owner, token);
-    assert(test_state.send_attempt_count == 2);
-    assert(test_state.packet_count == 1);
+    assert(test_state.send_attempt_count == 3);
+    assert(test_state.packet_count == 2);
     assert_text_packet(0, "*DEV#mem#3072#8192#");
+    assert_text_packet(1, "*DEV#mem#0#0#");
 }
 
 int main(void)
@@ -621,6 +890,7 @@ int main(void)
     test_state.file.file_size = TEST_FILE_SIZE;
     test_state.file.audio_crc = 891568578UL;
     test_state.list_file_count = 1;
+    test_state.storage_generation = 9;
     test_state.list_files[0] = test_state.file;
     for (i = 0; i < TEST_FILE_CAPACITY; i++) {
         test_state.file_data[i] = (uint8_t)(i + 1);
@@ -642,6 +912,9 @@ int main(void)
     test_long_file_offset_and_auto_delete();
     test_delete_and_format_golden_trace();
     test_malformed_and_disconnect();
+    test_list_generation_and_invalid_pack();
+    test_upload_timeout_disconnect_and_errors();
+    test_storage_busy_wire_contract();
     test_retryable_can_send();
 
     rdx_protocol_v23_local_storage_exit();
