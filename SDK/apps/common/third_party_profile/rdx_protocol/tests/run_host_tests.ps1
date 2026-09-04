@@ -101,6 +101,12 @@ $specs = @(
             (Join-Path $testDir 'rdx_artifact_test.c'),
             (Join-Path $moduleDir 'domain\rdx_artifact.c')
         )),
+    (New-RdxTestSpec -Name 'storage_command_slot' `
+        -Includes @($profileRoot) `
+        -Sources @(
+            (Join-Path $testDir 'rdx_storage_command_slot_test.c'),
+            (Join-Path $applicationDir 'rdx_storage_command_slot.c')
+        )),
     (New-RdxTestSpec -Name 'composite_destination' `
         -Includes @($publicInclude, $profileRoot) `
         -Sources @(
@@ -112,6 +118,7 @@ $specs = @(
         -Sources @(
             (Join-Path $testDir 'rdx_local_storage_service_test.c'),
             (Join-Path $moduleDir 'domain\rdx_artifact.c'),
+            (Join-Path $applicationDir 'rdx_storage_command_slot.c'),
             (Join-Path $applicationDir 'rdx_local_storage_service.c'),
             (Join-Path $applicationDir 'rdx_record_local_destination.c'),
             (Join-Path $applicationDir 'rdx_record_composite_destination.c'),
@@ -123,6 +130,7 @@ $specs = @(
         -Sources @(
             (Join-Path $testDir 'rdx_local_storage_service_test.c'),
             (Join-Path $moduleDir 'domain\rdx_artifact.c'),
+            (Join-Path $applicationDir 'rdx_storage_command_slot.c'),
             (Join-Path $applicationDir 'rdx_local_storage_service.c'),
             (Join-Path $applicationDir 'rdx_record_local_destination.c'),
             (Join-Path $applicationDir 'rdx_record_composite_destination.c'),

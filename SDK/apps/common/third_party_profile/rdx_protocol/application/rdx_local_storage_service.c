@@ -4,10 +4,15 @@
 #endif
 #include <string.h>
 
+#if CONFIG_CPU_BR56
+#include "app_config.h"
+#endif
 #include "rdx/rdx_local_storage_service.h"
+#include "rdx_storage_command_slot.h"
 
 #if CONFIG_CPU_BR56
 #include "system/includes.h"
+#include "system/timer.h"
 #include "task.h"
 #include "user_cfg.h"
 #if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE && TCFG_RESOURCE_MONITOR_ENABLE
@@ -23,12 +28,149 @@
 #define RDX_LOCAL_STORAGE_TASK_NAME       "rdx_storage"
 #define RDX_LOCAL_STORAGE_TASK_WAKE       0x52445802
 #define RDX_LOCAL_STORAGE_PUMP_BUDGET     RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES
-#define RDX_LOCAL_STORAGE_SEAL_WAIT_TICKS 100
+#endif
+
+enum service_command_type {
+    SERVICE_COMMAND_NONE = 0,
+    SERVICE_COMMAND_RECOVER,
+    SERVICE_COMMAND_RESERVE_ARTIFACT,
+    SERVICE_COMMAND_START,
+    SERVICE_COMMAND_ATTACH,
+    SERVICE_COMMAND_CANCEL_START,
+    SERVICE_COMMAND_SEAL,
+    SERVICE_COMMAND_ABORT,
+    SERVICE_COMMAND_GET_CAPACITY,
+    SERVICE_COMMAND_ENUMERATE,
+    SERVICE_COMMAND_DELETE,
+    SERVICE_COMMAND_FORMAT,
+    SERVICE_COMMAND_QUIESCE,
+    SERVICE_COMMAND_SHUTDOWN,
+};
+
+/* Every payload stored in the target command slot is worker-owned.  Caller
+ * output pointers are kept only on the waiting task's stack and are copied
+ * after a matching completion is claimed, so a timeout cannot leave the
+ * worker referencing an expired caller object. */
+struct service_command {
+    enum service_command_type type;
+    enum rdx_storage_result result;
+    uint32_t token;
+    union {
+        struct {
+            enum rdx_record_format_id format_id;
+            struct rdx_storage_artifact_spec spec;
+        } reserve;
+        struct {
+            struct rdx_storage_artifact_spec spec;
+        } start;
+        struct {
+            uint32_t session_id;
+            uint32_t capture_generation;
+        } attach;
+        struct {
+            enum rdx_record_cause cause;
+        } cancel_start;
+        struct {
+            uint32_t session_id;
+            uint32_t capture_generation;
+        } seal;
+        struct {
+            uint32_t session_id;
+            uint32_t capture_generation;
+            enum rdx_record_cause cause;
+        } abort;
+        struct {
+            uint64_t total_bytes;
+            uint64_t free_bytes;
+        } capacity;
+        struct {
+            uint32_t capacity;
+            uint32_t count;
+        } enumerate;
+        struct {
+            struct rdx_storage_file_id file_id;
+        } delete_file;
+        struct {
+            uint16_t timeout_ms;
+        } quiesce;
+        struct {
+            uint16_t timeout_ms;
+        } shutdown;
+    } data;
+};
+
+struct service_command_output {
+    struct rdx_storage_artifact_spec *reserved_spec;
+    uint64_t *total_bytes;
+    uint64_t *free_bytes;
+    struct rdx_storage_file_info *items;
+    uint32_t capacity;
+    uint32_t *count;
+};
+
+static enum rdx_storage_result service_recover_executor(
+    struct rdx_local_storage_service *service);
+static enum rdx_storage_result service_reserve_artifact_executor(
+    struct rdx_local_storage_service *service,
+    enum rdx_record_format_id format_id,
+    struct rdx_storage_artifact_spec *spec);
+static enum rdx_storage_result service_start_executor(
+    struct rdx_local_storage_service *service,
+    const struct rdx_storage_artifact_spec *spec);
+static enum rdx_storage_result service_attach_executor(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t capture_generation);
+static enum rdx_storage_result service_cancel_start_executor(
+    struct rdx_local_storage_service *service, enum rdx_record_cause cause);
+static enum rdx_storage_result service_seal_executor(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t capture_generation);
+static enum rdx_storage_result service_abort_executor(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t capture_generation, enum rdx_record_cause cause);
+static enum rdx_storage_result service_get_capacity_executor(
+    struct rdx_local_storage_service *service, uint64_t *total_bytes,
+    uint64_t *free_bytes);
+static enum rdx_storage_result service_enumerate_executor(
+    struct rdx_local_storage_service *service,
+    struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count);
+static enum rdx_storage_result service_delete_executor(
+    struct rdx_local_storage_service *service,
+    const struct rdx_storage_file_id *file_id);
+static enum rdx_storage_result service_format_executor(
+    struct rdx_local_storage_service *service);
+static enum rdx_storage_result service_quiesce_executor(
+    struct rdx_local_storage_service *service, uint16_t timeout_ms);
+static enum rdx_storage_result service_shutdown_executor(
+    struct rdx_local_storage_service *service, uint16_t timeout_ms);
+
+#if CONFIG_CPU_BR56
 
 struct rdx_local_storage_platform_context {
     struct rdx_local_storage_service *owner;
     OS_MUTEX executor_lock;
+    OS_SEM command_done;
     spinlock_t state_lock;
+    struct service_command command;
+    struct rdx_storage_command_slot command_slot;
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+    uint32_t command_enqueue_ms;
+    uint32_t command_run_start_ms;
+    uint32_t command_wait_max_ms;
+    uint32_t command_run_max_ms;
+    uint32_t wake_post_ms;
+    uint32_t wake_posts;
+    uint32_t wake_coalesced;
+    uint32_t wake_failures;
+    uint32_t wake_latency_max_ms;
+    uint32_t frame_batches;
+    uint32_t command_timeouts;
+    uint32_t pending_cancellations;
+    uint32_t pending_must_run;
+    uint32_t late_completions;
+    uint8_t queue_peak;
+    uint8_t wake_latency_pending;
+#endif
 };
 
 /* The product runtime owns exactly one Local Storage Service.  Keeping the
@@ -44,12 +186,93 @@ static struct rdx_local_storage_platform_context
 
 #define RDX_COMPAT_FILENAME_ATTEMPTS      64
 
-#define SERVICE_SEAL_EXECUTOR_RETURN(service, expression)              \
-    do {                                                               \
-        enum rdx_storage_result service_seal_return = (expression);    \
-        service_executor_unlock((service));                            \
-        return service_seal_return;                                    \
+#if CONFIG_CPU_BR56 && RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+static void service_diag_reset_locked(
+    struct rdx_local_storage_platform_context *context)
+{
+    uint32_t next_token = context->command_slot.next_token;
+
+    memset(&context->command_enqueue_ms, 0,
+           sizeof(*context)
+               - offsetof(struct rdx_local_storage_platform_context,
+                          command_enqueue_ms));
+    context->command_slot.next_token = next_token;
+}
+
+static void service_diag_max(uint32_t *maximum, uint32_t value)
+{
+    if (value > *maximum) {
+        *maximum = value;
+    }
+}
+
+static void service_diag_command_enqueued_locked(
+    struct rdx_local_storage_platform_context *context,
+    enum service_command_type type)
+{
+    if (type == SERVICE_COMMAND_RESERVE_ARTIFACT) {
+        service_diag_reset_locked(context);
+    }
+    context->command_enqueue_ms = sys_timer_get_ms();
+}
+
+static void service_diag_command_started_locked(
+    struct rdx_local_storage_platform_context *context)
+{
+    uint32_t now = sys_timer_get_ms();
+
+    context->command_run_start_ms = now;
+    service_diag_max(&context->command_wait_max_ms,
+                     now - context->command_enqueue_ms);
+}
+
+static void service_diag_command_finished_locked(
+    struct rdx_local_storage_platform_context *context)
+{
+    service_diag_max(&context->command_run_max_ms,
+                     sys_timer_get_ms() - context->command_run_start_ms);
+}
+
+static void service_diag_dump(
+    struct rdx_local_storage_platform_context *context, const char *reason)
+{
+    printf("[RDX][STORAGE_EXEC] reason=%s wake_posts=%u"
+           " wake_coalesced=%u wake_fail=%u wake_latency_max_ms=%u"
+           " frame_batches=%u queue_peak=%u command_wait_max_ms=%u"
+           " command_run_max_ms=%u timeouts=%u pending_cancel=%u"
+           " pending_must_run=%u late_completion=%u\n",
+           reason ? reason : "unknown",
+           (unsigned int)context->wake_posts,
+           (unsigned int)context->wake_coalesced,
+           (unsigned int)context->wake_failures,
+           (unsigned int)context->wake_latency_max_ms,
+           (unsigned int)context->frame_batches,
+           (unsigned int)context->queue_peak,
+           (unsigned int)context->command_wait_max_ms,
+           (unsigned int)context->command_run_max_ms,
+           (unsigned int)context->command_timeouts,
+           (unsigned int)context->pending_cancellations,
+           (unsigned int)context->pending_must_run,
+           (unsigned int)context->late_completions);
+#if TCFG_RESOURCE_MONITOR_ENABLE
+    resource_monitor_snapshot(reason);
+    resource_monitor_dump_key_tasks(reason);
+#endif
+}
+
+#define service_diag_queue_peak_locked(context, count)                 \
+    do {                                                                \
+        if ((count) > (context)->queue_peak) {                          \
+            (context)->queue_peak = (count);                            \
+        }                                                               \
     } while (0)
+#else
+#define service_diag_command_enqueued_locked(context, type)
+#define service_diag_command_started_locked(context)
+#define service_diag_command_finished_locked(context)
+#define service_diag_dump(context, reason)
+#define service_diag_queue_peak_locked(context, count)
+#endif
 
 /* CRC32/IEEE is part of the Native Artifact checkpoint contract.  Keep the
  * serialized value in the Artifact (rather than a backend-private running
@@ -130,14 +353,28 @@ static void service_state_unlock(struct rdx_local_storage_service *service)
 
 static void service_wake(struct rdx_local_storage_service *service)
 {
+    struct rdx_local_storage_platform_context *context;
     uint8_t post = 0;
     int ret;
 
     service_state_lock(service);
+    context = service_platform_context(service);
     if (service && service->worker_created && !service->worker_stop
         && !service->worker_wake_pending) {
         service->worker_wake_pending = 1;
         post = 1;
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+        if (context) {
+            context->wake_posts++;
+            context->wake_post_ms = sys_timer_get_ms();
+            context->wake_latency_pending = 1;
+        }
+#endif
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+    } else if (context && service && service->worker_created
+               && !service->worker_stop && service->worker_wake_pending) {
+        context->wake_coalesced++;
+#endif
     }
     service_state_unlock(service);
     if (!post) {
@@ -148,6 +385,12 @@ static void service_wake(struct rdx_local_storage_service *service)
     if (ret) {
         service_state_lock(service);
         service->worker_wake_pending = 0;
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+        if (context) {
+            context->wake_failures++;
+            context->wake_latency_pending = 0;
+        }
+#endif
         service_state_unlock(service);
     }
 }
@@ -175,6 +418,435 @@ static void service_state_unlock(struct rdx_local_storage_service *service)
 static void service_wake(struct rdx_local_storage_service *service)
 {
     (void)service;
+}
+#endif
+
+static uint8_t service_command_busy_locked(
+    struct rdx_local_storage_service *service)
+{
+#if CONFIG_CPU_BR56
+    struct rdx_local_storage_platform_context *context =
+        service_platform_context(service);
+
+    return context
+           && rdx_storage_command_slot_busy(&context->command_slot);
+#else
+    (void)service;
+    return 0;
+#endif
+}
+
+static enum rdx_storage_result service_execute_command(
+    struct rdx_local_storage_service *service,
+    struct service_command *command)
+{
+    switch (command->type) {
+    case SERVICE_COMMAND_RECOVER:
+        return service_recover_executor(service);
+    case SERVICE_COMMAND_RESERVE_ARTIFACT:
+        return service_reserve_artifact_executor(
+            service, command->data.reserve.format_id,
+            &command->data.reserve.spec);
+    case SERVICE_COMMAND_START:
+        return service_start_executor(service, &command->data.start.spec);
+    case SERVICE_COMMAND_ATTACH:
+        return service_attach_executor(
+            service, command->data.attach.session_id,
+            command->data.attach.capture_generation);
+    case SERVICE_COMMAND_CANCEL_START:
+        return service_cancel_start_executor(
+            service, command->data.cancel_start.cause);
+    case SERVICE_COMMAND_SEAL:
+        return service_seal_executor(
+            service, command->data.seal.session_id,
+            command->data.seal.capture_generation);
+    case SERVICE_COMMAND_ABORT:
+        return service_abort_executor(
+            service, command->data.abort.session_id,
+            command->data.abort.capture_generation,
+            command->data.abort.cause);
+    case SERVICE_COMMAND_GET_CAPACITY:
+        return service_get_capacity_executor(
+            service, &command->data.capacity.total_bytes,
+            &command->data.capacity.free_bytes);
+    case SERVICE_COMMAND_ENUMERATE:
+        {
+            uint32_t capacity = command->data.enumerate.capacity;
+            const uint32_t scratch_capacity =
+                sizeof(service->scratch.file_items)
+                    / sizeof(service->scratch.file_items[0]);
+
+            if (capacity > scratch_capacity) {
+                capacity = scratch_capacity;
+            }
+            return service_enumerate_executor(
+                service, capacity ? service->scratch.file_items : NULL,
+                capacity, &command->data.enumerate.count);
+        }
+    case SERVICE_COMMAND_DELETE:
+        return service_delete_executor(
+            service, &command->data.delete_file.file_id);
+    case SERVICE_COMMAND_FORMAT:
+        return service_format_executor(service);
+    case SERVICE_COMMAND_QUIESCE:
+        return service_quiesce_executor(
+            service, command->data.quiesce.timeout_ms);
+    case SERVICE_COMMAND_SHUTDOWN:
+        return service_shutdown_executor(
+            service, command->data.shutdown.timeout_ms);
+    default:
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+}
+
+static enum rdx_storage_result service_copy_command_output(
+    struct rdx_local_storage_service *service,
+    const struct service_command *command,
+    const struct service_command_output *output)
+{
+    if (!output) {
+        return command->result;
+    }
+    switch (command->type) {
+    case SERVICE_COMMAND_RESERVE_ARTIFACT:
+        if (output->reserved_spec) {
+            *output->reserved_spec = command->data.reserve.spec;
+        }
+        break;
+    case SERVICE_COMMAND_GET_CAPACITY:
+        if (output->total_bytes) {
+            *output->total_bytes = command->data.capacity.total_bytes;
+        }
+        if (output->free_bytes) {
+            *output->free_bytes = command->data.capacity.free_bytes;
+        }
+        break;
+    case SERVICE_COMMAND_ENUMERATE:
+        if (!output->count) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        *output->count = command->data.enumerate.count;
+        if (command->result != RDX_STORAGE_RESULT_READY) {
+            break;
+        }
+        if (command->data.enumerate.count > output->capacity
+            || (command->data.enumerate.count && !output->items)) {
+            return RDX_STORAGE_RESULT_CORRUPT;
+        }
+        if (command->data.enumerate.count) {
+            memcpy(output->items, service->scratch.file_items,
+                   command->data.enumerate.count
+                       * sizeof(service->scratch.file_items[0]));
+        }
+        break;
+    default:
+        break;
+    }
+    return command->result;
+}
+
+#if CONFIG_CPU_BR56
+static uint32_t service_command_timeout_ms(
+    const struct service_command *command)
+{
+    switch (command->type) {
+    case SERVICE_COMMAND_SEAL:
+    case SERVICE_COMMAND_FORMAT:
+        return RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS;
+    default:
+        return RDX_CFG_LOCAL_STORAGE_COMMAND_TIMEOUT_MS;
+    }
+}
+
+static uint8_t service_command_pending_cancellable(
+    const struct service_command *command)
+{
+    switch (command->type) {
+    case SERVICE_COMMAND_CANCEL_START:
+    case SERVICE_COMMAND_SEAL:
+    case SERVICE_COMMAND_ABORT:
+    case SERVICE_COMMAND_SHUTDOWN:
+        /* Once accepted, lifecycle cleanup and commit barriers must run even
+         * if their synchronous caller no longer waits for completion. */
+        return 0;
+    default:
+        return 1;
+    }
+}
+
+static void service_cancel_pending_command_locked(
+    struct rdx_local_storage_service *service,
+    struct rdx_local_storage_platform_context *context,
+    const struct service_command *command, uint8_t latch_seal)
+{
+    if (latch_seal && service->active && service->seal_requested
+        && service->session_id == command->data.seal.session_id
+        && service->capture_generation
+               == command->data.seal.capture_generation) {
+        service->seal_requested = 0;
+    }
+    memset(&context->command, 0, sizeof(context->command));
+}
+
+static void service_reconcile_late_command(
+    struct rdx_local_storage_service *service,
+    const struct service_command *command)
+{
+    if (command->result != RDX_STORAGE_RESULT_READY) {
+        return;
+    }
+    if (command->type == SERVICE_COMMAND_START) {
+        /* A caller that timed out cannot attach this prepared Artifact. */
+        (void)service_cancel_start_executor(
+            service, RDX_RECORD_CAUSE_STORAGE_ERROR);
+    } else if (command->type == SERVICE_COMMAND_ATTACH) {
+        /* Engine START cannot safely retain an attachment whose completion
+         * was not observed by its coordinator. */
+        (void)service_abort_executor(
+            service, command->data.attach.session_id,
+            command->data.attach.capture_generation,
+            RDX_RECORD_CAUSE_STORAGE_ERROR);
+    }
+}
+#endif
+
+static enum rdx_storage_result service_run_command_internal(
+    struct rdx_local_storage_service *service,
+    struct service_command *command, uint8_t latch_seal,
+    const struct service_command_output *output)
+{
+    enum rdx_storage_result result;
+
+    if (!service || !command || command->type == SERVICE_COMMAND_NONE) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+#if CONFIG_CPU_BR56
+    {
+        struct rdx_local_storage_platform_context *context =
+            service_platform_context(service);
+        enum rdx_storage_command_deadline_result deadline_result;
+        uint32_t wait_start_ms;
+        uint32_t timeout_ms;
+        uint32_t token;
+        int wait_result;
+
+        if (!context || !service->worker_created || service->worker_stop) {
+            return RDX_STORAGE_RESULT_BAD_STATE;
+        }
+        if (cpu_in_irq()) {
+            return RDX_STORAGE_RESULT_BAD_STATE;
+        }
+        if (os_current_task()
+            && !strcmp(os_current_task(), RDX_LOCAL_STORAGE_TASK_NAME)) {
+            if (latch_seal) {
+                service_state_lock(service);
+                if (!service->active || service->seal_requested
+                    || service->session_id
+                           != command->data.seal.session_id
+                    || service->capture_generation
+                           != command->data.seal.capture_generation) {
+                    service_state_unlock(service);
+                    return RDX_STORAGE_RESULT_BAD_STATE;
+                }
+                service->seal_requested = 1;
+                service_state_unlock(service);
+            }
+            service_executor_lock(service);
+            result = service_execute_command(service, command);
+            service_executor_unlock(service);
+            command->result = result;
+            return service_copy_command_output(
+                service, command, output);
+        }
+
+        service_state_lock(service);
+        if (service_command_busy_locked(service)
+            || service->operation_pending || service->operation_running) {
+            service_state_unlock(service);
+            return RDX_STORAGE_RESULT_BUSY;
+        }
+        if (latch_seal) {
+            if (!service->active || service->seal_requested
+                || service->session_id != command->data.seal.session_id
+                || service->capture_generation
+                       != command->data.seal.capture_generation) {
+                service_state_unlock(service);
+                return RDX_STORAGE_RESULT_BAD_STATE;
+            }
+            service->seal_requested = 1;
+        }
+        token = rdx_storage_command_slot_submit(&context->command_slot);
+        if (!token) {
+            service_state_unlock(service);
+            return RDX_STORAGE_RESULT_BUSY;
+        }
+        command->token = token;
+        context->command = *command;
+        service_diag_command_enqueued_locked(context, command->type);
+        service_state_unlock(service);
+        service_wake(service);
+
+        timeout_ms = service_command_timeout_ms(command);
+        wait_start_ms = sys_timer_get_ms();
+        for (;;) {
+            uint32_t elapsed_ms = sys_timer_get_ms() - wait_start_ms;
+            uint32_t remaining_ms = elapsed_ms < timeout_ms
+                                    ? timeout_ms - elapsed_ms : 0;
+            uint32_t timeout_ticks = remaining_ms
+                ? msecs_to_jiffies(remaining_ms - 1) + 1 : 1;
+
+            wait_result = os_sem_pend(&context->command_done,
+                                      (int)timeout_ticks);
+            service_state_lock(service);
+            if (rdx_storage_command_slot_claim(
+                    &context->command_slot, token)) {
+                *command = context->command;
+                service_state_unlock(service);
+                result = service_copy_command_output(
+                    service, command, output);
+                service_state_lock(service);
+                if (!rdx_storage_command_slot_release(
+                        &context->command_slot, token)) {
+                    result = RDX_STORAGE_RESULT_BAD_STATE;
+                }
+                memset(&context->command, 0, sizeof(context->command));
+                service_state_unlock(service);
+                return result;
+            }
+            elapsed_ms = sys_timer_get_ms() - wait_start_ms;
+            if (wait_result == OS_NO_ERR && elapsed_ms < timeout_ms) {
+                service_state_unlock(service);
+                continue;
+            }
+            deadline_result = rdx_storage_command_slot_deadline(
+                &context->command_slot, token,
+                service_command_pending_cancellable(command));
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+            context->command_timeouts++;
+            service_diag_max(&context->command_wait_max_ms, elapsed_ms);
+#endif
+            if (deadline_result
+                == RDX_STORAGE_COMMAND_DEADLINE_CANCELLED_PENDING) {
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+                context->pending_cancellations++;
+#endif
+                service_cancel_pending_command_locked(
+                    service, context, command, latch_seal);
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+            } else if (deadline_result
+                       == RDX_STORAGE_COMMAND_DEADLINE_ABANDONED_PENDING) {
+                context->pending_must_run++;
+#endif
+            }
+            service_state_unlock(service);
+            printf("[RDX][STORAGE_EXEC] command_timeout type=%u token=%u"
+                   " phase=%u wait_ms=%u os_ret=%d\n",
+                   command->type, (unsigned int)token, deadline_result,
+                   (unsigned int)elapsed_ms, wait_result);
+            service_diag_failure("rdx_storage_command_timeout");
+            return deadline_result
+                       == RDX_STORAGE_COMMAND_DEADLINE_COMPLETED
+                       ? RDX_STORAGE_RESULT_BAD_STATE
+                       : RDX_STORAGE_RESULT_TIMEOUT;
+        }
+    }
+#else
+    if (latch_seal) {
+        if (!service->active || service->seal_requested
+            || service->session_id != command->data.seal.session_id
+            || service->capture_generation
+                   != command->data.seal.capture_generation) {
+            return RDX_STORAGE_RESULT_BAD_STATE;
+        }
+        service->seal_requested = 1;
+    }
+    service_executor_lock(service);
+    result = service_execute_command(service, command);
+    service_executor_unlock(service);
+    command->result = result;
+    return service_copy_command_output(service, command, output);
+#endif
+}
+
+static enum rdx_storage_result service_run_command(
+    struct rdx_local_storage_service *service,
+    struct service_command *command, uint8_t latch_seal)
+{
+    return service_run_command_internal(
+        service, command, latch_seal, NULL);
+}
+
+#if CONFIG_CPU_BR56
+static void service_process_command(
+    struct rdx_local_storage_service *service)
+{
+    struct rdx_local_storage_platform_context *context =
+        service_platform_context(service);
+    enum rdx_storage_command_complete_result complete_result;
+    enum service_command_type type;
+    uint32_t token;
+    uint8_t post_completion = 0;
+
+    if (!context) {
+        return;
+    }
+    service_state_lock(service);
+    token = context->command.token;
+    if (!rdx_storage_command_slot_start(
+            &context->command_slot, token)) {
+        service_state_unlock(service);
+        return;
+    }
+    type = context->command.type;
+    service_diag_command_started_locked(context);
+    service_state_unlock(service);
+
+    service_executor_lock(service);
+    context->command.result = service_execute_command(
+        service, &context->command);
+    service_state_lock(service);
+    service_diag_command_finished_locked(context);
+    complete_result = rdx_storage_command_slot_complete(
+        &context->command_slot, token);
+    if (complete_result == RDX_STORAGE_COMMAND_COMPLETE_READY) {
+        post_completion = 1;
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+    } else if (complete_result
+               == RDX_STORAGE_COMMAND_COMPLETE_LATE_DROPPED) {
+        context->late_completions++;
+#endif
+    }
+    service_state_unlock(service);
+    if (complete_result == RDX_STORAGE_COMMAND_COMPLETE_LATE_DROPPED) {
+        service_reconcile_late_command(service, &context->command);
+    }
+    service_executor_unlock(service);
+
+    /* Dump while this token still owns the slot.  A following RESERVE resets
+     * per-recording counters and must not race the terminal snapshot. */
+    if (type == SERVICE_COMMAND_SEAL) {
+        service_diag_dump(context, "storage_seal");
+    } else if (type == SERVICE_COMMAND_ABORT) {
+        service_diag_dump(context, "storage_abort");
+    } else if (type == SERVICE_COMMAND_FORMAT) {
+        service_diag_dump(context, "storage_format");
+    }
+    if (complete_result == RDX_STORAGE_COMMAND_COMPLETE_LATE_DROPPED) {
+        printf("[RDX][STORAGE_EXEC] late_completion type=%u token=%u"
+               " result=%u action=reconciled\n",
+               type, (unsigned int)token, context->command.result);
+        service_state_lock(service);
+        (void)rdx_storage_command_slot_release(
+            &context->command_slot, token);
+        memset(&context->command, 0, sizeof(context->command));
+        service_state_unlock(service);
+    } else if (complete_result == RDX_STORAGE_COMMAND_COMPLETE_STALE) {
+        printf("[RDX][STORAGE_EXEC] stale_completion type=%u token=%u\n",
+               type, (unsigned int)token);
+    }
+    if (post_completion) {
+        os_sem_post(&context->command_done);
+    }
 }
 #endif
 
@@ -628,13 +1300,25 @@ static void rdx_local_storage_service_task(void *priv)
         return;
     }
     while (!service->worker_stop) {
+        struct rdx_local_storage_platform_context *context;
+        uint8_t has_command;
         uint8_t has_operation;
         uint8_t has_work;
 
         service_state_lock(service);
+        context = service_platform_context(service);
+        has_command = context
+                      && (context->command_slot.state
+                              == RDX_STORAGE_COMMAND_SLOT_PENDING
+                          || context->command_slot.state
+                              == RDX_STORAGE_COMMAND_SLOT_ABANDONED);
         has_operation = service->operation_pending;
         has_work = service_write_ready_locked(service);
         service_state_unlock(service);
+        if (has_command) {
+            service_process_command(service);
+            continue;
+        }
         if (has_operation) {
             service_process_operation(service);
             continue;
@@ -651,6 +1335,14 @@ static void rdx_local_storage_service_task(void *priv)
         }
         os_taskq_pend(NULL, msg, ARRAY_SIZE(msg));
         service_state_lock(service);
+#if RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+        if (context && context->wake_latency_pending) {
+            service_diag_max(
+                &context->wake_latency_max_ms,
+                sys_timer_get_ms() - context->wake_post_ms);
+            context->wake_latency_pending = 0;
+        }
+#endif
         service->worker_wake_pending = 0;
         service_state_unlock(service);
     }
@@ -702,7 +1394,10 @@ int rdx_local_storage_service_init(
            sizeof(rdx_local_storage_platform_context));
     rdx_local_storage_platform_context.owner = service;
     os_mutex_create(&rdx_local_storage_platform_context.executor_lock);
+    os_sem_create(&rdx_local_storage_platform_context.command_done, 0);
     spin_lock_init(&rdx_local_storage_platform_context.state_lock);
+    rdx_storage_command_slot_init(
+        &rdx_local_storage_platform_context.command_slot);
     service->platform_context = &rdx_local_storage_platform_context;
     service->platform_initialized = 1;
     service->worker_stop = 0;
@@ -718,7 +1413,7 @@ int rdx_local_storage_service_init(
     return 0;
 }
 
-enum rdx_storage_result rdx_local_storage_service_recover(
+static enum rdx_storage_result service_recover_executor(
     struct rdx_local_storage_service *service)
 {
     enum rdx_storage_result result;
@@ -726,9 +1421,7 @@ enum rdx_storage_result rdx_local_storage_service_recover(
     if (!service || !service->media_ops || !service->media_ops->ensure_ready) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
     service->readiness = RDX_STORAGE_READINESS_RECOVERING;
@@ -748,8 +1441,17 @@ enum rdx_storage_result rdx_local_storage_service_recover(
         service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
         service->recovery_checked = 0;
     }
-    service_executor_unlock(service);
     return result;
+}
+
+enum rdx_storage_result rdx_local_storage_service_recover(
+    struct rdx_local_storage_service *service)
+{
+    struct service_command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_RECOVER;
+    return service_run_command(service, &command, 0);
 }
 
 static const char *service_filename_basename(const char *name)
@@ -885,7 +1587,7 @@ static int service_fill_reserved_spec(
     return 0;
 }
 
-enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
+static enum rdx_storage_result service_reserve_artifact_executor(
     struct rdx_local_storage_service *service,
     enum rdx_record_format_id format_id,
     struct rdx_storage_artifact_spec *spec)
@@ -902,23 +1604,19 @@ enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
         || !service->native_ops->commit_index) {
         return RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
     if ((service->native_ops->recover && !service->recovery_checked)
         || service->readiness == RDX_STORAGE_READINESS_RECOVERY_REQUIRED
         || service->readiness == RDX_STORAGE_READINESS_HOST_OWNED
         || service->readiness == RDX_STORAGE_READINESS_QUIESCING) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     result = service->media_ops->ensure_ready();
     if (result != RDX_STORAGE_RESULT_READY) {
         service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
         service->recovery_checked = 0;
-        service_executor_unlock(service);
         return result;
     }
     memset(&snapshot, 0, sizeof(snapshot));
@@ -929,23 +1627,19 @@ enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
     if (result != RDX_STORAGE_RESULT_READY) {
         service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
         service->recovery_checked = 0;
-        service_executor_unlock(service);
         return result;
     }
     if (snapshot.count >= snapshot.capacity) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_NO_SPACE;
     }
     if (snapshot.serial_high_water == UINT32_MAX) {
         service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
         service->recovery_checked = 0;
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_CORRUPT;
     }
     serial_number = snapshot.serial_high_water + 1;
     if (service_fill_reserved_spec(format_id, serial_number, &snapshot,
                                    spec)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
     snapshot.serial_high_water = serial_number;
@@ -957,16 +1651,34 @@ enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
             service->readiness = RDX_STORAGE_READINESS_RECOVERY_REQUIRED;
             service->recovery_checked = 0;
         }
-        service_executor_unlock(service);
         return result;
     }
-    service_executor_unlock(service);
     printf("[RDX][LOCAL] reserved artifact=%08X sn=%u format=%u"
            " temp=%s final=%s\n",
            (unsigned int)spec->artifact_id.value,
            (unsigned int)spec->serial_number, spec->format_id,
            spec->temp_name, spec->final_name);
     return RDX_STORAGE_RESULT_READY;
+}
+
+enum rdx_storage_result rdx_local_storage_service_reserve_artifact(
+    struct rdx_local_storage_service *service,
+    enum rdx_record_format_id format_id,
+    struct rdx_storage_artifact_spec *spec)
+{
+    struct service_command command;
+    struct service_command_output output;
+
+    if (!spec) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    memset(&command, 0, sizeof(command));
+    memset(&output, 0, sizeof(output));
+    command.type = SERVICE_COMMAND_RESERVE_ARTIFACT;
+    command.data.reserve.format_id = format_id;
+    output.reserved_spec = spec;
+    return service_run_command_internal(
+        service, &command, 0, &output);
 }
 
 static enum rdx_storage_result service_start_executor(
@@ -1081,12 +1793,15 @@ enum rdx_storage_result rdx_local_storage_service_start(
     struct rdx_local_storage_service *service,
     const struct rdx_storage_artifact_spec *spec)
 {
-    enum rdx_storage_result result;
+    struct service_command command;
 
-    service_executor_lock(service);
-    result = service_start_executor(service, spec);
-    service_executor_unlock(service);
-    return result;
+    if (!spec) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_START;
+    command.data.start.spec = *spec;
+    return service_run_command(service, &command, 0);
 }
 
 static enum rdx_storage_result service_attach_executor(
@@ -1125,13 +1840,13 @@ enum rdx_storage_result rdx_local_storage_service_attach(
     struct rdx_local_storage_service *service, uint32_t session_id,
     uint32_t capture_generation)
 {
-    enum rdx_storage_result result;
+    struct service_command command;
 
-    service_executor_lock(service);
-    result = service_attach_executor(service, session_id,
-                                     capture_generation);
-    service_executor_unlock(service);
-    return result;
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_ATTACH;
+    command.data.attach.session_id = session_id;
+    command.data.attach.capture_generation = capture_generation;
+    return service_run_command(service, &command, 0);
 }
 
 enum rdx_storage_result rdx_local_storage_service_rebind_capture(
@@ -1159,32 +1874,27 @@ enum rdx_storage_result rdx_local_storage_service_rebind_capture(
     return result;
 }
 
-enum rdx_storage_result rdx_local_storage_service_cancel_start(
+static enum rdx_storage_result service_cancel_start_executor(
     struct rdx_local_storage_service *service, enum rdx_record_cause cause)
 {
-    uint8_t valid;
-
     if (!service || !service->active || service->capture_generation) {
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     if (cause == RDX_RECORD_CAUSE_NONE) {
         cause = RDX_RECORD_CAUSE_START_FAILED;
     }
-    service_executor_lock(service);
-    service_state_lock(service);
-    valid = service->active && !service->capture_generation;
-    service_state_unlock(service);
-    if (!valid) {
-        service_executor_unlock(service);
-        return RDX_STORAGE_RESULT_BAD_STATE;
-    }
-    {
-        enum rdx_storage_result result = service_fail(
-            service, RDX_STORAGE_RESULT_IO_ERROR, cause);
+    return service_fail(service, RDX_STORAGE_RESULT_IO_ERROR, cause);
+}
 
-        service_executor_unlock(service);
-        return result;
-    }
+enum rdx_storage_result rdx_local_storage_service_cancel_start(
+    struct rdx_local_storage_service *service, enum rdx_record_cause cause)
+{
+    struct service_command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_CANCEL_START;
+    command.data.cancel_start.cause = cause;
+    return service_run_command(service, &command, 0);
 }
 
 enum rdx_storage_result rdx_local_storage_service_consume(
@@ -1243,6 +1953,16 @@ enum rdx_storage_result rdx_local_storage_service_consume(
     service->queue_tail = (service->queue_tail + 1)
                           % RDX_LOCAL_STORAGE_QUEUE_DEPTH;
     service->queue_count++;
+#if CONFIG_CPU_BR56
+    {
+        struct rdx_local_storage_platform_context *context =
+            service_platform_context(service);
+
+        if (context) {
+            service_diag_queue_peak_locked(context, service->queue_count);
+        }
+    }
+#endif
     wake_worker = service_write_ready_locked(service);
     service_state_unlock(service);
     if (wake_worker) {
@@ -1329,6 +2049,16 @@ static enum rdx_storage_result service_pump_executor(
         }
         frame_bytes = batch_bytes / batch_frames;
         service->queue_count -= batch_frames;
+#if CONFIG_CPU_BR56 && RDX_CFG_LOCAL_STORAGE_O0_DIAG_ENABLE
+        {
+            struct rdx_local_storage_platform_context *context =
+                service_platform_context(service);
+
+            if (context) {
+                context->frame_batches++;
+            }
+        }
+#endif
         service_state_unlock(service);
 
         if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE) {
@@ -1422,13 +2152,22 @@ enum rdx_storage_result rdx_local_storage_service_pump(
     if (!service) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
+#if CONFIG_CPU_BR56
+    /* Target FAT ownership belongs to rdx_storage.  The public pump remains
+     * available to deterministic Host tests but must not create a second
+     * target execution path. */
+    if (!os_current_task()
+        || strcmp(os_current_task(), RDX_LOCAL_STORAGE_TASK_NAME)) {
+        return RDX_STORAGE_RESULT_BAD_STATE;
+    }
+#endif
     service_executor_lock(service);
     result = service_pump_executor(service, budget);
     service_executor_unlock(service);
     return result;
 }
 
-enum rdx_storage_result rdx_local_storage_service_seal(
+static enum rdx_storage_result service_seal_executor(
     struct rdx_local_storage_service *service, uint32_t session_id,
     uint32_t capture_generation)
 {
@@ -1438,65 +2177,31 @@ enum rdx_storage_result rdx_local_storage_service_seal(
     uint64_t file_size = 0;
     uint32_t audio_crc = 0;
 
-    if (!service_ids_match(service, session_id, capture_generation)
-        || service->seal_requested) {
-        return RDX_STORAGE_RESULT_BAD_STATE;
-    }
-    service_state_lock(service);
-    if (!service_ids_match(service, session_id, capture_generation)
-        || service->seal_requested) {
-        service_state_unlock(service);
-        return RDX_STORAGE_RESULT_BAD_STATE;
-    }
-    service->seal_requested = 1;
-    service_state_unlock(service);
-    service_wake(service);
-#if CONFIG_CPU_BR56
-    result = RDX_STORAGE_RESULT_READY;
-    {
-        uint16_t ticks = 0;
-        uint8_t queue_count;
-
-        for (;;) {
-            service_state_lock(service);
-            queue_count = service->queue_count;
-            service_state_unlock(service);
-            if (!queue_count || ticks++ >= RDX_LOCAL_STORAGE_SEAL_WAIT_TICKS) {
-                break;
-            }
-            os_time_dly(1);
-        }
-        service_state_lock(service);
-        queue_count = service->queue_count;
-        service_state_unlock(service);
-        if (queue_count) {
-            result = RDX_STORAGE_RESULT_TIMEOUT;
-        }
-    }
-#else
-    result = rdx_local_storage_service_pump(service, 0);
-#endif
-    if (result != RDX_STORAGE_RESULT_READY) {
-        return result;
-    }
-    /* queue_count reaches zero before an optional checkpoint transaction
-     * finishes.  Taking executor_lock here joins that in-flight transaction
-     * before close/publish/index begins. */
-    service_executor_lock(service);
     service_state_lock(service);
     if (!service_ids_match(service, session_id, capture_generation)
         || !service->seal_requested) {
         service_state_unlock(service);
-        service_executor_unlock(service);
+        return RDX_STORAGE_RESULT_BAD_STATE;
+    }
+    service_state_unlock(service);
+    /* SEAL is executed by the storage owner after the STOP cut has closed
+     * frame admission.  Drain every accepted frame here before the terminal
+     * marker, publish and index transaction. */
+    result = service_pump_executor(service, 0);
+    if (result != RDX_STORAGE_RESULT_READY) {
+        return result;
+    }
+    service_state_lock(service);
+    if (!service_ids_match(service, session_id, capture_generation)
+        || !service->seal_requested) {
+        service_state_unlock(service);
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     service_state_unlock(service);
     if (rdx_artifact_queue_seal(&service->artifact)
         || rdx_artifact_begin_commit(&service->artifact)) {
-        SERVICE_SEAL_EXECUTOR_RETURN(
-            service,
-            service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
-                         RDX_RECORD_CAUSE_STORAGE_ERROR));
+        return service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
+                            RDX_RECORD_CAUSE_STORAGE_ERROR);
     }
     if (service->backend == RDX_LOCAL_STORAGE_BACKEND_NATIVE) {
         result = service->native_ops->close(service->artifact_handle,
@@ -1506,10 +2211,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                result, (unsigned int)(file_size >> 32),
                (unsigned int)file_size, (unsigned int)audio_crc);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service->artifact_handle = NULL;
         if (file_size != service->artifact.audio_bytes
@@ -1522,10 +2225,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                    (unsigned int)(service->artifact.audio_bytes >> 32),
                    (unsigned int)service->artifact.audio_bytes,
                    (unsigned int)service->artifact.audio_crc);
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, RDX_STORAGE_RESULT_CORRUPT,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, RDX_STORAGE_RESULT_CORRUPT,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service->artifact.audio_crc = audio_crc;
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_SEALED,
@@ -1534,19 +2235,15 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         printf("[RDX][LOCAL] seal stage=sealed_marker result=%u\n",
                result);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         result = service->native_ops->publish(
             service->artifact.spec.temp_name, service->artifact.spec.final_name);
         printf("[RDX][LOCAL] seal stage=publish result=%u\n", result);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_PUBLISHED,
                             &marker);
@@ -1554,10 +2251,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         printf("[RDX][LOCAL] seal stage=published_marker result=%u\n",
                result);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         memset(&snapshot, 0, sizeof(snapshot));
         snapshot.entries = service->scratch.index_entries;
@@ -1571,13 +2266,11 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                (unsigned int)snapshot.serial_high_water);
         if (result != RDX_STORAGE_RESULT_READY
             || snapshot.count >= snapshot.capacity) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
+            return service_fail(
                 service,
-                service_fail(
-                    service,
-                    result == RDX_STORAGE_RESULT_READY
-                        ? RDX_STORAGE_RESULT_NO_SPACE : result,
-                    RDX_RECORD_CAUSE_STORAGE_ERROR));
+                result == RDX_STORAGE_RESULT_READY
+                    ? RDX_STORAGE_RESULT_NO_SPACE : result,
+                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         snapshot.entries[snapshot.count].file.file_id = service->file_id;
         snapshot.entries[snapshot.count].file.state =
@@ -1594,10 +2287,8 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                (unsigned int)snapshot.count,
                (unsigned int)snapshot.serial_high_water);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service_fill_marker(service, RDX_STORAGE_MARKER_STATE_INDEXED,
                             &marker);
@@ -1605,16 +2296,12 @@ enum rdx_storage_result rdx_local_storage_service_seal(
         printf("[RDX][LOCAL] seal stage=indexed_marker result=%u\n",
                result);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         if (rdx_artifact_commit(&service->artifact)) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service->active = 0;
         service->capture_detached = 1;
@@ -1623,16 +2310,12 @@ enum rdx_storage_result rdx_local_storage_service_seal(
     } else {
         result = service->legacy_ops->flush_commit(&service->file_id);
         if (result != RDX_STORAGE_RESULT_READY) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, result,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, result,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         if (rdx_artifact_commit(&service->artifact)) {
-            SERVICE_SEAL_EXECUTOR_RETURN(
-                service,
-                service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
-                             RDX_RECORD_CAUSE_STORAGE_ERROR));
+            return service_fail(service, RDX_STORAGE_RESULT_BAD_STATE,
+                                RDX_RECORD_CAUSE_STORAGE_ERROR);
         }
         service->active = 0;
         service->capture_detached = 1;
@@ -1640,39 +2323,47 @@ enum rdx_storage_result rdx_local_storage_service_seal(
                      RDX_LOCAL_STORAGE_COMPLETION_LEGACY_FILE_COMMITTED,
                      RDX_STORAGE_RESULT_READY, RDX_RECORD_CAUSE_NONE);
     }
-    service_executor_unlock(service);
     return RDX_STORAGE_RESULT_READY;
 }
 
-#undef SERVICE_SEAL_EXECUTOR_RETURN
+enum rdx_storage_result rdx_local_storage_service_seal(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t capture_generation)
+{
+    struct service_command command;
 
-enum rdx_storage_result rdx_local_storage_service_abort(
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_SEAL;
+    command.data.seal.session_id = session_id;
+    command.data.seal.capture_generation = capture_generation;
+    return service_run_command(service, &command, 1);
+}
+
+static enum rdx_storage_result service_abort_executor(
     struct rdx_local_storage_service *service, uint32_t session_id,
     uint32_t capture_generation, enum rdx_record_cause cause)
 {
-    uint8_t valid;
-
     if (!service_ids_match(service, session_id, capture_generation)) {
         return RDX_STORAGE_RESULT_BAD_STATE;
     }
     if (cause == RDX_RECORD_CAUSE_NONE) {
         cause = RDX_RECORD_CAUSE_STORAGE_ERROR;
     }
-    service_executor_lock(service);
-    service_state_lock(service);
-    valid = service_ids_match(service, session_id, capture_generation);
-    service_state_unlock(service);
-    if (!valid) {
-        service_executor_unlock(service);
-        return RDX_STORAGE_RESULT_BAD_STATE;
-    }
-    {
-        enum rdx_storage_result result = service_fail(
-            service, RDX_STORAGE_RESULT_IO_ERROR, cause);
+    return service_fail(service, RDX_STORAGE_RESULT_IO_ERROR, cause);
+}
 
-        service_executor_unlock(service);
-        return result;
-    }
+enum rdx_storage_result rdx_local_storage_service_abort(
+    struct rdx_local_storage_service *service, uint32_t session_id,
+    uint32_t capture_generation, enum rdx_record_cause cause)
+{
+    struct service_command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_ABORT;
+    command.data.abort.session_id = session_id;
+    command.data.abort.capture_generation = capture_generation;
+    command.data.abort.cause = cause;
+    return service_run_command(service, &command, 0);
 }
 
 void rdx_local_storage_service_detach_capture(
@@ -1698,28 +2389,39 @@ const struct rdx_artifact *rdx_local_storage_service_artifact(
     return service ? &service->artifact : NULL;
 }
 
-enum rdx_storage_result rdx_local_storage_service_get_capacity(
+static enum rdx_storage_result service_get_capacity_executor(
     struct rdx_local_storage_service *service, uint64_t *total_bytes,
     uint64_t *free_bytes)
 {
     if (!service || !service->media_ops || !service->media_ops->get_capacity) {
         return RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
-    {
-        enum rdx_storage_result result = service->media_ops->get_capacity(
-            total_bytes, free_bytes);
-
-        service_executor_unlock(service);
-        return result;
-    }
+    return service->media_ops->get_capacity(total_bytes, free_bytes);
 }
 
-enum rdx_storage_result rdx_local_storage_service_enumerate(
+enum rdx_storage_result rdx_local_storage_service_get_capacity(
+    struct rdx_local_storage_service *service, uint64_t *total_bytes,
+    uint64_t *free_bytes)
+{
+    struct service_command command;
+    struct service_command_output output;
+
+    if (!total_bytes || !free_bytes) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    memset(&command, 0, sizeof(command));
+    memset(&output, 0, sizeof(output));
+    command.type = SERVICE_COMMAND_GET_CAPACITY;
+    output.total_bytes = total_bytes;
+    output.free_bytes = free_bytes;
+    return service_run_command_internal(
+        service, &command, 0, &output);
+}
+
+static enum rdx_storage_result service_enumerate_executor(
     struct rdx_local_storage_service *service,
     struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count)
 {
@@ -1730,21 +2432,34 @@ enum rdx_storage_result rdx_local_storage_service_enumerate(
                    ? RDX_STORAGE_RESULT_BUSY
                                           : RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
-    {
-        enum rdx_storage_result result = service->media_ops->enumerate(
-            items, capacity, count);
-
-        service_executor_unlock(service);
-        return result;
-    }
+    return service->media_ops->enumerate(items, capacity, count);
 }
 
-enum rdx_storage_result rdx_local_storage_service_delete(
+enum rdx_storage_result rdx_local_storage_service_enumerate(
+    struct rdx_local_storage_service *service,
+    struct rdx_storage_file_info *items, uint32_t capacity, uint32_t *count)
+{
+    struct service_command command;
+    struct service_command_output output;
+
+    if (!count || (capacity && !items)) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    memset(&command, 0, sizeof(command));
+    memset(&output, 0, sizeof(output));
+    command.type = SERVICE_COMMAND_ENUMERATE;
+    command.data.enumerate.capacity = capacity;
+    output.items = items;
+    output.capacity = capacity;
+    output.count = count;
+    return service_run_command_internal(
+        service, &command, 0, &output);
+}
+
+static enum rdx_storage_result service_delete_executor(
     struct rdx_local_storage_service *service,
     const struct rdx_storage_file_id *file_id)
 {
@@ -1755,20 +2470,28 @@ enum rdx_storage_result rdx_local_storage_service_delete(
                    ? RDX_STORAGE_RESULT_BUSY
                                           : RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
-    {
-        enum rdx_storage_result result = service->media_ops->delete(file_id);
-
-        service_executor_unlock(service);
-        return result;
-    }
+    return service->media_ops->delete(file_id);
 }
 
-enum rdx_storage_result rdx_local_storage_service_format(
+enum rdx_storage_result rdx_local_storage_service_delete(
+    struct rdx_local_storage_service *service,
+    const struct rdx_storage_file_id *file_id)
+{
+    struct service_command command;
+
+    if (!file_id) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_DELETE;
+    command.data.delete_file.file_id = *file_id;
+    return service_run_command(service, &command, 0);
+}
+
+static enum rdx_storage_result service_format_executor(
     struct rdx_local_storage_service *service)
 {
     if (!service || service->active || service_operation_busy(service)
@@ -1778,18 +2501,20 @@ enum rdx_storage_result rdx_local_storage_service_format(
                    ? RDX_STORAGE_RESULT_BUSY
                                           : RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
-    {
-        enum rdx_storage_result result = service_format_and_recover(
-            service, NULL, NULL);
+    return service_format_and_recover(service, NULL, NULL);
+}
 
-        service_executor_unlock(service);
-        return result;
-    }
+enum rdx_storage_result rdx_local_storage_service_format(
+    struct rdx_local_storage_service *service)
+{
+    struct service_command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_FORMAT;
+    return service_run_command(service, &command, 0);
 }
 
 enum rdx_storage_result rdx_local_storage_service_submit_operation(
@@ -1831,7 +2556,8 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     }
 
     service_state_lock(service);
-    if (service->active || service_operation_busy(service)) {
+    if (service->active || service_operation_busy(service)
+        || service_command_busy_locked(service)) {
         service_state_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
@@ -1854,7 +2580,7 @@ enum rdx_storage_result rdx_local_storage_service_submit_operation(
     return RDX_STORAGE_RESULT_READY;
 }
 
-enum rdx_storage_result rdx_local_storage_service_quiesce(
+static enum rdx_storage_result service_quiesce_executor(
     struct rdx_local_storage_service *service, uint16_t timeout_ms)
 {
     enum rdx_storage_result result;
@@ -1866,24 +2592,31 @@ enum rdx_storage_result rdx_local_storage_service_quiesce(
                    ? RDX_STORAGE_RESULT_BUSY
                                           : RDX_STORAGE_RESULT_UNSUPPORTED;
     }
-    service_executor_lock(service);
     if (service->active || service_operation_busy(service)) {
-        service_executor_unlock(service);
         return RDX_STORAGE_RESULT_BUSY;
     }
     service->readiness = RDX_STORAGE_READINESS_QUIESCING;
     result = service->media_ops->quiesce(timeout_ms);
     if (result != RDX_STORAGE_RESULT_READY) {
         service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
-        service_executor_unlock(service);
         return result;
     }
     service->readiness = RDX_STORAGE_READINESS_HOST_OWNED;
-    service_executor_unlock(service);
     return RDX_STORAGE_RESULT_READY;
 }
 
-enum rdx_storage_result rdx_local_storage_service_shutdown(
+enum rdx_storage_result rdx_local_storage_service_quiesce(
+    struct rdx_local_storage_service *service, uint16_t timeout_ms)
+{
+    struct service_command command;
+
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_QUIESCE;
+    command.data.quiesce.timeout_ms = timeout_ms;
+    return service_run_command(service, &command, 0);
+}
+
+static enum rdx_storage_result service_shutdown_executor(
     struct rdx_local_storage_service *service, uint16_t timeout_ms)
 {
     enum rdx_storage_result result = RDX_STORAGE_RESULT_READY;
@@ -1891,20 +2624,13 @@ enum rdx_storage_result rdx_local_storage_service_shutdown(
     if (!service) {
         return RDX_STORAGE_RESULT_BAD_ARGUMENT;
     }
-#if CONFIG_CPU_BR56
-    service->worker_stop = 1;
-    service_wake(service);
-    if (service->worker_created) {
-        task_kill(RDX_LOCAL_STORAGE_TASK_NAME);
-        service->worker_created = 0;
+    if (service_operation_busy(service)) {
+        return RDX_STORAGE_RESULT_BUSY;
     }
-#endif
-    service_executor_lock(service);
     if (service->active) {
         result = service_fail(service, RDX_STORAGE_RESULT_IO_ERROR,
                               RDX_RECORD_CAUSE_SHUTDOWN);
     }
-    service_executor_unlock(service);
     if (service->media_ops && service->media_ops->quiesce) {
         enum rdx_storage_result quiesce_result;
 
@@ -1918,7 +2644,42 @@ enum rdx_storage_result rdx_local_storage_service_shutdown(
             service->readiness = RDX_STORAGE_READINESS_UNAVAILABLE;
         }
     }
+    return result;
+}
+
+enum rdx_storage_result rdx_local_storage_service_shutdown(
+    struct rdx_local_storage_service *service, uint16_t timeout_ms)
+{
+    struct service_command command;
+    enum rdx_storage_result result;
+
+    if (!service) {
+        return RDX_STORAGE_RESULT_BAD_ARGUMENT;
+    }
 #if CONFIG_CPU_BR56
+    if (!service->platform_initialized) {
+        return RDX_STORAGE_RESULT_READY;
+    }
+#endif
+    memset(&command, 0, sizeof(command));
+    command.type = SERVICE_COMMAND_SHUTDOWN;
+    command.data.shutdown.timeout_ms = timeout_ms;
+    result = service_run_command(service, &command, 0);
+#if CONFIG_CPU_BR56
+    /* A timed-out FAT call is still executing on rdx_storage.  Its command
+     * payload and late-completion reconciliation remain owned by that task;
+     * killing it here would strand both the filesystem transaction and slot. */
+    if (result == RDX_STORAGE_RESULT_TIMEOUT) {
+        return result;
+    }
+    if (!command.token) {
+        return result;
+    }
+    service->worker_stop = 1;
+    if (service->worker_created) {
+        task_kill(RDX_LOCAL_STORAGE_TASK_NAME);
+        service->worker_created = 0;
+    }
     if (rdx_local_storage_platform_context.owner == service) {
         service->platform_initialized = 0;
         service->platform_context = NULL;

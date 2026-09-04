@@ -39,6 +39,18 @@
 #define RDX_CFG_LOCAL_STORAGE_WRITE_BATCH_FRAMES 6
 #endif
 
+/* Target command waits are bounded independently from Backend calls.  Short
+ * control/media commands use the normal deadline; SEAL and FORMAT use the
+ * long deadline because they may verify a complete artifact or filesystem.
+ * A running FAT call is never killed at the deadline: its worker-owned payload
+ * remains valid and its late completion is reconciled before slot reuse. */
+#ifndef RDX_CFG_LOCAL_STORAGE_COMMAND_TIMEOUT_MS
+#define RDX_CFG_LOCAL_STORAGE_COMMAND_TIMEOUT_MS 5000
+#endif
+#ifndef RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS
+#define RDX_CFG_LOCAL_STORAGE_LONG_COMMAND_TIMEOUT_MS 120000
+#endif
+
 enum rdx_local_storage_backend {
     RDX_LOCAL_STORAGE_BACKEND_NATIVE = 1,
     RDX_LOCAL_STORAGE_BACKEND_LEGACY_UXFILE = 2,
@@ -54,7 +66,9 @@ enum rdx_local_storage_completion_type {
 
 /* APP file commands arrive on btstack and must never execute FAT there.
  * These operations are copied into the existing rdx_storage worker.  Caller
- * owned output buffers must remain valid until the completion callback. */
+ * owned output buffers must remain valid until the completion callback.  The
+ * synchronous recording/media APIs below use the same worker through a
+ * private tokenized command slot on BR56. */
 enum rdx_local_storage_operation_type {
     RDX_LOCAL_STORAGE_OPERATION_NONE = 0,
     RDX_LOCAL_STORAGE_OPERATION_CAPACITY,
@@ -182,7 +196,11 @@ int rdx_local_storage_service_init(
     rdx_local_storage_completion_callback_t completion_callback,
     void *completion_priv);
 
-/* Validate the bounded Native marker/index recovery path after mount.  This
+/* Target synchronous APIs below dispatch a worker-owned command snapshot to
+ * rdx_storage and wait for its token completion.  Call them only from task
+ * context.  Caller outputs are copied only after the matching completion;
+ * TIMEOUT therefore never leaves the worker referencing caller memory.
+ * Validate the bounded Native marker/index recovery path after mount.  This
  * is intentionally separate from init so a temporary media outage can be
  * retried without rebuilding the Service or spawning another worker. */
 enum rdx_storage_result rdx_local_storage_service_recover(
@@ -215,6 +233,8 @@ enum rdx_storage_result rdx_local_storage_service_cancel_start(
 enum rdx_storage_result rdx_local_storage_service_consume(
     struct rdx_local_storage_service *service,
     const struct rdx_record_frame *frame);
+/* Deterministic Host-test pump.  On BR56 only the selected storage executor
+ * may call it; external target callers receive BAD_STATE. */
 enum rdx_storage_result rdx_local_storage_service_pump(
     struct rdx_local_storage_service *service, uint8_t budget);
 enum rdx_storage_result rdx_local_storage_service_seal(

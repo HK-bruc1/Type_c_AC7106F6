@@ -174,9 +174,16 @@ struct rdx_sd0_backend {
     char root[RDX_SD0_PATH_MAX];
     uint8_t initialized;
     struct rdx_sd0_open_file open;
-    /* The backend is single-owner. Keep the maximum index image off the
-     * storage worker stack and reuse it for A/B reads and commits. */
-    uint8_t index_data[RDX_SD0_INDEX_DATA_SIZE];
+    /* The backend is single-owner. Keep the maximum index image and marker
+     * write/readback objects off the storage worker stack. Marker scratch is
+     * smaller than the index image, so this union adds no static RAM. */
+    union {
+        uint8_t index_data[RDX_SD0_INDEX_DATA_SIZE];
+        struct {
+            uint8_t data[RDX_SD0_MARKER_DATA_SIZE];
+            struct rdx_storage_marker decoded;
+        } marker;
+    } scratch;
     struct rdx_storage_index_entry enumerate_entries[RDX_SD0_INDEX_MAX_ENTRIES];
 };
 
@@ -209,8 +216,8 @@ static enum rdx_storage_result sd0_crc_file(const char *path,
 {
     /* close/stat and index load are serialized by the Backend owner. Reuse
      * the index image after audio close so verification does not grow BSS or
-     * the already-high rdx_record stack, and read whole sector batches. */
-    uint8_t *buffer = rdx_sd0.index_data;
+     * the storage worker stack, and read whole sector batches. */
+    uint8_t *buffer = rdx_sd0.scratch.index_data;
     FILE *file;
     uint32_t crc = 0;
     uint8_t initialized = 0;
@@ -303,7 +310,7 @@ static enum rdx_storage_result sd0_load_marker(
 static int sd0_marker_path(const struct rdx_artifact_id *artifact_id,
                            char *path, uint32_t capacity);
 
-static enum rdx_storage_result sd0_ready(void)
+static enum rdx_storage_result sd0_probe_media(void)
 {
     char *root;
 
@@ -317,6 +324,16 @@ static enum rdx_storage_result sd0_ready(void)
     }
     strncpy(rdx_sd0.root, root, sizeof(rdx_sd0.root) - 1);
     rdx_sd0.root[sizeof(rdx_sd0.root) - 1] = 0;
+    return RDX_STORAGE_RESULT_READY;
+}
+
+static enum rdx_storage_result sd0_ready(void)
+{
+    enum rdx_storage_result result = sd0_probe_media();
+
+    if (result != RDX_STORAGE_RESULT_READY) {
+        return result;
+    }
     return sd0_ensure_layout();
 }
 
@@ -860,12 +877,39 @@ static int sd0_marker_path(const struct rdx_artifact_id *artifact_id,
     return len > 0 && (uint32_t)len < capacity ? 0 : -1;
 }
 
+static uint8_t sd0_marker_equal(const struct rdx_storage_marker *left,
+                                const struct rdx_storage_marker *right)
+{
+    return left && right
+           && left->artifact_id.value == right->artifact_id.value
+           && left->generation == right->generation
+           && left->state == right->state
+           && left->session_id == right->session_id
+           && left->serial_number == right->serial_number
+           && left->produced_frame_count == right->produced_frame_count
+           && left->destination_accepted_count
+              == right->destination_accepted_count
+           && left->local_accepted_count == right->local_accepted_count
+           && left->persisted_frame_count == right->persisted_frame_count
+           && left->rejected_frame_count == right->rejected_frame_count
+           && left->dropped_frame_count == right->dropped_frame_count
+           && left->first_error_cause == right->first_error_cause
+           && left->audio_bytes == right->audio_bytes
+           && left->audio_crc == right->audio_crc
+           && left->marks_count == right->marks_count
+           && left->marks_crc == right->marks_crc
+           && !memcmp(left->temp_name, right->temp_name,
+                      sizeof(left->temp_name))
+           && !memcmp(left->final_name, right->final_name,
+                      sizeof(left->final_name));
+}
+
 static enum rdx_storage_result sd0_store_marker(
     const struct rdx_storage_marker *marker)
 {
-    uint8_t data[RDX_SD0_MARKER_DATA_SIZE];
-    uint8_t verify_data[RDX_SD0_MARKER_DATA_SIZE];
-    struct rdx_storage_marker verify;
+    uint8_t *data = rdx_sd0.scratch.marker.data;
+    struct rdx_storage_marker *verify =
+        &rdx_sd0.scratch.marker.decoded;
     char path[RDX_SD0_PATH_MAX];
     FILE *file;
     uint32_t len;
@@ -886,8 +930,8 @@ static enum rdx_storage_result sd0_store_marker(
     } else if (marker->state == RDX_STORAGE_MARKER_STATE_WRITING) {
         rdx_sd0_diag_resource("writing_marker_before", 0);
     }
-    len = sd0_serialize_marker(marker, data, sizeof(data));
-    if (len != sizeof(data)) {
+    len = sd0_serialize_marker(marker, data, RDX_SD0_MARKER_DATA_SIZE);
+    if (len != RDX_SD0_MARKER_DATA_SIZE) {
         return RDX_STORAGE_RESULT_CORRUPT;
     }
     RDX_SD0_DIAG_BEGIN(write_start_ms);
@@ -913,11 +957,9 @@ static enum rdx_storage_result sd0_store_marker(
      * operation.  Re-open and decode the marker so a torn/short write is not
      * used as a recovery checkpoint. */
     RDX_SD0_DIAG_BEGIN(verify_start_ms);
-    if (sd0_load_marker(&marker->artifact_id, &verify)
+    if (sd0_load_marker(&marker->artifact_id, verify)
         != RDX_STORAGE_RESULT_READY
-        || sd0_serialize_marker(&verify, verify_data, sizeof(verify_data))
-           != len
-        || memcmp(data, verify_data, len)) {
+        || !sd0_marker_equal(marker, verify)) {
         RDX_SD0_DIAG_END(RDX_SD0_DIAG_MARKER_VERIFY, verify_start_ms);
         rdx_sd0_diag_resource("marker_verify_failed", 1);
         rdx_sd0_diag_dump("marker_verify_failed");
@@ -936,7 +978,7 @@ static enum rdx_storage_result sd0_load_marker(
     const struct rdx_artifact_id *artifact_id,
     struct rdx_storage_marker *marker)
 {
-    uint8_t data[RDX_SD0_MARKER_DATA_SIZE];
+    uint8_t *data = rdx_sd0.scratch.marker.data;
     char path[RDX_SD0_PATH_MAX];
     FILE *file;
     uint32_t len;
@@ -957,12 +999,13 @@ static enum rdx_storage_result sd0_load_marker(
         return RDX_STORAGE_RESULT_IO_ERROR;
     }
     len = flen(file);
-    if (len > sizeof(data) || fread(data, 1, len, file) != (int)len) {
+    if (len > RDX_SD0_MARKER_DATA_SIZE
+        || fread(data, 1, len, file) != (int)len) {
         fclose(file);
         return RDX_STORAGE_RESULT_CORRUPT;
     }
     fclose(file);
-    if (len != sizeof(data)) {
+    if (len != RDX_SD0_MARKER_DATA_SIZE) {
         return RDX_STORAGE_RESULT_CORRUPT;
     }
     memset(marker, 0, sizeof(*marker));
@@ -997,7 +1040,7 @@ static enum rdx_storage_result sd0_load_marker(
 static enum rdx_storage_result sd0_load_index(
     struct rdx_storage_index_snapshot *snapshot)
 {
-    uint8_t *data = rdx_sd0.index_data;
+    uint8_t *data = rdx_sd0.scratch.index_data;
     uint32_t best_generation = 0;
     uint32_t best_count = 0;
     uint32_t best_schema_version = 0;
@@ -1227,7 +1270,7 @@ static enum rdx_storage_result sd0_recover(void)
 static enum rdx_storage_result sd0_commit_index(
     const struct rdx_storage_index_snapshot *snapshot)
 {
-    uint8_t *data = rdx_sd0.index_data;
+    uint8_t *data = rdx_sd0.scratch.index_data;
     char path[RDX_SD0_PATH_MAX];
     FILE *file;
     uint32_t offset = 0;
@@ -1383,7 +1426,10 @@ int rdx_storage_backend_sd0_jl_br56_init(void)
 {
     memset(&rdx_sd0, 0, sizeof(rdx_sd0));
     rdx_sd0.initialized = 1;
-    return sd0_ready() == RDX_STORAGE_RESULT_READY ? 0 : -1;
+    /* Runtime initialization may run on app_core before the Storage Service
+     * owns its worker.  Probe only the public device-manager state here;
+     * directory checks/creation belong to ensure_ready() on rdx_storage. */
+    return sd0_probe_media() == RDX_STORAGE_RESULT_READY ? 0 : -1;
 }
 
 const struct rdx_storage_media_ops *

@@ -1092,6 +1092,7 @@ c_SRC_FILES += \
 #if RDX_CFG_LOCAL_STORAGE_BUILD_ENABLE
 c_SRC_FILES += \
     apps/common/third_party_profile/rdx_protocol/domain/rdx_artifact.c \
+    apps/common/third_party_profile/rdx_protocol/application/rdx_storage_command_slot.c \
     apps/common/third_party_profile/rdx_protocol/application/rdx_local_storage_service.c \
     apps/common/third_party_profile/rdx_protocol/application/rdx_record_local_destination.c \
     apps/common/third_party_profile/rdx_protocol/application/rdx_record_composite_destination.c \
