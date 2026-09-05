@@ -58,8 +58,8 @@
 #define RDX_COMPAT_FIXED_BATTERY_LEVEL         100
 #define RDX_BLE_ADV_INTERVAL                   160
 
+#define RDX_COMPAT_HARDWARE_VERSION            "1.0.2"
 #define RDX_COMPAT_FIRMWARE_VERSION            "0.0.1"
-#define RDX_COMPAT_HARDWARE_VERSION            "1.0.1"
 
 /*
  * librdxApp.a 中按 app_select 选择的具名 AppKey 字典。

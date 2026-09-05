@@ -30,6 +30,7 @@
 
 
 
+
 c_SRC_FILES += audio/framework/plugs/source/a2dp_file.c audio/framework/plugs/source/a2dp_streamctrl.c audio/framework/plugs/source/esco_file.c audio/framework/plugs/source/adc_file.c audio/framework/nodes/esco_tx_node.c audio/framework/nodes/plc_node.c audio/framework/nodes/volume_node.c audio/framework/node_list.c
 c_SRC_FILES += audio/framework/nodes/sink_dev0_node.c
 
@@ -81,13 +82,17 @@ c_SRC_FILES += apps/common/fat_nor/cfg_private.c
 
 
 c_SRC_FILES += apps/common/debug/memory_debug.c
-
-
-
-c_SRC_FILES += apps/common/debug/resource_monitor.c
+c_SRC_FILES += apps/common/update/update.c
 c_SRC_FILES += apps/common/third_party_profile/multi_protocol_main.c apps/common/third_party_profile/multi_protocol_common.c apps/common/third_party_profile/multi_protocol_event.c
 c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_runtime.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_profile_type_c.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_product_key_routing.c apps/common/third_party_profile/rdx_protocol/application/rdx_ble_name_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_transport_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_device_management_service.c apps/common/third_party_profile/rdx_protocol/application/rdx_device_state_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_state_repository_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_factory_identity.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_factory_identity_jl_br56.c apps/common/third_party_profile/rdx_protocol/application/rdx_identity_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_device_identity_jl_br56.c apps/common/third_party_profile/rdx_protocol/integration/type_c_ac7106f6/rdx_system_action_type_c.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_session.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_management.c apps/common/third_party_profile/rdx_protocol/providers/appkey/rdx_appkey_verifier.c
 c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_rtc_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_clock_jl_br56.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_rtc_backup_repository_jl_br56.c
+
+
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_ota_service.c apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx_firmware_update_jl_br56.c apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_ota.c
 
 
 
@@ -98,6 +103,20 @@ c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/rdx
 
 
 
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/domain/rdx_artifact.c apps/common/third_party_profile/rdx_protocol/application/rdx_storage_command_slot.c apps/common/third_party_profile/rdx_protocol/application/rdx_local_storage_service.c apps/common/third_party_profile/rdx_protocol/application/rdx_record_local_destination.c apps/common/third_party_profile/rdx_protocol/application/rdx_record_composite_destination.c apps/common/third_party_profile/rdx_protocol/application/rdx_record_coordinator.c
+
+
+
+
+
+
+
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/adapters/jl_br56/storage/rdx_storage_backend_sd0_jl_br56.c
+c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/protocol/v23/rdx_protocol_v23_local_storage.c
 
 
 
@@ -121,6 +140,11 @@ c_SRC_FILES += apps/common/third_party_profile/rdx_protocol/application/rdx_sess
 THIRD_PARTY_LIBS += apps/common/third_party_profile/rdx_protocol/providers/appkey/librdxApp.a
 c_SRC_FILES += apps/common/jldtp/uart_transport.c apps/common/jldtp/jldtp_manager.c
 c_SRC_FILES += apps/common/device/key/key_driver.c
+c_SRC_FILES += apps/common/device/key/adkey.c
+
+
+
+
 c_SRC_FILES += apps/common/device/key/mickey.c
 c_SRC_FILES += apps/common/device/usb/usb_config.c apps/common/device/usb/device/descriptor.c apps/common/device/usb/device/usb_device.c apps/common/device/usb/device/user_setup.c apps/common/device/usb/device/task_pc.c
 c_SRC_FILES += apps/common/device/usb/device/usb_pll_trim.c
@@ -179,6 +203,14 @@ c_SRC_FILES += cpu/br56/power/power_port.c cpu/br56/power/power_gate.c cpu/br56/
 
 
 c_SRC_FILES += cpu/br56/ui_driver/led7/led7_driver.c cpu/br56/ui_driver/ui_common.c
+
+
+
+
+
+
+
+c_SRC_FILES += apps/common/dev_manager/dev_reg.c
 c_SRC_FILES += apps/earphone/mode/pc/pc.c apps/earphone/mode/pc/pc_key_msg_table.c
 c_SRC_FILES += apps/earphone/demo/pbg_demo.c
 c_SRC_FILES += apps/earphone/mode/bt/poweroff.c apps/earphone/mode/bt/dual_conn.c apps/earphone/mode/bt/phone_call.c
